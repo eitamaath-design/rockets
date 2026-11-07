@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rockets-pwa-v1';
+const CACHE_NAME = 'rockets-pwa-v2';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -38,6 +38,21 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
+  // Network-first for navigation / HTML so new deployments are served immediately
+  if (e.request.mode === 'navigate' || e.request.destination === 'document') {
+    e.respondWith(
+      fetch(e.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const resClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone));
+        }
+        return networkResponse;
+      }).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Cache-first with background revalidation for static assets
   e.respondWith(
     caches.match(e.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -50,7 +65,7 @@ self.addEventListener('fetch', (e) => {
         return cachedResponse;
       }
       return fetch(e.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+        if (!networkResponse || networkResponse.status !== 200) {
           return networkResponse;
         }
         const responseToCache = networkResponse.clone();

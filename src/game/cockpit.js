@@ -78,7 +78,8 @@ export class Cockpit {
       color: 0x00ffcc,
       wireframe: true,
       transparent: true,
-      opacity: 0.4
+      opacity: 0.4,
+      depthWrite: false
     });
     const radarMesh = new THREE.Mesh(radarPlateGeom, radarMat);
     radarMesh.position.set(0, -0.21, -0.46);
@@ -91,7 +92,8 @@ export class Cockpit {
       color: 0x0088ff,
       wireframe: true,
       transparent: true,
-      opacity: 0.5
+      opacity: 0.5,
+      depthWrite: false
     });
     const monitorLeft = new THREE.Mesh(monitorGeom, monitorLeftMat);
     monitorLeft.position.set(-0.22, -0.2, -0.47);
@@ -103,7 +105,8 @@ export class Cockpit {
       color: 0xffaa00,
       wireframe: true,
       transparent: true,
-      opacity: 0.5
+      opacity: 0.5,
+      depthWrite: false
     });
     const monitorRight = new THREE.Mesh(monitorGeom, monitorRightMat);
     monitorRight.position.set(0.22, -0.2, -0.47);
@@ -117,7 +120,8 @@ export class Cockpit {
       transparent: true,
       opacity: 0.04,
       side: THREE.BackSide,
-      blending: THREE.AdditiveBlending
+      blending: THREE.AdditiveBlending,
+      depthWrite: false // Essential: never write depth on transparent canopy or it blocks the outer 3D world!
     });
     const glassMesh = new THREE.Mesh(glassGeom, this.shieldGlassMat);
     glassMesh.position.set(0, 0, 0.1);

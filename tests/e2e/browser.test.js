@@ -65,8 +65,16 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
     await expect(page.locator('#btn-roll-left')).toBeVisible();
     await expect(page.locator('#btn-roll-right')).toBeVisible();
 
-    // Verify Fullscreen toggle button
+    // Verify Fullscreen toggle and Diagnostics button
     await expect(page.locator('#hud-btn-fullscreen')).toBeVisible();
+    await expect(page.locator('#hud-btn-diag')).toBeVisible();
+
+    // Click Diagnostics button and verify modal opens with telemetry
+    await page.click('#hud-btn-diag');
+    await expect(page.locator('#hud-diag-backdrop')).toBeVisible();
+    await expect(page.locator('#diag-text-display')).toContainText('ROCKETS CLIENT DIAGNOSTICS');
+    await page.click('#btn-close-diag');
+    await expect(page.locator('#hud-diag-backdrop')).not.toBeVisible();
   });
 
   test('should join directly via URL query parameter ?room=Test-Sector-99', async ({ page }) => {

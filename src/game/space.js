@@ -39,6 +39,11 @@ export class SpaceEnvironment {
     const rimLight = new THREE.DirectionalLight(0x00aaff, 1.6);
     rimLight.position.set(-500, -300, -400);
     this.scene.add(rimLight);
+
+    // Warm foreground point light illuminating asteroids ahead of player spawn
+    const spawnLight = new THREE.PointLight(0xffeedd, 3.0, 700);
+    spawnLight.position.set(0, 50, 180);
+    this.scene.add(spawnLight);
   }
 
   createStarfield() {
@@ -192,11 +197,11 @@ export class SpaceEnvironment {
 
       let posX = 0, posY = 0, posZ = 0;
 
-      // Ensure the first 25 asteroids are positioned in immediate forward view (Z between -30 and -250)
+      // Ensure the first 25 asteroids are positioned in immediate forward view in front of ship at z=180
       if (i < 25) {
-        posX = (prng() - 0.5) * 160;
-        posY = (prng() - 0.5) * 70;
-        posZ = -30 - prng() * 220; // directly ahead in the pilot's forward field of view!
+        posX = (prng() - 0.5) * 110;
+        posY = (prng() - 0.5) * 50;
+        posZ = 120 - prng() * 200; // Directly ahead in the pilot's forward field of view (60 to 260 units away)!
       } else {
         // Distribute remaining asteroids across outer playfield
         let posFound = false;

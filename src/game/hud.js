@@ -1,3 +1,5 @@
+import { logger } from '../utils/logger.js';
+
 export class GameHUD {
   constructor(container, engine) {
     this.container = container;
@@ -8,6 +10,7 @@ export class GameHUD {
     this.bindJoystick();
     this.bindTouchControls();
     this.bindFullscreen();
+    this.bindDiagnostics();
 
     // Initialize room title immediately
     const roomTitle = document.getElementById('hud-room-title');
@@ -26,7 +29,7 @@ export class GameHUD {
         <button class="hud-btn-mini-fullscreen" id="btn-rotate-fullscreen">⛶ Fullscreen</button>
       </div>
 
-      <!-- Top Status Bar (Zero Technical Jargon, Instant Play) -->
+      <!-- Top Status Bar -->
       <div class="hud-top-bar">
         <div class="hud-top-left">
           <div class="hud-room-info">
@@ -48,6 +51,7 @@ export class GameHUD {
         <div class="hud-top-right">
           <div class="hud-stat-pill" id="hud-peers-count">👥 1 Pilot</div>
           <div class="hud-stat-pill" id="hud-ping-val">📡 0ms</div>
+          <button class="hud-btn-diag" id="hud-btn-diag" title="Client Diagnostics & Telemetry Logs">🐞 Logs</button>
           <button class="hud-btn-fullscreen" id="hud-btn-fullscreen" title="Toggle Fullscreen">⛶ Fullscreen</button>
           <button class="hud-btn-leave" id="hud-btn-leave" title="Leave Match">✕</button>
         </div>
@@ -140,6 +144,22 @@ export class GameHUD {
           </div>
         </div>
       </div>
+
+      <!-- Client Diagnostic & Telemetry Log Modal -->
+      <div class="hud-diag-backdrop" id="hud-diag-backdrop" style="display: none;">
+        <div class="hud-diag-modal">
+          <div class="diag-header">
+            <h3>🛠️ Client Diagnostics & Engine Logs</h3>
+            <button class="diag-close-btn" id="btn-close-diag">✕ Close</button>
+          </div>
+          <div class="diag-body">
+            <pre class="diag-text" id="diag-text-display">Loading diagnostics...</pre>
+          </div>
+          <div class="diag-footer">
+            <button class="btn-primary" id="btn-copy-diag-text">📋 Copy Log to Clipboard</button>
+          </div>
+        </div>
+      </div>
     `;
 
     this.container.appendChild(this.hudElement);
@@ -153,9 +173,10 @@ export class GameHUD {
 
     const shipInput = this.engine.playerShip.input;
     const maxRadius = 45; // max drag radius in pixels
-    let activePointerId = null;
+    let activeTouchId = null;
+    let pointerDragging = false;
 
-    const handlePointerMove = (clientX, clientY) => {
+    const handleCoord = (clientX, clientY) => {
       const rect = base.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
@@ -178,35 +199,203 @@ export class GameHUD {
       shipInput.analogYaw = (dx / maxRadius);
     };
 
-    const handlePointerEnd = () => {
-      activePointerId = null;
+    const resetKnob = () => {
+      activeTouchId = null;
+      pointerDragging = false;
       knob.style.transform = `translate(0px, 0px)`;
       shipInput.analogPitch = 0;
       shipInput.analogYaw = 0;
     };
 
-    container.addEventListener('pointerdown', (e) => {
+    // 1. Direct Touch Events (iOS & Android)
+    container.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      activePointerId = e.pointerId;
-      container.setPointerCapture?.(e.pointerId);
-      handlePointerMove(e.clientX, e.clientY);
+      e.stopPropagation();
+      if (activeTouchId === null && e.touches.length > 0) {
+        const touch = e.touches[0];
+        activeTouchId = touch.identifier;
+        handleCoord(touch.clientX, touch.clientY);
+        logger.log('TOUCH', `Joystick touchstart at (${Math.round(touch.clientX)}, ${Math.round(touch.clientY)})`);
+      }
+    }, { passive: false });
+
+    container.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (activeTouchId !== null) {
+        for (let i = 0; i < e.touches.length; i++) {
+          if (e.touches[i].identifier === activeTouchId) {
+            handleCoord(e.touches[i].clientX, e.touches[i].clientY);
+            break;
+          }
+        }
+      }
+    }, { passive: false });
+
+    container.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      resetKnob();
+    }, { passive: false });
+
+    container.addEventListener('touchcancel', (e) => {
+      resetKnob();
+    }, { passive: false });
+
+    // 2. Pointer / Mouse Events (Desktop)
+    container.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') return;
+      e.preventDefault();
+      pointerDragging = true;
+      handleCoord(e.clientX, e.clientY);
     });
 
-    container.addEventListener('pointermove', (e) => {
-      if (activePointerId !== null && e.pointerId === activePointerId) {
-        e.preventDefault();
-        handlePointerMove(e.clientX, e.clientY);
+    window.addEventListener('pointermove', (e) => {
+      if (pointerDragging) {
+        handleCoord(e.clientX, e.clientY);
       }
     });
 
-    container.addEventListener('pointerup', (e) => {
-      if (e.pointerId === activePointerId) {
-        e.preventDefault();
-        handlePointerEnd();
+    window.addEventListener('pointerup', () => {
+      if (pointerDragging) {
+        resetKnob();
       }
     });
+  }
 
-    container.addEventListener('pointercancel', handlePointerEnd);
+  bindTouchControls() {
+    const shipInput = this.engine.playerShip.input;
+
+    const setupHoldButton = (elementId, onActive, onInactive) => {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+
+      let isHeld = false;
+
+      const triggerStart = (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        if (isHeld) return;
+        isHeld = true;
+        onActive();
+        el.classList.add('active');
+        logger.log('INPUT', `Button [${elementId}] ACTIVATED`);
+      };
+
+      const triggerStop = (e) => {
+        if (!isHeld) return;
+        isHeld = false;
+        onInactive();
+        el.classList.remove('active');
+        logger.log('INPUT', `Button [${elementId}] RELEASED`);
+      };
+
+      // Native Touch Handlers
+      el.addEventListener('touchstart', triggerStart, { passive: false });
+      el.addEventListener('touchend', triggerStop, { passive: false });
+      el.addEventListener('touchcancel', triggerStop, { passive: false });
+
+      // Pointer / Mouse Handlers
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch') return;
+        triggerStart(e);
+      });
+      el.addEventListener('pointerup', triggerStop);
+      el.addEventListener('pointerleave', triggerStop);
+      window.addEventListener('pointerup', triggerStop);
+    };
+
+    // Manual Roll
+    setupHoldButton('btn-roll-left', () => shipInput.rollLeft = true, () => shipInput.rollLeft = false);
+    setupHoldButton('btn-roll-right', () => shipInput.rollRight = true, () => shipInput.rollRight = false);
+
+    // Lateral Strafing (Side thrusters)
+    setupHoldButton('btn-strafe-left', () => shipInput.strafeLeft = true, () => shipInput.strafeLeft = false);
+    setupHoldButton('btn-strafe-right', () => shipInput.strafeRight = true, () => shipInput.strafeRight = false);
+
+    // Main Thrust & Brake
+    setupHoldButton('btn-thrust', () => shipInput.thrust = true, () => shipInput.thrust = false);
+    setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
+
+    // Weapons
+    setupHoldButton('btn-cannon', () => this.engine.isFiringCannon = true, () => this.engine.isFiringCannon = false);
+
+    const mineBtn = document.getElementById('btn-mine');
+    if (mineBtn) {
+      const triggerMine = (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        this.engine.weaponsSystem.triggerRearMine(this.engine.playerShip);
+        mineBtn.classList.add('active');
+        logger.log('INPUT', 'Rear Mine Triggered');
+        setTimeout(() => mineBtn.classList.remove('active'), 150);
+      };
+      mineBtn.addEventListener('touchstart', triggerMine, { passive: false });
+      mineBtn.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch') return;
+        triggerMine(e);
+      });
+    }
+
+    // Copy invite link
+    const copyBtn = document.getElementById('hud-btn-copy');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const url = window.location.origin + window.location.pathname + `?room=${encodeURIComponent(this.engine.network.roomId)}`;
+        navigator.clipboard.writeText(url).then(() => {
+          copyBtn.textContent = '✅ Copied!';
+          setTimeout(() => copyBtn.textContent = '📋 Invite', 2000);
+        }).catch(() => {
+          prompt('Share this match link:', url);
+        });
+      });
+    }
+
+    // Exit match
+    const leaveBtn = document.getElementById('hud-btn-leave');
+    if (leaveBtn) {
+      leaveBtn.addEventListener('click', () => {
+        if (confirm('Leave current match and return to lobby?')) {
+          window.location.href = window.location.origin + window.location.pathname;
+        }
+      });
+    }
+  }
+
+  bindDiagnostics() {
+    const diagBtn = document.getElementById('hud-btn-diag');
+    const backdrop = document.getElementById('hud-diag-backdrop');
+    const closeBtn = document.getElementById('btn-close-diag');
+    const copyBtn = document.getElementById('btn-copy-diag-text');
+    const textDisplay = document.getElementById('diag-text-display');
+
+    if (!diagBtn || !backdrop) return;
+
+    diagBtn.addEventListener('click', () => {
+      if (textDisplay) {
+        textDisplay.textContent = logger.generateDiagnosticReport();
+      }
+      backdrop.style.display = 'flex';
+    });
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        backdrop.style.display = 'none';
+      });
+    }
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        await logger.copyToClipboard();
+        copyBtn.textContent = '✅ Copied to Clipboard!';
+        setTimeout(() => {
+          copyBtn.textContent = '📋 Copy Log to Clipboard';
+        }, 2500);
+      });
+    }
   }
 
   bindFullscreen() {
@@ -244,81 +433,6 @@ export class GameHUD {
     };
     document.addEventListener('fullscreenchange', updateFsBtnText);
     document.addEventListener('webkitfullscreenchange', updateFsBtnText);
-  }
-
-  bindTouchControls() {
-    const shipInput = this.engine.playerShip.input;
-
-    const setupHoldButton = (elementId, onActive, onInactive) => {
-      const el = document.getElementById(elementId);
-      if (!el) return;
-
-      const start = (e) => {
-        e.preventDefault();
-        onActive();
-        el.classList.add('active');
-      };
-
-      const stop = (e) => {
-        e.preventDefault();
-        onInactive();
-        el.classList.remove('active');
-      };
-
-      el.addEventListener('pointerdown', start);
-      el.addEventListener('pointerup', stop);
-      el.addEventListener('pointercancel', stop);
-      el.addEventListener('pointerleave', stop);
-    };
-
-    // Manual Roll
-    setupHoldButton('btn-roll-left', () => shipInput.rollLeft = true, () => shipInput.rollLeft = false);
-    setupHoldButton('btn-roll-right', () => shipInput.rollRight = true, () => shipInput.rollRight = false);
-
-    // Lateral Strafing (Side thrusters)
-    setupHoldButton('btn-strafe-left', () => shipInput.strafeLeft = true, () => shipInput.strafeLeft = false);
-    setupHoldButton('btn-strafe-right', () => shipInput.strafeRight = true, () => shipInput.strafeRight = false);
-
-    // Main Thrust & Brake
-    setupHoldButton('btn-thrust', () => shipInput.thrust = true, () => shipInput.thrust = false);
-    setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
-
-    // Weapons
-    setupHoldButton('btn-cannon', () => this.engine.isFiringCannon = true, () => this.engine.isFiringCannon = false);
-
-    const mineBtn = document.getElementById('btn-mine');
-    if (mineBtn) {
-      mineBtn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        this.engine.weaponsSystem.triggerRearMine(this.engine.playerShip);
-        mineBtn.classList.add('active');
-        setTimeout(() => mineBtn.classList.remove('active'), 150);
-      });
-    }
-
-    // Copy invite link
-    const copyBtn = document.getElementById('hud-btn-copy');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        const url = window.location.origin + window.location.pathname + `?room=${encodeURIComponent(this.engine.network.roomId)}`;
-        navigator.clipboard.writeText(url).then(() => {
-          copyBtn.textContent = '✅ Copied!';
-          setTimeout(() => copyBtn.textContent = '📋 Invite', 2000);
-        }).catch(() => {
-          prompt('Share this match link:', url);
-        });
-      });
-    }
-
-    // Exit match
-    const leaveBtn = document.getElementById('hud-btn-leave');
-    if (leaveBtn) {
-      leaveBtn.addEventListener('click', () => {
-        if (confirm('Leave current match and return to lobby?')) {
-          window.location.href = window.location.origin + window.location.pathname;
-        }
-      });
-    }
   }
 
   showCombatMessage(text) {

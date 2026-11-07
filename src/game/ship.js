@@ -57,40 +57,15 @@ export class PlayerShip {
   }
 
   resetSpawn() {
-    // Find a clear spawn coordinate
-    let found = false;
-    let attempts = 0;
-    const spawnRadius = 250;
-    while (!found && attempts < 30) {
-      attempts++;
-      const angle = Math.random() * Math.PI * 2;
-      const height = (Math.random() - 0.5) * 100;
-      const dist = 100 + Math.random() * spawnRadius;
-      const testPos = new THREE.Vector3(
-        Math.cos(angle) * dist,
-        height,
-        Math.sin(angle) * dist
-      );
-      if (!this.spaceEnv.checkCollision(testPos, 35)) {
-        this.position.copy(testPos);
-        found = true;
-      }
-    }
-    if (!found) {
-      this.position.set(0, 0, 150);
-    }
-
+    // Clear initial spawn coordinate facing directly forward down -Z into asteroid field
+    this.position.set(0, 0, 180);
     this.velocity.set(0, 0, 0);
+    this.quaternion.set(0, 0, 0, 1); // Looking straight down -Z
+
     this.hp = this.maxHp;
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
-
-    // Point inward towards center (down -Z)
-    const dummy = new THREE.Object3D();
-    dummy.position.copy(this.position);
-    dummy.lookAt(0, 0, 0);
-    this.quaternion.copy(dummy.quaternion);
 
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.quaternion);
@@ -132,6 +107,18 @@ export class PlayerShip {
         this.resetSpawn();
       }
       return;
+    }
+
+    // Safety checks against NaN corruption
+    if (isNaN(this.position.x) || isNaN(this.position.y) || isNaN(this.position.z)) {
+      this.position.set(0, 0, 180);
+      this.velocity.set(0, 0, 0);
+    }
+    if (isNaN(this.velocity.x) || isNaN(this.velocity.y) || isNaN(this.velocity.z)) {
+      this.velocity.set(0, 0, 0);
+    }
+    if (isNaN(this.quaternion.x) || isNaN(this.quaternion.w)) {
+      this.quaternion.set(0, 0, 0, 1);
     }
 
     this.handleRotation(dt);
@@ -263,8 +250,13 @@ export class PlayerShip {
     const shipRadius = 2.8;
     const hitAsteroid = this.spaceEnv.checkCollision(this.position, shipRadius);
     if (hitAsteroid) {
-      // Collision normal
-      const normal = this.position.clone().sub(hitAsteroid.position).normalize();
+      // Collision normal with safe zero check
+      const normal = this.position.clone().sub(hitAsteroid.position);
+      if (normal.lengthSq() < 0.001) {
+        normal.set(0, 0, 1);
+      } else {
+        normal.normalize();
+      }
       // Push ship out of penetration
       this.position.copy(hitAsteroid.position).addScaledVector(normal, hitAsteroid.radius + shipRadius + 0.5);
 

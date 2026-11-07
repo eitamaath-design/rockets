@@ -4,6 +4,7 @@ import { Cockpit } from './cockpit.js';
 import { PlayerShip } from './ship.js';
 import { WeaponsSystem } from './weapons.js';
 import { RemoteShip } from './remoteShip.js';
+import { logger } from '../utils/logger.js';
 
 export class GameEngine {
   constructor({ container, network, mapSeed, onHudUpdate, onDeathNotice }) {
@@ -27,6 +28,9 @@ export class GameEngine {
     this.lastTime = performance.now();
     this.animFrameId = null;
 
+    this.lastWidth = 0;
+    this.lastHeight = 0;
+
     // Mouse look state
     this.isPointerLocked = false;
     this.mouseSensitivity = 0.0022;
@@ -41,6 +45,9 @@ export class GameEngine {
     this.initThree();
     this.setupNetworkHandlers();
     this.setupInputListeners();
+
+    logger.setEngine(this);
+    logger.log('ENGINE', `GameEngine initialized with seed ${this.mapSeed}`);
   }
 
   initThree() {
@@ -263,102 +270,119 @@ export class GameEngine {
     if (!this.isRunning) return;
     this.animFrameId = requestAnimationFrame(this.loop.bind(this));
 
-    const now = performance.now();
-    const dt = Math.min(0.1, (now - this.lastTime) / 1000);
-    this.lastTime = now;
+    try {
+      logger.recordFrame();
 
-    // Decay mouse analog inputs smoothly
-    if (this.isPointerLocked) {
-      this.playerShip.input.analogPitch *= 0.7;
-      this.playerShip.input.analogYaw *= 0.7;
-    }
-
-    // 1. Update Player Ship Physics
-    this.playerShip.update(dt);
-
-    // 2. Continuous Cannon Firing
-    this.weaponsSystem.triggerCannon(this.isFiringCannon, this.playerShip, now);
-
-    // 3. Update Weapons & Explosions
-    this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
-      this.cockpit.triggerDamageFlash();
-    });
-
-    // 4. Update Remote Ships from network packets
-    for (const [peerId, peerData] of this.network.peers.entries()) {
-      if (!this.remoteShips.has(peerId)) {
-        const remote = new RemoteShip(peerId, this.scene, peerData.name || `Pilot-${peerId.slice(0, 4)}`);
-        this.remoteShips.set(peerId, remote);
+      // Dynamic canvas & aspect verification (handles mobile rotation & delayed layout reflow)
+      const cw = this.container.clientWidth || window.innerWidth;
+      const ch = this.container.clientHeight || window.innerHeight;
+      if (cw > 0 && ch > 0 && (cw !== this.lastWidth || ch !== this.lastHeight)) {
+        this.lastWidth = cw;
+        this.lastHeight = ch;
+        this.camera.aspect = cw / ch;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(cw, ch, false);
       }
-      const remote = this.remoteShips.get(peerId);
-      if (peerData.lastState) {
-        remote.receiveNetworkState(peerData.lastState);
+
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - this.lastTime) / 1000);
+      this.lastTime = now;
+
+      // Decay mouse analog inputs smoothly
+      if (this.isPointerLocked) {
+        this.playerShip.input.analogPitch *= 0.7;
+        this.playerShip.input.analogYaw *= 0.7;
       }
-      remote.update(dt);
-    }
 
-    // 5. Update Cockpit visual tilt and shield glass
-    const flightInput = {
-      thrust: this.playerShip.input.thrust,
-      brake: this.playerShip.input.brake,
-      strafe: (this.playerShip.input.strafeRight ? 1 : 0) - (this.playerShip.input.strafeLeft ? 1 : 0),
-      pitch: (this.playerShip.input.pitchUp ? 1 : 0) - (this.playerShip.input.pitchDown ? 1 : 0) + this.playerShip.input.analogPitch,
-      roll: (this.playerShip.input.rollRight ? 1 : 0) - (this.playerShip.input.rollLeft ? 1 : 0)
-    };
-    this.cockpit.update(dt, flightInput, this.playerShip.velocity);
+      // 1. Update Player Ship Physics
+      this.playerShip.update(dt);
 
-    // 6. Update Space Environment (asteroids rotation, speed dust)
-    this.spaceEnv.update(dt, this.playerShip.position, this.playerShip.velocity);
+      // 2. Continuous Cannon Firing
+      this.weaponsSystem.triggerCannon(this.isFiringCannon, this.playerShip, now);
 
-    // 7. Network State Broadcast (20Hz)
-    this.broadcastTimer += dt;
-    if (this.broadcastTimer >= this.broadcastInterval) {
-      this.broadcastTimer = 0;
-      this.network.broadcastLocalState({
-        pos: { x: this.playerShip.position.x, y: this.playerShip.position.y, z: this.playerShip.position.z },
-        quat: {
-          x: this.playerShip.quaternion.x,
-          y: this.playerShip.quaternion.y,
-          z: this.playerShip.quaternion.z,
-          w: this.playerShip.quaternion.w
-        },
-        vel: { x: this.playerShip.velocity.x, y: this.playerShip.velocity.y, z: this.playerShip.velocity.z },
+      // 3. Update Weapons & Explosions
+      this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
+        this.cockpit.triggerDamageFlash();
+      });
+
+      // 4. Update Remote Ships from network packets
+      for (const [peerId, peerData] of this.network.peers.entries()) {
+        if (!this.remoteShips.has(peerId)) {
+          const remote = new RemoteShip(peerId, this.scene, peerData.name || `Pilot-${peerId.slice(0, 4)}`);
+          this.remoteShips.set(peerId, remote);
+        }
+        const remote = this.remoteShips.get(peerId);
+        if (peerData.lastState) {
+          remote.receiveNetworkState(peerData.lastState);
+        }
+        remote.update(dt);
+      }
+
+      // 5. Update Cockpit visual tilt and shield glass
+      const flightInput = {
         thrust: this.playerShip.input.thrust,
+        brake: this.playerShip.input.brake,
         strafe: (this.playerShip.input.strafeRight ? 1 : 0) - (this.playerShip.input.strafeLeft ? 1 : 0),
+        pitch: (this.playerShip.input.pitchUp ? 1 : 0) - (this.playerShip.input.pitchDown ? 1 : 0) + this.playerShip.input.analogPitch,
+        roll: (this.playerShip.input.rollRight ? 1 : 0) - (this.playerShip.input.rollLeft ? 1 : 0)
+      };
+      this.cockpit.update(dt, flightInput, this.playerShip.velocity);
+
+      // 6. Update Space Environment (asteroids rotation, speed dust)
+      this.spaceEnv.update(dt, this.playerShip.position, this.playerShip.velocity);
+
+      // 7. Network State Broadcast (20Hz)
+      this.broadcastTimer += dt;
+      if (this.broadcastTimer >= this.broadcastInterval) {
+        this.broadcastTimer = 0;
+        this.network.broadcastLocalState({
+          pos: { x: this.playerShip.position.x, y: this.playerShip.position.y, z: this.playerShip.position.z },
+          quat: {
+            x: this.playerShip.quaternion.x,
+            y: this.playerShip.quaternion.y,
+            z: this.playerShip.quaternion.z,
+            w: this.playerShip.quaternion.w
+          },
+          vel: { x: this.playerShip.velocity.x, y: this.playerShip.velocity.y, z: this.playerShip.velocity.z },
+          thrust: this.playerShip.input.thrust,
+          strafe: (this.playerShip.input.strafeRight ? 1 : 0) - (this.playerShip.input.strafeLeft ? 1 : 0),
+          hp: this.playerShip.hp,
+          isDead: this.playerShip.isDead,
+          score: this.playerShip.score,
+          kills: this.playerShip.kills,
+          deaths: this.playerShip.deaths
+        });
+      }
+
+      // 8. Render Scene
+      this.renderer.render(this.scene, this.camera);
+
+      // 9. Inform HUD
+      this.onHudUpdate({
         hp: this.playerShip.hp,
+        maxHp: this.playerShip.maxHp,
+        speed: Math.round(this.playerShip.getSpeed()),
+        maxSpeed: Math.round(this.playerShip.maxSpeed),
+        cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
+        cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,
+        cannonRecharging: (this.weaponsSystem.cannonCooldownTimer <= 0 && this.weaponsSystem.cannonEnergy < this.weaponsSystem.cannonMaxEnergy),
+        mineCharges: this.weaponsSystem.mineCharges,
+        mineMaxCharges: this.weaponsSystem.mineMaxCharges,
+        mineRechargeProgress: this.weaponsSystem.mineRechargeProgress,
         isDead: this.playerShip.isDead,
+        respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
+        invulnerable: (this.playerShip.invulnerableTimer > 0),
         score: this.playerShip.score,
         kills: this.playerShip.kills,
-        deaths: this.playerShip.deaths
+        deaths: this.playerShip.deaths,
+        activePeersCount: this.network.peers.size + 1,
+        isMaster: this.network.isMaster,
+        masterId: this.network.currentMasterId,
+        avgPing: this.network.getAveragePing()
       });
+    } catch (loopErr) {
+      logger.log('CRASH', `Render loop exception: ${loopErr.message}\n${loopErr.stack}`);
     }
-
-    // 8. Render Scene
-    this.renderer.render(this.scene, this.camera);
-
-    // 9. Inform HUD
-    this.onHudUpdate({
-      hp: this.playerShip.hp,
-      maxHp: this.playerShip.maxHp,
-      speed: Math.round(this.playerShip.getSpeed()),
-      maxSpeed: Math.round(this.playerShip.maxSpeed),
-      cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
-      cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,
-      cannonRecharging: (this.weaponsSystem.cannonCooldownTimer <= 0 && this.weaponsSystem.cannonEnergy < this.weaponsSystem.cannonMaxEnergy),
-      mineCharges: this.weaponsSystem.mineCharges,
-      mineMaxCharges: this.weaponsSystem.mineMaxCharges,
-      mineRechargeProgress: this.weaponsSystem.mineRechargeProgress,
-      isDead: this.playerShip.isDead,
-      respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
-      invulnerable: (this.playerShip.invulnerableTimer > 0),
-      score: this.playerShip.score,
-      kills: this.playerShip.kills,
-      deaths: this.playerShip.deaths,
-      activePeersCount: this.network.peers.size + 1,
-      isMaster: this.network.isMaster,
-      masterId: this.network.currentMasterId,
-      avgPing: this.network.getAveragePing()
-    });
   }
 
   destroy() {
