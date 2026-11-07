@@ -22,23 +22,27 @@ export class SpaceEnvironment {
   }
 
   setupLighting() {
-    // Soft cosmic ambient light
-    const ambient = new THREE.AmbientLight(0x223344, 1.2);
+    // Soft cosmic hemisphere light (bright sky, subtle ground bounce)
+    const hemiLight = new THREE.HemisphereLight(0x446688, 0x182233, 1.4);
+    this.scene.add(hemiLight);
+
+    // Cosmic ambient light
+    const ambient = new THREE.AmbientLight(0x334455, 1.0);
     this.scene.add(ambient);
 
-    // Distant star / sun directional light
-    const sunLight = new THREE.DirectionalLight(0xfff5e6, 2.5);
-    sunLight.position.set(500, 300, 400);
+    // Primary bright directional sunlight
+    const sunLight = new THREE.DirectionalLight(0xfff5e6, 3.0);
+    sunLight.position.set(600, 400, 500);
     this.scene.add(sunLight);
 
-    // Blueish rim light from opposite angle
-    const rimLight = new THREE.DirectionalLight(0x3366bb, 1.0);
-    rimLight.position.set(-400, -200, -300);
+    // Secondary cyan/blue rim light from opposite angle
+    const rimLight = new THREE.DirectionalLight(0x00aaff, 1.6);
+    rimLight.position.set(-500, -300, -400);
     this.scene.add(rimLight);
   }
 
   createStarfield() {
-    const starCount = 3000;
+    const starCount = 4000;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
@@ -46,25 +50,25 @@ export class SpaceEnvironment {
     const prng = createPRNG('stars-fixed-background');
     for (let i = 0; i < starCount; i++) {
       const idx = i * 3;
-      // Distribute stars on a large sphere
       const u = prng();
       const v = prng();
       const theta = u * 2.0 * Math.PI;
       const phi = Math.acos(2.0 * v - 1.0);
-      const r = 2500 + prng() * 500;
+      const r = 1400 + prng() * 600;
 
       positions[idx] = r * Math.sin(phi) * Math.cos(theta);
       positions[idx + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[idx + 2] = r * Math.cos(phi);
 
-      // Star color variation (cool blue, warm yellow, pure white)
       const colorType = prng();
-      if (colorType < 0.2) {
-        colors[idx] = 0.7; colors[idx + 1] = 0.85; colors[idx + 2] = 1.0; // blue-white
-      } else if (colorType < 0.4) {
-        colors[idx] = 1.0; colors[idx + 1] = 0.8; colors[idx + 2] = 0.5; // warm orange
+      if (colorType < 0.25) {
+        colors[idx] = 0.6; colors[idx + 1] = 0.85; colors[idx + 2] = 1.0; // electric blue
+      } else if (colorType < 0.45) {
+        colors[idx] = 1.0; colors[idx + 1] = 0.85; colors[idx + 2] = 0.6; // golden yellow
+      } else if (colorType < 0.6) {
+        colors[idx] = 0.9; colors[idx + 1] = 0.6; colors[idx + 2] = 1.0; // magenta star
       } else {
-        colors[idx] = 0.95; colors[idx + 1] = 0.95; colors[idx + 2] = 0.95; // silver white
+        colors[idx] = 1.0; colors[idx + 1] = 1.0; colors[idx + 2] = 1.0; // pure diamond white
       }
     }
 
@@ -72,34 +76,66 @@ export class SpaceEnvironment {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 3.5,
+      size: 3.2,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
-      sizeAttenuation: false
+      opacity: 0.95,
+      sizeAttenuation: false,
+      fog: false // Crucial: stars remain crystal clear without fogging to black
     });
 
     const starfield = new THREE.Points(geometry, material);
     this.scene.add(starfield);
 
-    // Distant colorful nebulae
+    // Glowing deep space nebulae clouds
     this.createNebulae(prng);
   }
 
   createNebulae(prng) {
-    const nebulaColors = [0x552288, 0x114477, 0x882255, 0x006677];
-    for (let i = 0; i < 6; i++) {
-      const color = nebulaColors[i % nebulaColors.length];
-      const light = new THREE.PointLight(color, 2.0, 3000);
-      const angle = (i / 6) * Math.PI * 2 + prng() * 0.5;
-      const dist = 1800 + prng() * 400;
-      light.position.set(
-        Math.cos(angle) * dist,
-        (prng() - 0.5) * 800,
-        Math.sin(angle) * dist
-      );
-      this.scene.add(light);
+    const nebulaCount = 500;
+    const geom = new THREE.BufferGeometry();
+    const positions = new Float32Array(nebulaCount * 3);
+    const colors = new Float32Array(nebulaCount * 3);
+
+    const clusterColors = [
+      new THREE.Color(0x0088ff),
+      new THREE.Color(0x9922ff),
+      new THREE.Color(0x00ffcc),
+      new THREE.Color(0xff3388)
+    ];
+
+    for (let i = 0; i < nebulaCount; i++) {
+      const idx = i * 3;
+      const clusterIdx = Math.floor(prng() * clusterColors.length);
+      const baseColor = clusterColors[clusterIdx];
+
+      const angle = (clusterIdx / clusterColors.length) * Math.PI * 2 + (prng() - 0.5) * 0.8;
+      const dist = 1100 + prng() * 400;
+
+      positions[idx] = Math.cos(angle) * dist + (prng() - 0.5) * 300;
+      positions[idx + 1] = (prng() - 0.5) * 600;
+      positions[idx + 2] = Math.sin(angle) * dist + (prng() - 0.5) * 300;
+
+      colors[idx] = baseColor.r;
+      colors[idx + 1] = baseColor.g;
+      colors[idx + 2] = baseColor.b;
     }
+
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const mat = new THREE.PointsMaterial({
+      size: 45.0,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+      fog: false
+    });
+
+    const nebula = new THREE.Points(geom, mat);
+    this.scene.add(nebula);
   }
 
   /**
@@ -107,45 +143,41 @@ export class SpaceEnvironment {
    */
   createAsteroidField() {
     const prng = createPRNG(this.mapSeed);
-    const count = 160;
+    const count = 180;
     const playAreaRadius = 850;
 
-    // Rock materials with slight variations
-    const baseRockMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6e6e6e,
-      roughness: 0.9,
-      metalness: 0.15,
-      flatShading: true
-    });
-
-    const darkRockMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a4744,
-      roughness: 0.95,
+    // Rock materials with crisp shading and visible contrast
+    const grayRock = new THREE.MeshStandardMaterial({
+      color: 0x8a929a,
+      roughness: 0.75,
       metalness: 0.2,
       flatShading: true
     });
 
-    const rustRockMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7c5d4b,
-      roughness: 0.85,
+    const rustRock = new THREE.MeshStandardMaterial({
+      color: 0xa48570,
+      roughness: 0.7,
       metalness: 0.25,
       flatShading: true
     });
 
-    const materials = [baseRockMaterial, darkRockMaterial, rustRockMaterial];
+    const darkBasalt = new THREE.MeshStandardMaterial({
+      color: 0x727b85,
+      roughness: 0.8,
+      metalness: 0.3,
+      flatShading: true
+    });
+
+    const materials = [grayRock, rustRock, darkBasalt];
 
     for (let i = 0; i < count; i++) {
-      // Asteroid radius between 8 and 42 units
-      const radius = 8 + Math.pow(prng(), 1.8) * 34;
-
-      // Deformed icosahedron geometry for craggy asteroid shape
-      const detail = radius > 22 ? 2 : 1;
+      const radius = 8 + Math.pow(prng(), 1.7) * 32;
+      const detail = radius > 20 ? 2 : 1;
       const geom = new THREE.IcosahedronGeometry(radius, detail);
       const posAttr = geom.attributes.position;
       const vertex = new THREE.Vector3();
 
-      // Displace vertices to create craters and bumpy rocks
-      const noiseSeed = prng() * 1000;
+      // Deform vertices for craggy asteroid appearance
       for (let v = 0; v < posAttr.count; v++) {
         vertex.fromBufferAttribute(posAttr, v);
         const len = vertex.length();
@@ -158,17 +190,24 @@ export class SpaceEnvironment {
       const mat = materials[Math.floor(prng() * materials.length)];
       const mesh = new THREE.Mesh(geom, mat);
 
-      // Position in a 3D field with clear center spawn buffer
-      let posFound = false;
       let posX = 0, posY = 0, posZ = 0;
-      while (!posFound) {
-        posX = (prng() - 0.5) * playAreaRadius * 2;
-        posY = (prng() - 0.5) * (playAreaRadius * 0.9);
-        posZ = (prng() - 0.5) * playAreaRadius * 2;
-        // Keep central spawn sphere relatively clear
-        const distFromCenter = Math.sqrt(posX * posX + posY * posY + posZ * posZ);
-        if (distFromCenter > 75 && distFromCenter < playAreaRadius) {
-          posFound = true;
+
+      // Ensure the first 25 asteroids are positioned in immediate forward view (Z between -30 and -250)
+      if (i < 25) {
+        posX = (prng() - 0.5) * 160;
+        posY = (prng() - 0.5) * 70;
+        posZ = -30 - prng() * 220; // directly ahead in the pilot's forward field of view!
+      } else {
+        // Distribute remaining asteroids across outer playfield
+        let posFound = false;
+        while (!posFound) {
+          posX = (prng() - 0.5) * playAreaRadius * 2;
+          posY = (prng() - 0.5) * (playAreaRadius * 0.8);
+          posZ = (prng() - 0.5) * playAreaRadius * 2;
+          const dist = Math.sqrt(posX * posX + posY * posY + posZ * posZ);
+          if (dist > 35 && dist < playAreaRadius) {
+            posFound = true;
+          }
         }
       }
 
@@ -182,9 +221,9 @@ export class SpaceEnvironment {
         radius,
         position: mesh.position,
         rotationSpeed: new THREE.Vector3(
-          (prng() - 0.5) * 0.003,
-          (prng() - 0.5) * 0.003,
-          (prng() - 0.5) * 0.003
+          (prng() - 0.5) * 0.004,
+          (prng() - 0.5) * 0.004,
+          (prng() - 0.5) * 0.004
         ),
         boundingSphere: new THREE.Sphere(mesh.position, radius * 1.05)
       });
@@ -212,10 +251,11 @@ export class SpaceEnvironment {
 
     const mat = new THREE.PointsMaterial({
       color: 0x88ccff,
-      size: 2.2,
+      size: 2.5,
       transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+      fog: false
     });
 
     this.dustParticles = new THREE.Points(geom, mat);
@@ -241,7 +281,6 @@ export class SpaceEnvironment {
 
       for (let i = 0; i < this.dustCount; i++) {
         const idx = i * 3;
-        // Wrap particles around player position
         let dx = array[idx] - playerPosition.x;
         let dy = array[idx + 1] - playerPosition.y;
         let dz = array[idx + 2] - playerPosition.z;

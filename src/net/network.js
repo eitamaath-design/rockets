@@ -17,8 +17,8 @@ export class GameNetwork {
     this.onCombatLog = onCombatLog || (() => {});
 
     this.room = null;
-    this.currentMasterId = null;
-    this.isMaster = false;
+    this.currentMasterId = this.selfId;
+    this.isMaster = true;
     this.peers = new Map(); // peerId -> { lastState, ping, lastSeen }
 
     // Action dispatchers
@@ -129,8 +129,17 @@ export class GameNetwork {
       this.onCombatLog(`💨 Pilot left the mesh: ${peerId.slice(0, 5)}`);
     });
 
-    // Initial master election check
+    // Initial master election check and immediate keep-alive activation
     this.updateMasterElection();
+    if (this.isMaster) {
+      lobbyService.startMasterKeepAlive({
+        roomId: this.roomId,
+        roomName: this.roomName,
+        mapSeed: this.mapSeed,
+        isMaster: () => this.isMaster,
+        getPlayerCount: () => this.peers.size + 1
+      });
+    }
 
     // Regular ping measurements
     this.pingInterval = setInterval(() => {

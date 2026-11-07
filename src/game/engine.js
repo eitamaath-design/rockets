@@ -45,20 +45,20 @@ export class GameEngine {
 
   initThree() {
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x040812, 0.0006);
+    this.scene.background = new THREE.Color(0x040814);
+    this.scene.fog = new THREE.FogExp2(0x040814, 0.0001);
 
-    this.camera = new THREE.PerspectiveCamera(
-      75,
-      this.container.clientWidth / this.container.clientHeight,
-      0.1,
-      3500
-    );
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+
+    this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 4000);
+    this.scene.add(this.camera); // Ensure camera and its children (3D cockpit) are in the scene
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.2;
     this.container.appendChild(this.renderer.domElement);
 
     // Initialize subsystems

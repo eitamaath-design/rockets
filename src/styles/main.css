@@ -742,53 +742,69 @@ html, body {
   pointer-events: auto;
 }
 
-/* Flight D-Pad */
-.touch-dpad-cluster {
-  display: grid;
-  grid-template-columns: repeat(3, 46px);
-  grid-template-rows: repeat(3, 46px);
-  gap: 3px;
-  background: rgba(10, 16, 26, 0.65);
-  border: 1px solid var(--hud-border);
-  padding: 4px;
-  border-radius: 14px;
-  backdrop-filter: blur(6px);
-}
-
-.dpad-btn {
-  background: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(0, 212, 255, 0.3);
-  border-radius: 8px;
+/* Touch Joystick D-Pad (Drag to Aim) */
+.touch-joystick-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 1.1rem;
-  cursor: pointer;
+  gap: 4px;
   touch-action: none;
 }
 
-.dpad-btn:active, .dpad-btn.active {
-  background: var(--hud-cyan);
-  color: #000;
-  box-shadow: 0 0 12px var(--hud-cyan);
-}
-
-.dpad-up { grid-column: 2; grid-row: 1; }
-.dpad-left { grid-column: 1; grid-row: 2; }
-.dpad-center-label {
-  grid-column: 2;
-  grid-row: 2;
+.joystick-base {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 28, 48, 0.6) 0%, rgba(4, 10, 20, 0.85) 100%);
+  border: 2px solid var(--hud-border);
+  box-shadow: inset 0 0 15px rgba(0, 212, 255, 0.15), 0 4px 16px rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
+  touch-action: none;
+  cursor: grab;
+  backdrop-filter: blur(6px);
+}
+
+.joystick-base:active {
+  cursor: grabbing;
+  border-color: var(--hud-cyan);
+}
+
+.joystick-axis-h {
+  position: absolute;
+  width: 80%;
+  height: 1px;
+  background: rgba(0, 212, 255, 0.25);
+  pointer-events: none;
+}
+
+.joystick-axis-v {
+  position: absolute;
+  height: 80%;
+  width: 1px;
+  background: rgba(0, 212, 255, 0.25);
+  pointer-events: none;
+}
+
+.joystick-knob {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #0284c7 0%, #034f75 70%, #082f49 100%);
+  border: 2px solid var(--hud-cyan);
+  box-shadow: 0 0 12px var(--hud-cyan-glow), inset 0 0 8px rgba(0, 255, 255, 0.5);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.joystick-label {
   font-size: 0.55rem;
   font-weight: 700;
   color: #38bdf8;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
 }
-.dpad-right { grid-column: 3; grid-row: 2; }
-.dpad-down { grid-column: 2; grid-row: 3; }
 
 .touch-roll-cluster {
   display: flex;

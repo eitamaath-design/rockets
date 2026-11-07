@@ -48,18 +48,20 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
 
     // Verify HUD elements
     await expect(page.locator('#hud-room-title')).toBeVisible();
-    await expect(page.locator('#hud-master-badge')).toBeVisible();
     await expect(page.locator('.hud-center-crosshair')).toBeVisible();
 
-    // Verify On-Screen Touch Controls (D-pad, Thrusters, Weapons)
+    // Verify Drag Touch D-Pad / Joystick
+    await expect(page.locator('#touch-joystick-container')).toBeVisible();
+    await expect(page.locator('#joystick-base')).toBeVisible();
+    await expect(page.locator('#joystick-knob')).toBeVisible();
+
+    // Verify Action & Weapon Buttons
     await expect(page.locator('#btn-thrust')).toBeVisible();
     await expect(page.locator('#btn-brake')).toBeVisible();
     await expect(page.locator('#btn-cannon')).toBeVisible();
     await expect(page.locator('#btn-mine')).toBeVisible();
-    await expect(page.locator('#btn-pitch-up')).toBeVisible();
-    await expect(page.locator('#btn-pitch-down')).toBeVisible();
-    await expect(page.locator('#btn-yaw-left')).toBeVisible();
-    await expect(page.locator('#btn-yaw-right')).toBeVisible();
+    await expect(page.locator('#btn-strafe-left')).toBeVisible();
+    await expect(page.locator('#btn-strafe-right')).toBeVisible();
     await expect(page.locator('#btn-roll-left')).toBeVisible();
     await expect(page.locator('#btn-roll-right')).toBeVisible();
 

@@ -86,10 +86,11 @@ export class PlayerShip {
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
 
-    // Point inward towards center
-    const lookTarget = new THREE.Vector3(0, 0, 0);
-    const m = new THREE.Matrix4().lookAt(this.position, lookTarget, new THREE.Vector3(0, 1, 0));
-    this.quaternion.setFromRotationMatrix(m);
+    // Point inward towards center (down -Z)
+    const dummy = new THREE.Object3D();
+    dummy.position.copy(this.position);
+    dummy.lookAt(0, 0, 0);
+    this.quaternion.copy(dummy.quaternion);
 
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.quaternion);
@@ -162,7 +163,18 @@ export class PlayerShip {
     if (this.input.rollLeft) rollInput += 1;
     if (this.input.rollRight) rollInput -= 1;
     rollInput += this.input.analogRoll;
-    rollInput = clamp(rollInput, -1, 1);
+
+    // Auto-banking roll: applying yaw with touch D-pad automatically rolls into the turn
+    if (this.input.analogYaw !== 0) {
+      rollInput += this.input.analogYaw * 0.85;
+    } else if (!this.input.rollLeft && !this.input.rollRight && this.input.analogRoll === 0) {
+      // Soft auto-leveling towards horizon when centered
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
+      if (Math.abs(right.y) > 0.01) {
+        rollInput += clamp(right.y * 1.5, -0.6, 0.6);
+      }
+    }
+    rollInput = clamp(rollInput, -1.5, 1.5);
 
     // Local rotation axes
     const pitchAxis = new THREE.Vector3(1, 0, 0);

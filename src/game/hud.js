@@ -5,6 +5,7 @@ export class GameHUD {
     this.hudElement = null;
 
     this.createDom();
+    this.bindJoystick();
     this.bindTouchControls();
     this.bindFullscreen();
 
@@ -21,11 +22,11 @@ export class GameHUD {
     this.hudElement.innerHTML = `
       <!-- Orientation Warning for Mobile Portrait -->
       <div class="hud-rotate-notice" id="hud-rotate-notice">
-        <span>🔄 Rotate phone to landscape for optimal flight controls</span>
+        <span>🔄 Rotate phone to landscape for flight stick controls</span>
         <button class="hud-btn-mini-fullscreen" id="btn-rotate-fullscreen">⛶ Fullscreen</button>
       </div>
 
-      <!-- Top Status Bar -->
+      <!-- Top Status Bar (Zero Technical Jargon, Instant Play) -->
       <div class="hud-top-bar">
         <div class="hud-top-left">
           <div class="hud-room-info">
@@ -35,31 +36,26 @@ export class GameHUD {
         </div>
 
         <div class="hud-top-center">
-          <div class="hud-master-badge" id="hud-master-badge">
-            <span class="badge-icon">👑</span>
-            <span class="badge-text" id="hud-master-text">Determining Master...</span>
-          </div>
-
-          <!-- Compact Header Scoreboard -->
+          <!-- Compact Live Score & Flight Speed -->
           <div class="hud-header-scoreboard" id="hud-header-scoreboard">
             <span>SCR: <strong id="hud-score-val">0</strong></span>
             <span>K: <strong id="hud-kills-val">0</strong></span>
             <span>D: <strong id="hud-deaths-val">0</strong></span>
-            <span>SPD: <strong id="hud-speed-val">0</strong></span>
+            <span>SPD: <strong id="hud-speed-val">0</strong> u/s</span>
           </div>
         </div>
 
         <div class="hud-top-right">
-          <div class="hud-stat-pill" id="hud-peers-count">👥 1</div>
+          <div class="hud-stat-pill" id="hud-peers-count">👥 1 Pilot</div>
           <div class="hud-stat-pill" id="hud-ping-val">📡 0ms</div>
           <button class="hud-btn-fullscreen" id="hud-btn-fullscreen" title="Toggle Fullscreen">⛶ Fullscreen</button>
           <button class="hud-btn-leave" id="hud-btn-leave" title="Leave Match">✕</button>
         </div>
       </div>
 
-      <!-- Floating Compact Gauges (Mobile/Tablet Friendly) -->
+      <!-- Floating Compact Gauges -->
       <div class="hud-gauges-floating">
-        <!-- Shield & Hull Float (Top Left) -->
+        <!-- Shield & Hull (Top Left) -->
         <div class="hud-gauge-pill gauge-shield-pill">
           <div class="gauge-pill-header">
             <span>SHIELDS & HULL</span>
@@ -71,17 +67,17 @@ export class GameHUD {
           <div class="gauge-pill-sub" id="hud-shield-status">ACTIVE</div>
         </div>
 
-        <!-- Cannon & Mine Float (Top Right) -->
+        <!-- Cannon & Mine (Top Right) -->
         <div class="hud-gauge-pill gauge-weapons-pill">
           <div class="gauge-pill-header">
-            <span>CANNON</span>
+            <span>CANNON AMMO</span>
             <span id="hud-cannon-pct">100%</span>
           </div>
           <div class="gauge-pill-track">
             <div class="gauge-bar-fill bar-cannon" id="hud-cannon-bar" style="width: 100%;"></div>
           </div>
           <div class="weapons-pill-sub">
-            <span id="hud-cannon-status">READY</span>
+            <span id="hud-cannon-status">READY (TTK 2s)</span>
             <div class="mine-mini-row">
               <span class="mine-mini-title">MINES:</span>
               <div class="mine-dot" id="mine-dot-1">💣</div>
@@ -103,47 +99,114 @@ export class GameHUD {
         <div class="respawn-counter" id="hud-respawn-counter">Respawning in 3...</div>
       </div>
 
-      <!-- On-Screen Responsive Controls (Anchored cleanly to bottom corners) -->
+      <!-- On-Screen Flight & Combat Controls -->
       <div class="hud-touch-controls">
-        <!-- Left Corner: Flight D-Pad & Roll Controls -->
+        <!-- Left: Drag D-Pad Joystick (Pitch Up/Down, Pan Left/Right with Auto-Roll Banking) -->
         <div class="touch-controls-left">
-          <div class="touch-dpad-cluster">
-            <div class="dpad-btn dpad-up" id="btn-pitch-up" title="Pitch Up">▲</div>
-            <div class="dpad-btn dpad-left" id="btn-yaw-left" title="Pan Left">◀</div>
-            <div class="dpad-center-label">D-PAD</div>
-            <div class="dpad-btn dpad-right" id="btn-yaw-right" title="Pan Right">▶</div>
-            <div class="dpad-btn dpad-down" id="btn-pitch-down" title="Pitch Down">▼</div>
+          <div class="touch-joystick-container" id="touch-joystick-container">
+            <div class="joystick-base" id="joystick-base">
+              <div class="joystick-axis-h"></div>
+              <div class="joystick-axis-v"></div>
+              <div class="joystick-knob" id="joystick-knob"></div>
+            </div>
+            <div class="joystick-label">TOUCH D-PAD (DRAG TO AIM)</div>
           </div>
+
+          <!-- Manual Roll Buttons -->
           <div class="touch-roll-cluster">
             <button class="action-touch-btn btn-roll" id="btn-roll-left" title="Roll Left (Q)">↺ Roll L</button>
             <button class="action-touch-btn btn-roll" id="btn-roll-right" title="Roll Right (E)">Roll R ↻</button>
           </div>
         </div>
 
-        <!-- Right Corner: Strafing, Thrusters & Weapons -->
+        <!-- Right: Side Strafing, Main Thrusters & Weapons -->
         <div class="touch-controls-right">
           <!-- Side Thrusters (Strafing) -->
           <div class="touch-strafe-cluster">
-            <button class="action-touch-btn btn-strafe" id="btn-strafe-left" title="Strafe Left (A)">⬅ Strafe L</button>
-            <button class="action-touch-btn btn-strafe" id="btn-strafe-right" title="Strafe Right (D)">Strafe R ➡</button>
+            <button class="action-touch-btn btn-strafe" id="btn-strafe-left" title="Strafe Left Side Thruster (A)">⬅ Strafe L</button>
+            <button class="action-touch-btn btn-strafe" id="btn-strafe-right" title="Strafe Right Side Thruster (D)">Strafe R ➡</button>
           </div>
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W)">🚀 <strong>THRUST</strong></button>
-            <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Brake (S)">🛑 <strong>BRAKE</strong></button>
+            <button class="action-touch-btn btn-thrust" id="btn-thrust" title="Hold to Accelerate Forward (W)">🚀 <strong>THRUST</strong></button>
+            <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 2.0s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
 
           <!-- Combat Weapons -->
           <div class="touch-weapon-cluster">
-            <button class="action-touch-btn btn-cannon" id="btn-cannon" title="Hold to Fire Cannon (Space)">⚡ <strong>CANNON</strong></button>
-            <button class="action-touch-btn btn-mine" id="btn-mine" title="Tap to Drop Rear Mine (F)">💣 <strong>MINE</strong></button>
+            <button class="action-touch-btn btn-cannon" id="btn-cannon" title="Hold to Fire Cannon (Space / LMB)">⚡ <strong>CANNON</strong></button>
+            <button class="action-touch-btn btn-mine" id="btn-mine" title="Tap to Drop Rear Mine (F / RMB)">💣 <strong>MINE</strong></button>
           </div>
         </div>
       </div>
     `;
 
     this.container.appendChild(this.hudElement);
+  }
+
+  bindJoystick() {
+    const container = document.getElementById('touch-joystick-container');
+    const base = document.getElementById('joystick-base');
+    const knob = document.getElementById('joystick-knob');
+    if (!container || !base || !knob) return;
+
+    const shipInput = this.engine.playerShip.input;
+    const maxRadius = 45; // max drag radius in pixels
+    let activePointerId = null;
+
+    const handlePointerMove = (clientX, clientY) => {
+      const rect = base.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      let dx = clientX - centerX;
+      let dy = clientY - centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > maxRadius) {
+        dx = (dx / dist) * maxRadius;
+        dy = (dy / dist) * maxRadius;
+      }
+
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+
+      // Normalized analog inputs: -1 to +1
+      // Drag UP -> Pitch Up (+1), Drag DOWN -> Pitch Down (-1)
+      shipInput.analogPitch = -(dy / maxRadius);
+      // Drag LEFT -> Pan Left (-1), Drag RIGHT -> Pan Right (+1)
+      shipInput.analogYaw = (dx / maxRadius);
+    };
+
+    const handlePointerEnd = () => {
+      activePointerId = null;
+      knob.style.transform = `translate(0px, 0px)`;
+      shipInput.analogPitch = 0;
+      shipInput.analogYaw = 0;
+    };
+
+    container.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      activePointerId = e.pointerId;
+      container.setPointerCapture?.(e.pointerId);
+      handlePointerMove(e.clientX, e.clientY);
+    });
+
+    container.addEventListener('pointermove', (e) => {
+      if (activePointerId !== null && e.pointerId === activePointerId) {
+        e.preventDefault();
+        handlePointerMove(e.clientX, e.clientY);
+      }
+    });
+
+    container.addEventListener('pointerup', (e) => {
+      if (e.pointerId === activePointerId) {
+        e.preventDefault();
+        handlePointerEnd();
+      }
+    });
+
+    container.addEventListener('pointercancel', handlePointerEnd);
   }
 
   bindFullscreen() {
@@ -175,7 +238,6 @@ export class GameHUD {
     if (fsBtn) fsBtn.addEventListener('click', toggleFs);
     if (rotateFsBtn) rotateFsBtn.addEventListener('click', toggleFs);
 
-    // Update button text on fullscreen change
     const updateFsBtnText = () => {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
       if (fsBtn) fsBtn.textContent = isFs ? '⛶ Exit' : '⛶ Fullscreen';
@@ -209,21 +271,15 @@ export class GameHUD {
       el.addEventListener('pointerleave', stop);
     };
 
-    // D-Pad buttons
-    setupHoldButton('btn-pitch-up', () => shipInput.pitchUp = true, () => shipInput.pitchUp = false);
-    setupHoldButton('btn-pitch-down', () => shipInput.pitchDown = true, () => shipInput.pitchDown = false);
-    setupHoldButton('btn-yaw-left', () => shipInput.yawLeft = true, () => shipInput.yawLeft = false);
-    setupHoldButton('btn-yaw-right', () => shipInput.yawRight = true, () => shipInput.yawRight = false);
-
-    // Roll
+    // Manual Roll
     setupHoldButton('btn-roll-left', () => shipInput.rollLeft = true, () => shipInput.rollLeft = false);
     setupHoldButton('btn-roll-right', () => shipInput.rollRight = true, () => shipInput.rollRight = false);
 
-    // Strafing
+    // Lateral Strafing (Side thrusters)
     setupHoldButton('btn-strafe-left', () => shipInput.strafeLeft = true, () => shipInput.strafeLeft = false);
     setupHoldButton('btn-strafe-right', () => shipInput.strafeRight = true, () => shipInput.strafeRight = false);
 
-    // Thrust & Brake
+    // Main Thrust & Brake
     setupHoldButton('btn-thrust', () => shipInput.thrust = true, () => shipInput.thrust = false);
     setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
 
@@ -283,23 +339,9 @@ export class GameHUD {
     const roomTitle = document.getElementById('hud-room-title');
     if (roomTitle) roomTitle.textContent = this.engine.network.roomName || 'Orion Sector';
 
-    // Master session status badge
-    const masterBadge = document.getElementById('hud-master-badge');
-    const masterText = document.getElementById('hud-master-text');
-    if (masterText && masterBadge) {
-      if (state.isMaster) {
-        masterBadge.className = 'hud-master-badge master-active';
-        masterText.innerHTML = `👑 <strong>MASTER</strong> (TTL Active)`;
-      } else {
-        masterBadge.className = 'hud-master-badge master-peer';
-        const hostTag = state.masterId ? state.masterId.slice(0, 4) : 'Host';
-        masterText.innerHTML = `⚡ Mesh (Host: ${hostTag})`;
-      }
-    }
-
     // Network stats
     const peersEl = document.getElementById('hud-peers-count');
-    if (peersEl) peersEl.textContent = `👥 ${state.activePeersCount}`;
+    if (peersEl) peersEl.textContent = `👥 ${state.activePeersCount} Pilot${state.activePeersCount === 1 ? '' : 's'}`;
 
     const pingEl = document.getElementById('hud-ping-val');
     if (pingEl) pingEl.textContent = `📡 ${state.avgPing}ms`;
@@ -356,7 +398,7 @@ export class GameHUD {
         cannonStatus.textContent = 'COOLDOWN';
         cannonStatus.style.color = '#ffaa00';
       } else {
-        cannonStatus.textContent = 'READY';
+        cannonStatus.textContent = 'READY (TTK 2s)';
         cannonStatus.style.color = '#88aacc';
       }
     }
