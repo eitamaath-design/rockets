@@ -1,0 +1,295 @@
+import { lobbyService } from './net/lobby.js';
+import { GameNetwork } from './net/network.js';
+import { GameEngine } from './game/engine.js';
+import { GameHUD } from './game/hud.js';
+
+const app = document.getElementById('app');
+
+const SECTOR_NAMES = [
+  'Nebula-Orion',
+  'Andromeda-Deep',
+  'Centauri-Prime',
+  'Cygnus-Rift',
+  'Cassiopeia-Void',
+  'Pegasus-Belt',
+  'Vela-Pulsar',
+  'Perseus-Arm'
+];
+
+function getRandomSectorName() {
+  const base = SECTOR_NAMES[Math.floor(Math.random() * SECTOR_NAMES.length)];
+  const num = Math.floor(100 + Math.random() * 900);
+  return `${base}-${num}`;
+}
+
+class AppRouter {
+  constructor() {
+    this.currentMode = 'lobby'; // 'lobby' | 'game'
+    this.engine = null;
+    this.network = null;
+    this.hud = null;
+
+    this.playerName = localStorage.getItem('rockets_pilot_name') || `Pilot-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    this.init();
+  }
+
+  init() {
+    // Check if URL has ?room=
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+
+    if (roomParam) {
+      this.startMatch({
+        roomId: roomParam,
+        roomName: roomParam,
+        mapSeed: Math.abs(this.hashCode(roomParam))
+      });
+    } else {
+      this.renderLobby();
+    }
+  }
+
+  hashCode(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return hash;
+  }
+
+  renderLobby() {
+    this.currentMode = 'lobby';
+    app.innerHTML = `
+      <div class="lobby-container">
+        <header class="lobby-header">
+          <h1 class="lobby-title">🚀 ROCKETS</h1>
+          <p class="lobby-subtitle">Serverless P2P WebRTC 3D Multiplayer Space Combat</p>
+        </header>
+
+        <div class="lobby-pilot-config">
+          <label for="pilot-name-input">CALLSIGN:</label>
+          <input type="text" id="pilot-name-input" value="${this.playerName}" maxlength="16" placeholder="Pilot Name" />
+        </div>
+
+        <div class="lobby-grid">
+          <!-- Create Match Card -->
+          <div class="lobby-card">
+            <h2 class="card-title"><span>🛰️</span> Create New Sector</h2>
+            <p class="card-description">
+              Initialize a new procedural asteroid map. You become the initial Master peer broadcasting session TTL heartbeats.
+            </p>
+            <div class="lobby-form-row">
+              <label for="sector-name-input">Sector / Room Name</label>
+              <input type="text" id="sector-name-input" class="lobby-input" value="${getRandomSectorName()}" />
+            </div>
+            <button class="btn-primary" id="btn-create-match">LAUNCH SECTOR</button>
+          </div>
+
+          <!-- Join by Code Card -->
+          <div class="lobby-card">
+            <h2 class="card-title"><span>⚡</span> Direct Join</h2>
+            <p class="card-description">
+              Connect directly to an existing peer mesh using a known Room ID or invite link.
+            </p>
+            <div class="lobby-form-row">
+              <label for="join-room-input">Room Code or Sector ID</label>
+              <input type="text" id="join-room-input" class="lobby-input" placeholder="e.g. Nebula-Orion-412" />
+            </div>
+            <button class="btn-secondary" id="btn-direct-join">JOIN DIRECTLY</button>
+          </div>
+        </div>
+
+        <!-- Live Public Lobbies Browser -->
+        <section class="lobby-browser-section">
+          <div class="browser-header">
+            <h2 class="card-title"><span>📡</span> Public Sector Directory (Live Keep-Alive TTL)</h2>
+            <button class="btn-refresh-rooms" id="btn-refresh-rooms">🔄 Refresh</button>
+          </div>
+          <div class="rooms-list" id="rooms-list-container">
+            <div class="rooms-empty">Scanning decentralized relays for active sectors...</div>
+          </div>
+        </section>
+
+        <!-- Controls Guide -->
+        <section class="lobby-controls-card">
+          <strong>PILOT FLIGHT & COMBAT MANUAL:</strong>
+          <div class="controls-grid">
+            <div class="control-item">
+              <span class="control-key">W / 🚀 Thrust:</span> Accelerate forward up to max speed
+            </div>
+            <div class="control-item">
+              <span class="control-key">S / 🛑 Brake:</span> Progressive deceleration (full stop in 2.0s)
+            </div>
+            <div class="control-item">
+              <span class="control-key">A & D / ⬅ ➡ Strafe:</span> Fire lateral side thrusters
+            </div>
+            <div class="control-item">
+              <span class="control-key">D-Pad / Arrows / Mouse:</span> Pitch (up/down) & Pan/Yaw (left/right)
+            </div>
+            <div class="control-item">
+              <span class="control-key">Q & E / ↺ ↻:</span> Roll left & right
+            </div>
+            <div class="control-item">
+              <span class="control-key">Space / LMB:</span> Front Cannon (rapid fire, 2.0s TTK, auto-recharge)
+            </div>
+            <div class="control-item">
+              <span class="control-key">F / RMB:</span> Rear Mine (forward boost + 3s proximity fuse)
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+
+    // Hook Pilot Name change
+    const nameInput = document.getElementById('pilot-name-input');
+    if (nameInput) {
+      nameInput.addEventListener('input', (e) => {
+        this.playerName = e.target.value.trim() || 'Pilot';
+        localStorage.setItem('rockets_pilot_name', this.playerName);
+      });
+    }
+
+    // Hook Create Match
+    const createBtn = document.getElementById('btn-create-match');
+    const sectorInput = document.getElementById('sector-name-input');
+    if (createBtn) {
+      createBtn.addEventListener('click', () => {
+        const roomName = (sectorInput.value.trim()) || getRandomSectorName();
+        const roomId = roomName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+        this.startMatch({
+          roomId,
+          roomName,
+          mapSeed: Math.abs(this.hashCode(roomId))
+        });
+      });
+    }
+
+    // Hook Direct Join
+    const joinBtn = document.getElementById('btn-direct-join');
+    const joinInput = document.getElementById('join-room-input');
+    if (joinBtn) {
+      joinBtn.addEventListener('click', () => {
+        const val = joinInput.value.trim();
+        if (!val) {
+          alert('Please enter a Room Code or Sector ID to join.');
+          return;
+        }
+        const roomId = val.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+        this.startMatch({
+          roomId,
+          roomName: val,
+          mapSeed: Math.abs(this.hashCode(roomId))
+        });
+      });
+    }
+
+    // Hook Refresh Rooms
+    const refreshBtn = document.getElementById('btn-refresh-rooms');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        lobbyService.refreshRooms();
+      });
+    }
+
+    // Initialize lobby directory & subscribe to updates
+    lobbyService.init();
+    lobbyService.onRoomsUpdated((rooms) => {
+      this.updateRoomsListUI(rooms);
+    });
+  }
+
+  updateRoomsListUI(rooms) {
+    const container = document.getElementById('rooms-list-container');
+    if (!container) return;
+
+    if (!rooms || rooms.length === 0) {
+      container.innerHTML = `<div class="rooms-empty">No active matches found. Click <strong>LAUNCH SECTOR</strong> above to host one!</div>`;
+      return;
+    }
+
+    container.innerHTML = rooms.map(room => `
+      <div class="room-list-item">
+        <div class="room-item-meta">
+          <span class="room-item-name">🛰️ ${escapeHtml(room.roomName || room.roomId)}</span>
+          <div class="room-item-details">
+            <span>👥 ${room.playerCount || 1} Pilot${room.playerCount === 1 ? '' : 's'}</span>
+            <span>👑 Host: Pilot-${(room.masterId || 'Host').slice(0, 4)}</span>
+            <span class="room-ttl-badge">⏳ TTL: ${room.ttlSecondsRemaining}s</span>
+          </div>
+        </div>
+        <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}">
+          JOIN SECTOR
+        </button>
+      </div>
+    `).join('');
+
+    // Attach click listeners to join buttons
+    const joinButtons = container.querySelectorAll('.btn-join-room-item');
+    joinButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const roomId = btn.getAttribute('data-room-id');
+        const roomName = btn.getAttribute('data-room-name');
+        const mapSeed = parseInt(btn.getAttribute('data-seed'), 10) || 42;
+        this.startMatch({ roomId, roomName, mapSeed });
+      });
+    });
+  }
+
+  startMatch({ roomId, roomName, mapSeed }) {
+    this.currentMode = 'game';
+
+    // Clear DOM
+    app.innerHTML = '';
+    const gameContainer = document.createElement('div');
+    gameContainer.id = 'game-canvas-container';
+    gameContainer.style.width = '100%';
+    gameContainer.style.height = '100%';
+    gameContainer.style.position = 'relative';
+    gameContainer.style.overflow = 'hidden';
+    app.appendChild(gameContainer);
+
+    // Update browser URL query without reload
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+
+    // Initialize Network Mesh
+    this.network = new GameNetwork({
+      roomId,
+      roomName,
+      mapSeed,
+      playerName: this.playerName,
+      onCombatLog: (msg) => {
+        if (this.hud) this.hud.showCombatMessage(msg);
+      }
+    });
+
+    // Initialize Game Engine
+    this.engine = new GameEngine({
+      container: gameContainer,
+      network: this.network,
+      mapSeed,
+      onHudUpdate: (hudState) => {
+        if (this.hud) this.hud.update(hudState);
+      },
+      onDeathNotice: (notice) => {
+        if (this.hud) this.hud.showCombatMessage(notice);
+      }
+    });
+
+    // Initialize Responsive HUD
+    this.hud = new GameHUD(gameContainer, this.engine);
+
+    // Join room & start engine
+    this.network.join();
+    this.engine.start();
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+new AppRouter();
