@@ -21,122 +21,77 @@ export class Cockpit {
 
   createCockpitModel() {
     const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0x181c24,
-      roughness: 0.4,
-      metalness: 0.8,
+      color: 0x1a2230,
+      roughness: 0.3,
+      metalness: 0.85,
       flatShading: true
     });
 
-    const interiorPanelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0f131a,
-      roughness: 0.6,
-      metalness: 0.5
-    });
-
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00d4ff,
+    const glowAccentMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff,
       wireframe: false
     });
 
-    // 1. Lower Dashboard Console
-    const dashGeom = new THREE.CylinderGeometry(0.55, 0.65, 0.4, 8, 1, false, Math.PI * 0.7, Math.PI * 0.6);
-    const dashMesh = new THREE.Mesh(dashGeom, interiorPanelMaterial);
-    dashMesh.position.set(0, -0.28, -0.45);
-    dashMesh.rotation.x = 0.35;
-    this.group.add(dashMesh);
+    // 1. Sleek low-profile lower cockpit rim (tucked way below sightline at y = -0.42)
+    const rimGeom = new THREE.BoxGeometry(1.6, 0.04, 0.2);
+    const rimMesh = new THREE.Mesh(rimGeom, frameMaterial);
+    rimMesh.position.set(0, -0.42, -0.55);
+    rimMesh.rotation.x = 0.25;
+    this.group.add(rimMesh);
 
-    // 2. Cockpit Canopy Frame Struts (Left, Right, Top arch)
-    // Left Strut
-    const leftStrutGeom = new THREE.BoxGeometry(0.025, 0.7, 0.035);
-    const leftStrut = new THREE.Mesh(leftStrutGeom, frameMaterial);
-    leftStrut.position.set(-0.45, 0.05, -0.45);
-    leftStrut.rotation.set(-0.25, 0.2, 0.3);
-    this.group.add(leftStrut);
+    // Glowing telemetry line along bottom rim
+    const glowLineGeom = new THREE.BoxGeometry(1.2, 0.006, 0.01);
+    const glowLine = new THREE.Mesh(glowLineGeom, glowAccentMaterial);
+    glowLine.position.set(0, -0.40, -0.54);
+    glowLine.rotation.x = 0.25;
+    this.group.add(glowLine);
 
-    // Right Strut
-    const rightStrut = leftStrut.clone();
-    rightStrut.position.set(0.45, 0.05, -0.45);
-    rightStrut.rotation.set(-0.25, -0.2, -0.3);
-    this.group.add(rightStrut);
+    // 2. Peripheral Outer Canopy Pillars (pushed far to the outer sides at x = +/-0.72)
+    const pillarGeom = new THREE.BoxGeometry(0.03, 0.9, 0.04);
+    const leftPillar = new THREE.Mesh(pillarGeom, frameMaterial);
+    leftPillar.position.set(-0.72, 0.08, -0.5);
+    leftPillar.rotation.set(-0.15, 0.15, 0.42);
+    this.group.add(leftPillar);
 
-    // Top Overhead Canopy Arch
-    const topArchGeom = new THREE.BoxGeometry(0.85, 0.025, 0.04);
-    const topArch = new THREE.Mesh(topArchGeom, frameMaterial);
-    topArch.position.set(0, 0.38, -0.5);
-    this.group.add(topArch);
+    const rightPillar = leftPillar.clone();
+    rightPillar.position.set(0.72, 0.08, -0.5);
+    rightPillar.rotation.set(-0.15, -0.15, -0.42);
+    this.group.add(rightPillar);
 
-    // Center Overhead Spine Strut
-    const centerSpineGeom = new THREE.BoxGeometry(0.03, 0.025, 0.8);
-    const centerSpine = new THREE.Mesh(centerSpineGeom, frameMaterial);
-    centerSpine.position.set(0, 0.39, -0.1);
-    this.group.add(centerSpine);
-
-    // 3. Dashboard Displays / Holographic Screens
-    // Center holographic radar plate
-    const radarPlateGeom = new THREE.CircleGeometry(0.08, 16);
-    const radarMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffcc,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.4,
-      depthWrite: false
-    });
-    const radarMesh = new THREE.Mesh(radarPlateGeom, radarMat);
-    radarMesh.position.set(0, -0.21, -0.46);
-    radarMesh.rotation.x = -0.5;
-    this.group.add(radarMesh);
-
-    // Left Console Monitor (Shields / Status)
-    const monitorGeom = new THREE.PlaneGeometry(0.12, 0.08);
-    const monitorLeftMat = new THREE.MeshBasicMaterial({
-      color: 0x0088ff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5,
-      depthWrite: false
-    });
-    const monitorLeft = new THREE.Mesh(monitorGeom, monitorLeftMat);
-    monitorLeft.position.set(-0.22, -0.2, -0.47);
-    monitorLeft.rotation.set(-0.4, 0.3, 0);
-    this.group.add(monitorLeft);
-
-    // Right Console Monitor (Weapons / Mines)
-    const monitorRightMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa00,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5,
-      depthWrite: false
-    });
-    const monitorRight = new THREE.Mesh(monitorGeom, monitorRightMat);
-    monitorRight.position.set(0.22, -0.2, -0.47);
-    monitorRight.rotation.set(-0.4, -0.3, 0);
-    this.group.add(monitorRight);
-
-    // 4. Subtle Glass Canopy with Shield Flash Effect
+    // 3. Subtle Glass Canopy with Shield Flash Effect (depthWrite: false is essential)
     const glassGeom = new THREE.SphereGeometry(0.75, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.45);
     this.shieldGlassMat = new THREE.MeshBasicMaterial({
       color: 0x00e1ff,
       transparent: true,
-      opacity: 0.04,
+      opacity: 0.03,
       side: THREE.BackSide,
       blending: THREE.AdditiveBlending,
-      depthWrite: false // Essential: never write depth on transparent canopy or it blocks the outer 3D world!
+      depthWrite: false
     });
     const glassMesh = new THREE.Mesh(glassGeom, this.shieldGlassMat);
     glassMesh.position.set(0, 0, 0.1);
     this.group.add(glassMesh);
 
-    // 5. Cannon Barrels visible at lower periphery
-    const barrelGeom = new THREE.CylinderGeometry(0.02, 0.025, 0.6, 8);
+    // 4. Dual Wing Cannon Barrels at lower periphery corners (x = +/-0.52, y = -0.32)
+    const barrelGeom = new THREE.CylinderGeometry(0.022, 0.03, 0.55, 8);
     const leftBarrel = new THREE.Mesh(barrelGeom, frameMaterial);
-    leftBarrel.position.set(-0.48, -0.25, -0.6);
+    leftBarrel.position.set(-0.52, -0.32, -0.65);
     leftBarrel.rotation.x = Math.PI / 2;
     this.group.add(leftBarrel);
 
     const rightBarrel = leftBarrel.clone();
-    rightBarrel.position.set(0.48, -0.25, -0.6);
+    rightBarrel.position.set(0.52, -0.32, -0.65);
     this.group.add(rightBarrel);
+
+    // Muzzle emitter rings on barrels
+    const muzzleRingGeom = new THREE.TorusGeometry(0.026, 0.006, 6, 12);
+    const leftMuzzle = new THREE.Mesh(muzzleRingGeom, glowAccentMaterial);
+    leftMuzzle.position.set(-0.52, -0.32, -0.92);
+    this.group.add(leftMuzzle);
+
+    const rightMuzzle = leftMuzzle.clone();
+    rightMuzzle.position.set(0.52, -0.32, -0.92);
+    this.group.add(rightMuzzle);
   }
 
   triggerDamageFlash() {

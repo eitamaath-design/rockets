@@ -29,7 +29,7 @@ export class GameHUD {
         <button class="hud-btn-mini-fullscreen" id="btn-rotate-fullscreen">⛶ Fullscreen</button>
       </div>
 
-      <!-- Top Status Bar -->
+      <!-- Top Status Bar with Integrated Compact Gauges -->
       <div class="hud-top-bar">
         <div class="hud-top-left">
           <div class="hud-room-info">
@@ -39,55 +39,47 @@ export class GameHUD {
         </div>
 
         <div class="hud-top-center">
-          <!-- Compact Live Score & Flight Speed -->
           <div class="hud-header-scoreboard" id="hud-header-scoreboard">
             <span>SCR: <strong id="hud-score-val">0</strong></span>
             <span>K: <strong id="hud-kills-val">0</strong></span>
-            <span>D: <strong id="hud-deaths-val">0</strong></span>
-            <span>SPD: <strong id="hud-speed-val">0</strong> u/s</span>
+            <span style="display:none;" id="hud-deaths-val">0</span>
+            <span>SPD: <strong id="hud-speed-val">0</strong></span>
+          </div>
+
+          <!-- Integrated Compact Flight Gauges (No Screen Clutter) -->
+          <div class="hud-top-meters">
+            <div class="hud-compact-meter meter-hp">
+              <span class="meter-label">HULL</span>
+              <div class="meter-track">
+                <div class="gauge-bar-fill bar-hp" id="hud-hp-bar" style="width: 100%;"></div>
+              </div>
+              <span class="meter-val" id="hud-hp-num">100%</span>
+              <span id="hud-shield-status" style="display:none;">ACTIVE</span>
+            </div>
+
+            <div class="hud-compact-meter meter-cannon">
+              <span class="meter-label">CANNON</span>
+              <div class="meter-track">
+                <div class="gauge-bar-fill bar-cannon" id="hud-cannon-bar" style="width: 100%;"></div>
+              </div>
+              <span class="meter-val" id="hud-cannon-pct">100%</span>
+              <span id="hud-cannon-status" style="display:none;">READY</span>
+            </div>
+
+            <div class="hud-compact-mines">
+              <span class="mine-mini-title">MINES:</span>
+              <div class="mine-dot active" id="mine-dot-1">💣</div>
+              <div class="mine-dot active" id="mine-dot-2">💣</div>
+            </div>
           </div>
         </div>
 
         <div class="hud-top-right">
-          <div class="hud-stat-pill" id="hud-peers-count">👥 1 Pilot</div>
+          <div class="hud-stat-pill" id="hud-peers-count">👥 1</div>
           <div class="hud-stat-pill" id="hud-ping-val">📡 0ms</div>
           <button class="hud-btn-diag" id="hud-btn-diag" title="Client Diagnostics & Telemetry Logs">🐞 Logs</button>
-          <button class="hud-btn-fullscreen" id="hud-btn-fullscreen" title="Toggle Fullscreen">⛶ Fullscreen</button>
+          <button class="hud-btn-fullscreen" id="hud-btn-fullscreen" title="Toggle Fullscreen">⛶</button>
           <button class="hud-btn-leave" id="hud-btn-leave" title="Leave Match">✕</button>
-        </div>
-      </div>
-
-      <!-- Floating Compact Gauges -->
-      <div class="hud-gauges-floating">
-        <!-- Shield & Hull (Top Left) -->
-        <div class="hud-gauge-pill gauge-shield-pill">
-          <div class="gauge-pill-header">
-            <span>SHIELDS & HULL</span>
-            <span id="hud-hp-num">100%</span>
-          </div>
-          <div class="gauge-pill-track">
-            <div class="gauge-bar-fill bar-hp" id="hud-hp-bar" style="width: 100%;"></div>
-          </div>
-          <div class="gauge-pill-sub" id="hud-shield-status">ACTIVE</div>
-        </div>
-
-        <!-- Cannon & Mine (Top Right) -->
-        <div class="hud-gauge-pill gauge-weapons-pill">
-          <div class="gauge-pill-header">
-            <span>CANNON AMMO</span>
-            <span id="hud-cannon-pct">100%</span>
-          </div>
-          <div class="gauge-pill-track">
-            <div class="gauge-bar-fill bar-cannon" id="hud-cannon-bar" style="width: 100%;"></div>
-          </div>
-          <div class="weapons-pill-sub">
-            <span id="hud-cannon-status">READY (TTK 2s)</span>
-            <div class="mine-mini-row">
-              <span class="mine-mini-title">MINES:</span>
-              <div class="mine-dot" id="mine-dot-1">💣</div>
-              <div class="mine-dot" id="mine-dot-2">💣</div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -103,9 +95,9 @@ export class GameHUD {
         <div class="respawn-counter" id="hud-respawn-counter">Respawning in 3...</div>
       </div>
 
-      <!-- On-Screen Flight & Combat Controls -->
+      <!-- On-Screen Flight & Combat Controls (Clean, Minimalist Translucent) -->
       <div class="hud-touch-controls">
-        <!-- Left: Drag D-Pad Joystick (Pitch Up/Down, Pan Left/Right with Auto-Roll Banking) -->
+        <!-- Left: Drag D-Pad Joystick (Pitch Up/Down, Turn Left/Right with Auto-Roll Banking) -->
         <div class="touch-controls-left">
           <div class="touch-joystick-container" id="touch-joystick-container">
             <div class="joystick-base" id="joystick-base">
@@ -113,7 +105,6 @@ export class GameHUD {
               <div class="joystick-axis-v"></div>
               <div class="joystick-knob" id="joystick-knob"></div>
             </div>
-            <div class="joystick-label">TOUCH D-PAD (DRAG TO AIM)</div>
           </div>
 
           <!-- Manual Roll Buttons -->
@@ -195,8 +186,8 @@ export class GameHUD {
       // Normalized analog inputs: -1 to +1
       // Drag UP -> Pitch Up (+1), Drag DOWN -> Pitch Down (-1)
       shipInput.analogPitch = -(dy / maxRadius);
-      // Drag LEFT -> Pan Left (-1), Drag RIGHT -> Pan Right (+1)
-      shipInput.analogYaw = (dx / maxRadius);
+      // Drag RIGHT -> Turn Right (-1), Drag LEFT -> Turn Left (+1)
+      shipInput.analogYaw = -(dx / maxRadius);
     };
 
     const resetKnob = () => {

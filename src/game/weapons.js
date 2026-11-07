@@ -9,12 +9,11 @@ export class WeaponsSystem {
     // Cannon parameters
     this.cannonMaxEnergy = 100.0;
     this.cannonEnergy = 100.0;
-    this.cannonDrainPerSec = 28.0; // ~3.5s of continuous fire
-    this.cannonShotCost = 2.8;
+    this.cannonShotCost = 2.5; // 40 shots = 4.0s of continuous fire
     this.cannonCooldownDelay = 1.0; // 1s pause before recharge starts
     this.cannonCooldownTimer = 0;
     this.cannonRechargeRate = 35.0; // units per second
-    this.cannonFireInterval = 0.1; // 10 shots/sec
+    this.cannonFireInterval = 0.1; // 10 shots/sec (every 100ms)
     this.cannonLastFireTime = 0;
     this.cannonDamage = 5.0; // 20 hits in 2.0s = 100 HP (TTK = 2.0s)
     this.cannonSpeed = 380.0;
@@ -35,11 +34,25 @@ export class WeaponsSystem {
     this.mines = []; // { mesh, light, pos, life, ownerId, id, isLocal }
     this.explosions = []; // { mesh, light, life, maxLife }
 
-    // Reusable materials & geometries for performance
-    this.cannonGeom = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6);
-    this.cannonGeom.rotateX(Math.PI / 2);
-    this.localLaserMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-    this.remoteLaserMat = new THREE.MeshBasicMaterial({ color: 0xff3344 });
+    // Reusable materials & geometries for prominent, glowing plasma bolts
+    this.laserOuterGeom = new THREE.CylinderGeometry(0.35, 0.35, 6.0, 8);
+    this.laserOuterGeom.rotateX(Math.PI / 2);
+    this.laserCoreGeom = new THREE.CylinderGeometry(0.16, 0.16, 6.4, 6);
+    this.laserCoreGeom.rotateX(Math.PI / 2);
+
+    this.localLaserOuterMat = new THREE.MeshBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending
+    });
+    this.remoteLaserOuterMat = new THREE.MeshBasicMaterial({
+      color: 0xff3355,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending
+    });
+    this.laserCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
     this.mineGeom = new THREE.DodecahedronGeometry(1.6, 1);
     this.mineMat = new THREE.MeshStandardMaterial({
@@ -69,18 +82,21 @@ export class WeaponsSystem {
     if (isHolding) {
       this.cannonCooldownTimer = this.cannonCooldownDelay; // reset cooldown
 
-      if (this.cannonEnergy >= this.cannonShotCost && (now - this.cannonLastFireTime) >= this.cannonFireInterval) {
-        this.cannonLastFireTime = now;
+      // Normalize now timestamp: converts performance.now() ms to seconds if needed
+      const nowSec = now > 1000 ? now * 0.001 : now;
+
+      if (this.cannonEnergy >= this.cannonShotCost && (nowSec - this.cannonLastFireTime) >= this.cannonFireInterval) {
+        this.cannonLastFireTime = nowSec;
         this.cannonEnergy = Math.max(0, this.cannonEnergy - this.cannonShotCost);
 
         // Fire alternating dual bolts from ship wings
         const fwd = ship.getForwardVector();
         const right = ship.getRightVector();
-        const wingOffset = (Math.random() > 0.5 ? 1 : -1) * 0.9;
+        const wingOffset = (Math.random() > 0.5 ? 1 : -1) * 0.52;
         const origin = ship.position.clone()
-          .addScaledVector(fwd, 1.2)
+          .addScaledVector(fwd, 2.5) // in front of cockpit where bolts are immediately visible!
           .addScaledVector(right, wingOffset)
-          .add(new THREE.Vector3(0, -0.4, 0));
+          .add(new THREE.Vector3(0, -0.32, 0));
 
         const shotId = `${this.network.selfId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         this.spawnProjectile(origin, fwd, ship.velocity, true, shotId);
@@ -124,17 +140,29 @@ export class WeaponsSystem {
   }
 
   spawnProjectile(origin, dir, initialVel, isLocal, id) {
-    const mesh = new THREE.Mesh(this.cannonGeom, isLocal ? this.localLaserMat : this.remoteLaserMat);
-    mesh.position.copy(origin);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    const group = new THREE.Group();
+    group.position.copy(origin);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
 
-    this.scene.add(mesh);
+    // Outer bright glowing beam
+    const outerBeam = new THREE.Mesh(this.laserOuterGeom, isLocal ? this.localLaserOuterMat : this.remoteLaserOuterMat);
+    group.add(outerBeam);
+
+    // Inner brilliant white core
+    const innerCore = new THREE.Mesh(this.laserCoreGeom, this.laserCoreMat);
+    group.add(innerCore);
+
+    // Bolt point light for local illumination
+    const light = new THREE.PointLight(isLocal ? 0x00ffff : 0xff3344, 2.0, 18);
+    group.add(light);
+
+    this.scene.add(group);
     this.projectiles.push({
-      mesh,
+      mesh: group,
       dir: dir.clone().normalize(),
       speed: this.cannonSpeed,
       initialVel: initialVel ? initialVel.clone() : new THREE.Vector3(),
-      life: 1.5, // 1.5s max flight range (~570 units)
+      life: 1.8,
       isLocal,
       id
     });

@@ -23,26 +23,26 @@ export class SpaceEnvironment {
 
   setupLighting() {
     // Soft cosmic hemisphere light (bright sky, subtle ground bounce)
-    const hemiLight = new THREE.HemisphereLight(0x446688, 0x182233, 1.4);
+    const hemiLight = new THREE.HemisphereLight(0x557799, 0x1a2433, 1.6);
     this.scene.add(hemiLight);
 
     // Cosmic ambient light
-    const ambient = new THREE.AmbientLight(0x334455, 1.0);
+    const ambient = new THREE.AmbientLight(0x3a4b5c, 1.2);
     this.scene.add(ambient);
 
-    // Primary bright directional sunlight
-    const sunLight = new THREE.DirectionalLight(0xfff5e6, 3.0);
-    sunLight.position.set(600, 400, 500);
+    // Primary bright directional sunlight casting strong crater shadows
+    const sunLight = new THREE.DirectionalLight(0xfff6ea, 3.2);
+    sunLight.position.set(700, 450, 600);
     this.scene.add(sunLight);
 
     // Secondary cyan/blue rim light from opposite angle
-    const rimLight = new THREE.DirectionalLight(0x00aaff, 1.6);
-    rimLight.position.set(-500, -300, -400);
+    const rimLight = new THREE.DirectionalLight(0x00b4ff, 1.8);
+    rimLight.position.set(-600, -350, -500);
     this.scene.add(rimLight);
 
     // Warm foreground point light illuminating asteroids ahead of player spawn
-    const spawnLight = new THREE.PointLight(0xffeedd, 3.0, 700);
-    spawnLight.position.set(0, 50, 180);
+    const spawnLight = new THREE.PointLight(0xffeedd, 3.2, 900);
+    spawnLight.position.set(0, 60, 160);
     this.scene.add(spawnLight);
   }
 
@@ -145,49 +145,114 @@ export class SpaceEnvironment {
 
   /**
    * Deterministic asteroid generation based on room seed.
+   * Features massive Titan, Large, and Medium cratered asteroids
+   * that ships can easily hide behind for tactical dogfighting cover.
    */
   createAsteroidField() {
     const prng = createPRNG(this.mapSeed);
-    const count = 180;
-    const playAreaRadius = 850;
+    const count = 120;
+    const playAreaRadius = 1000;
 
-    // Rock materials with crisp shading and visible contrast
-    const grayRock = new THREE.MeshStandardMaterial({
-      color: 0x8a929a,
-      roughness: 0.75,
-      metalness: 0.2,
+    // Rock materials with rich planetary rock colors and crisp flat shading
+    const grayChondrite = new THREE.MeshStandardMaterial({
+      color: 0x828b96,
+      roughness: 0.85,
+      metalness: 0.15,
       flatShading: true
     });
 
-    const rustRock = new THREE.MeshStandardMaterial({
-      color: 0xa48570,
+    const rustIron = new THREE.MeshStandardMaterial({
+      color: 0x9b6b55,
+      roughness: 0.75,
+      metalness: 0.35,
+      flatShading: true
+    });
+
+    const darkBasalt = new THREE.MeshStandardMaterial({
+      color: 0x48505a,
+      roughness: 0.9,
+      metalness: 0.1,
+      flatShading: true
+    });
+
+    const nickelGranite = new THREE.MeshStandardMaterial({
+      color: 0x94a3af,
       roughness: 0.7,
       metalness: 0.25,
       flatShading: true
     });
 
-    const darkBasalt = new THREE.MeshStandardMaterial({
-      color: 0x727b85,
-      roughness: 0.8,
-      metalness: 0.3,
-      flatShading: true
-    });
-
-    const materials = [grayRock, rustRock, darkBasalt];
+    const materials = [grayChondrite, rustIron, darkBasalt, nickelGranite];
 
     for (let i = 0; i < count; i++) {
-      const radius = 8 + Math.pow(prng(), 1.7) * 32;
-      const detail = radius > 20 ? 2 : 1;
+      // Scale distribution: Titan (75-140), Large (42-75), Medium (22-42)
+      let radius;
+      let detail;
+      if (i < 20) {
+        // Massive Titan asteroids for ship cover & hiding
+        radius = 75 + prng() * 65; // 75 to 140 units
+        detail = 3;
+      } else if (i < 65) {
+        // Large asteroids
+        radius = 42 + prng() * 33; // 42 to 75 units
+        detail = 2;
+      } else {
+        // Medium asteroids
+        radius = 22 + prng() * 20; // 22 to 42 units
+        detail = 2;
+      }
+
       const geom = new THREE.IcosahedronGeometry(radius, detail);
       const posAttr = geom.attributes.position;
       const vertex = new THREE.Vector3();
 
-      // Deform vertices for craggy asteroid appearance
+      // Oblong non-spherical shape factors
+      const stretchX = 0.8 + prng() * 0.45;
+      const stretchY = 0.75 + prng() * 0.5;
+      const stretchZ = 0.8 + prng() * 0.45;
+
+      // 3-5 procedural crater indentation centers
+      const numCraters = Math.floor(3 + prng() * 3);
+      const craters = [];
+      for (let c = 0; c < numCraters; c++) {
+        const cTheta = prng() * Math.PI * 2;
+        const cPhi = Math.acos(2.0 * prng() - 1.0);
+        craters.push({
+          dir: new THREE.Vector3(
+            Math.sin(cPhi) * Math.cos(cTheta),
+            Math.sin(cPhi) * Math.sin(cTheta),
+            Math.cos(cPhi)
+          ),
+          depth: 0.18 + prng() * 0.16,
+          radiusCos: 0.75 + prng() * 0.18
+        });
+      }
+
+      // Deform vertices for craggy craters, ridges, and crags
       for (let v = 0; v < posAttr.count; v++) {
         vertex.fromBufferAttribute(posAttr, v);
-        const len = vertex.length();
-        const disp = 1.0 + (prng() - 0.5) * 0.35;
-        vertex.normalize().multiplyScalar(len * disp);
+        const normDir = vertex.clone().normalize();
+
+        // Apply oblong stretches
+        vertex.x *= stretchX;
+        vertex.y *= stretchY;
+        vertex.z *= stretchZ;
+
+        // Apply craters
+        let craterDisp = 0;
+        for (const crater of craters) {
+          const dot = normDir.dot(crater.dir);
+          if (dot > crater.radiusCos) {
+            const factor = (dot - crater.radiusCos) / (1.0 - crater.radiusCos);
+            craterDisp += Math.sin(factor * Math.PI) * crater.depth;
+          }
+        }
+
+        // Craggy noise
+        const crag = (prng() - 0.5) * 0.18;
+        const finalScale = Math.max(0.65, 1.0 - craterDisp + crag);
+        vertex.multiplyScalar(finalScale);
+
         posAttr.setXYZ(v, vertex.x, vertex.y, vertex.z);
       }
       geom.computeVertexNormals();
@@ -197,20 +262,23 @@ export class SpaceEnvironment {
 
       let posX = 0, posY = 0, posZ = 0;
 
-      // Ensure the first 25 asteroids are positioned in immediate forward view in front of ship at z=180
-      if (i < 25) {
-        posX = (prng() - 0.5) * 110;
-        posY = (prng() - 0.5) * 50;
-        posZ = 120 - prng() * 200; // Directly ahead in the pilot's forward field of view (60 to 260 units away)!
+      // The first 12 asteroids are placed directly in the player's forward view down -Z
+      // (Player spawns at z = 180 looking down -Z, so z values from 70 down to -250 are 110 to 430 units ahead)
+      if (i < 12) {
+        posX = (prng() - 0.5) * 180;
+        posY = (prng() - 0.5) * 90;
+        posZ = 70 - prng() * 320;
       } else {
-        // Distribute remaining asteroids across outer playfield
         let posFound = false;
-        while (!posFound) {
+        let attempts = 0;
+        while (!posFound && attempts < 50) {
+          attempts++;
           posX = (prng() - 0.5) * playAreaRadius * 2;
-          posY = (prng() - 0.5) * (playAreaRadius * 0.8);
+          posY = (prng() - 0.5) * (playAreaRadius * 0.7);
           posZ = (prng() - 0.5) * playAreaRadius * 2;
-          const dist = Math.sqrt(posX * posX + posY * posY + posZ * posZ);
-          if (dist > 35 && dist < playAreaRadius) {
+          const distToSpawn = Math.hypot(posX - 0, posY - 0, posZ - 180);
+          const distToCenter = Math.hypot(posX, posY, posZ);
+          if (distToSpawn > radius + 40 && distToCenter < playAreaRadius) {
             posFound = true;
           }
         }
@@ -226,11 +294,11 @@ export class SpaceEnvironment {
         radius,
         position: mesh.position,
         rotationSpeed: new THREE.Vector3(
-          (prng() - 0.5) * 0.004,
-          (prng() - 0.5) * 0.004,
-          (prng() - 0.5) * 0.004
+          (prng() - 0.5) * 0.003,
+          (prng() - 0.5) * 0.003,
+          (prng() - 0.5) * 0.003
         ),
-        boundingSphere: new THREE.Sphere(mesh.position, radius * 1.05)
+        boundingSphere: new THREE.Sphere(mesh.position, radius * 1.1)
       });
     }
 

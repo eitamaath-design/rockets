@@ -532,48 +532,52 @@ html, body {
   cursor: pointer;
 }
 
-/* Floating Gauges (Upper Corners) */
-.hud-gauges-floating {
-  position: absolute;
-  top: 52px;
-  left: 12px;
-  right: 12px;
+/* Compact Integrated Top Flight Meters */
+.hud-top-meters {
   display: flex;
-  justify-content: space-between;
-  pointer-events: none;
+  align-items: center;
+  gap: 12px;
+  background: rgba(4, 8, 20, 0.45);
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.hud-gauge-pill {
-  width: 145px;
-  background: var(--hud-bg-dark);
-  border: 1px solid var(--hud-border);
-  border-radius: 10px;
-  padding: 6px 10px;
-  backdrop-filter: blur(8px);
+.hud-compact-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.gauge-pill-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.65rem;
+.meter-label {
+  font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: #94a3b8;
-  margin-bottom: 3px;
 }
 
-.gauge-pill-header span:last-child {
-  color: #fff;
-  font-family: monospace;
-}
-
-.gauge-pill-track {
-  width: 100%;
+.meter-track {
+  width: 65px;
   height: 6px;
   background: rgba(0, 0, 0, 0.6);
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.meter-val {
+  font-size: 0.65rem;
+  font-family: monospace;
+  font-weight: 700;
+  color: #fff;
+  min-width: 30px;
+}
+
+.hud-compact-mines {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
 }
 
 .gauge-bar-fill {
@@ -595,43 +599,21 @@ html, body {
   background: linear-gradient(90deg, #0284c7 0%, #00ffff 100%);
 }
 
-.gauge-pill-sub {
-  font-size: 0.6rem;
-  font-weight: 700;
-  margin-top: 3px;
-  color: #00ff88;
-}
-
-.weapons-pill-sub {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.6rem;
-  font-weight: 700;
-  margin-top: 3px;
-  color: #88aacc;
-}
-
-.mine-mini-row {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
 .mine-mini-title {
   font-size: 0.55rem;
   color: #94a3b8;
+  font-weight: 700;
 }
 
 .mine-dot {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: 1px solid var(--hud-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   background: rgba(0, 0, 0, 0.4);
 }
 
@@ -842,7 +824,7 @@ html, body {
 
 /* Action Touch Buttons */
 .action-touch-btn {
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(8, 16, 32, 0.45);
   border: 1px solid var(--hud-border);
   border-radius: 8px;
   color: #fff;
@@ -850,10 +832,13 @@ html, body {
   touch-action: none;
   text-align: center;
   transition: all 0.1s;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .action-touch-btn:active, .action-touch-btn.active {
+  background: rgba(14, 165, 233, 0.35);
   box-shadow: 0 0 12px var(--hud-cyan);
   transform: scale(0.96);
 }
