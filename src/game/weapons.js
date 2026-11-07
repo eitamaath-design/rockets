@@ -308,7 +308,7 @@ export class WeaponsSystem {
     const dir = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z);
     const vel = data.vel ? new THREE.Vector3(data.vel.x, data.vel.y, data.vel.z) : new THREE.Vector3();
     this.spawnProjectile(origin, dir, vel, false, data.id);
-    audio.playCannonShot(false);
+    audio.playCannonShot(false, origin);
   }
 
   spawnMine(pos, isLocal, ownerId, id) {
@@ -343,7 +343,7 @@ export class WeaponsSystem {
     mesh.position.copy(pos);
 
     this.scene.add(mesh);
-    audio.playExplosion(radius > 15 ? 1.5 : 0.8);
+    audio.playExplosion(radius > 15 ? 1.5 : 0.8, pos);
 
     // Trigger pre-allocated sector combat flash (prevents WebGL shader recompilations)
     if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {

@@ -137,8 +137,11 @@ export class GameHUD {
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn btn-thrust" id="btn-thrust" title="Hold to Accelerate Forward (W)">🚀 <strong>THRUST</strong></button>
-            <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 2.0s (S)">🛑 <strong>BRAKE</strong></button>
+            <button class="action-touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap to BOOST">
+              🚀 <strong>THRUST</strong>
+              <span class="hud-boost-badge" id="hud-boost-badge">⚡ BOOST</span>
+            </button>
+            <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
 
           <!-- Combat Weapons -->
@@ -325,7 +328,10 @@ export class GameHUD {
     }, () => shipInput.strafeRight = false);
 
     // Main Thrust & Brake
-    setupHoldButton('btn-thrust', () => shipInput.thrust = true, () => shipInput.thrust = false);
+    setupHoldButton('btn-thrust', () => {
+      this.engine.triggerBoostAction();
+      shipInput.thrust = true;
+    }, () => shipInput.thrust = false);
     setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
 
     // Weapons
@@ -522,6 +528,21 @@ export class GameHUD {
     // Speedometer
     const speedVal = document.getElementById('hud-speed-val');
     if (speedVal) speedVal.textContent = state.speed;
+
+    // Boost Badge (Double-tap thrust evasive boost)
+    const boostBadge = document.getElementById('hud-boost-badge');
+    const thrustBtn = document.getElementById('btn-thrust');
+    if (boostBadge) {
+      if (state.boostReady) {
+        boostBadge.textContent = '⚡ BOOST';
+        boostBadge.className = 'hud-boost-badge ready';
+        if (thrustBtn) thrustBtn.classList.add('boost-ready');
+      } else {
+        boostBadge.textContent = `${state.boostCooldown}s`;
+        boostBadge.className = 'hud-boost-badge cooling';
+        if (thrustBtn) thrustBtn.classList.remove('boost-ready');
+      }
+    }
 
     // Cannon Ammo
     const cannonBar = document.getElementById('hud-cannon-bar');

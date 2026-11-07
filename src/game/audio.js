@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 /**
  * Rockets Space Audio System
  * Synthesizes dynamic, zero-dependency procedural SFX and engine ambiances
@@ -82,6 +84,66 @@ export class AudioManager {
     window.addEventListener('pointerdown', unlock, { passive: true, once: true });
     window.addEventListener('keydown', unlock, { passive: true, once: true });
     window.addEventListener('touchstart', unlock, { passive: true, once: true });
+  }
+
+  /**
+   * Update 3D listener position and orientation from camera
+   */
+  updateListener(camera) {
+    if (!this.ctx || !this.ctx.listener || !camera) return;
+    try {
+      const listener = this.ctx.listener;
+      const now = this.ctx.currentTime;
+      const pos = camera.position;
+
+      // Extract forward and up vectors from camera orientation
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+      if (listener.positionX) {
+        listener.positionX.setValueAtTime(pos.x, now);
+        listener.positionY.setValueAtTime(pos.y, now);
+        listener.positionZ.setValueAtTime(pos.z, now);
+        listener.forwardX.setValueAtTime(fwd.x, now);
+        listener.forwardY.setValueAtTime(fwd.y, now);
+        listener.forwardZ.setValueAtTime(fwd.z, now);
+        listener.upX.setValueAtTime(up.x, now);
+        listener.upY.setValueAtTime(up.y, now);
+        listener.upZ.setValueAtTime(up.z, now);
+      } else if (listener.setPosition) {
+        listener.setPosition(pos.x, pos.y, pos.z);
+        listener.setOrientation(fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Creates an HRTF 3D spatial panner for positional sound effects
+   */
+  createPanner(pos) {
+    if (!this.ctx || !pos) return null;
+    try {
+      const panner = this.ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 35;
+      panner.maxDistance = 2500;
+      panner.rolloffFactor = 1.15;
+      panner.coneInnerAngle = 360;
+
+      const now = this.ctx.currentTime;
+      if (panner.positionX) {
+        panner.positionX.setValueAtTime(pos.x, now);
+        panner.positionY.setValueAtTime(pos.y, now);
+        panner.positionZ.setValueAtTime(pos.z, now);
+      } else if (panner.setPosition) {
+        panner.setPosition(pos.x, pos.y, pos.z);
+      }
+      panner.connect(this.compressor);
+      return panner;
+    } catch (_) {
+      return null;
+    }
   }
 
   resume() {
@@ -188,11 +250,12 @@ export class AudioManager {
   /**
    * Front Cannon projectile blast: sharp transient + sweeping laser chirp
    */
-  playCannonShot(isLocal = true) {
+  playCannonShot(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();
 
     const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
@@ -208,13 +271,13 @@ export class AudioManager {
     filter.frequency.setValueAtTime(2800, now);
     filter.frequency.exponentialRampToValueAtTime(400, now + 0.09);
 
-    const vol = isLocal ? 0.36 : 0.18;
+    const vol = isLocal ? 0.36 : 0.22;
     gain.gain.setValueAtTime(vol, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.compressor);
+    gain.connect(dest);
 
     osc.start(now);
     osc.stop(now + 0.1);
@@ -264,13 +327,14 @@ export class AudioManager {
 
   /**
    * Explosions (projectile hit or mine detonation)
-   * Deep sub-bass boom + filtered noise burst
+   * Deep sub-bass boom + filtered noise burst with 3D spatial panning
    */
-  playExplosion(intensity = 1.0) {
+  playExplosion(intensity = 1.0, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();
 
     const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
 
     // 1. Sub-bass punch oscillator
     const boomOsc = this.ctx.createOscillator();
@@ -284,7 +348,7 @@ export class AudioManager {
     boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.75 * intensity);
 
     boomOsc.connect(boomGain);
-    boomGain.connect(this.compressor);
+    boomGain.connect(dest);
     boomOsc.start(now);
     boomOsc.stop(now + 0.8 * intensity);
 
@@ -304,7 +368,7 @@ export class AudioManager {
 
       noise.connect(filter);
       filter.connect(noiseGain);
-      noiseGain.connect(this.compressor);
+      noiseGain.connect(dest);
 
       noise.start(now);
       noise.stop(now + 0.7 * intensity);
@@ -388,13 +452,14 @@ export class AudioManager {
   }
 
   /**
-   * 30-Second Inactivity Engagement Beacon: resonant high-tech sonar ping
+   * 30-Second Inactivity Engagement Beacon: resonant high-tech sonar ping with 3D spatial panning
    */
-  playEngagementBeacon() {
+  playEngagementBeacon(pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();
 
     const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
@@ -413,20 +478,21 @@ export class AudioManager {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.compressor);
+    gain.connect(dest);
 
     osc.start(now);
     osc.stop(now + 1.0);
   }
 
   /**
-   * Fiery rogue meteor screaming past close to cockpit
+   * Fiery rogue meteor screaming past close to cockpit with 3D spatial panning
    */
-  playMeteorFlyby() {
+  playMeteorFlyby(pos = null) {
     if (!this.ctx || this.isMuted || !this.noiseBuffer) return;
     this.resume();
 
     const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
     const noise = this.ctx.createBufferSource();
     noise.buffer = this.noiseBuffer;
 
@@ -439,15 +505,64 @@ export class AudioManager {
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.45, now + 0.35);
+    gain.gain.linearRampToValueAtTime(0.55, now + 0.35);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 1.15);
 
     noise.connect(filter);
     filter.connect(gain);
-    gain.connect(this.compressor);
+    gain.connect(dest);
 
     noise.start(now);
     noise.stop(now + 1.2);
+  }
+
+  /**
+   * Double-tap thrust evasive boost: punchy sub-bass kick + plasma turbine surge
+   */
+  playBoost() {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+
+    // 1. Heavy sub-bass thump
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(220, now);
+    subOsc.frequency.exponentialRampToValueAtTime(45, now + 0.28);
+
+    subGain.gain.setValueAtTime(0.55, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+    subOsc.connect(subGain);
+    subGain.connect(this.compressor);
+    subOsc.start(now);
+    subOsc.stop(now + 0.32);
+
+    // 2. High-pass plasma whoosh
+    if (this.noiseBuffer) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.noiseBuffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(320, now);
+      filter.frequency.exponentialRampToValueAtTime(1400, now + 0.12);
+      filter.frequency.exponentialRampToValueAtTime(250, now + 0.35);
+      filter.Q.setValueAtTime(2.2, now);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.48, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.compressor);
+
+      noise.start(now);
+      noise.stop(now + 0.38);
+    }
   }
 }
 

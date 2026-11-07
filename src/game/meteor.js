@@ -19,7 +19,7 @@ export class MeteorSystem {
     this.activeMeteor = null;
 
     // Pre-allocated particle buffer for the meteor's roaring fire & smoke trail
-    this.maxParticles = 120;
+    this.maxParticles = 250;
     this.particles = [];
     this.trailGeom = new THREE.BufferGeometry();
     this.trailPositions = new Float32Array(this.maxParticles * 3);
@@ -29,7 +29,7 @@ export class MeteorSystem {
     this.trailGeom.setAttribute('color', new THREE.BufferAttribute(this.trailColors, 3));
 
     this.trailMat = new THREE.PointsMaterial({
-      size: 16.0,
+      size: 48.0,
       vertexColors: true,
       transparent: true,
       opacity: 0.95,
@@ -77,40 +77,66 @@ export class MeteorSystem {
     const dir = targetPos.clone().sub(spawnPos).normalize();
     const speed = 260; // Roaring speed across sector
     const velocity = dir.clone().multiplyScalar(speed);
-    const radius = 9.5;
-    const mass = 150000; // Substantial planetary mass
+    const radius = 56.0; // Asteroid-sized massive planetary impactor
+    const mass = 1200000; // Colossal planetary mass
 
-    // 3. 3D Model: Molten craggy rock core with glowing lava crust
+    // 3. 3D Model: Molten craggy rock core with glowing lava crust & roaring fire aura
     const group = new THREE.Group();
     group.position.copy(spawnPos);
 
     const coreGeom = new THREE.DodecahedronGeometry(radius, 2);
     const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x110904,
+      color: 0x1a0802,
       emissive: 0xff3300,
-      emissiveIntensity: 3.5,
-      roughness: 0.85,
-      metalness: 0.2
+      emissiveIntensity: 4.2,
+      roughness: 0.88,
+      metalness: 0.25
     });
     const coreMesh = new THREE.Mesh(coreGeom, coreMat);
     group.add(coreMesh);
 
-    // Blazing white-hot inner corona
-    const coronaGeom = new THREE.SphereGeometry(radius * 0.7, 12, 10);
+    // Blazing white-hot incandescent inner core
+    const coronaGeom = new THREE.SphereGeometry(radius * 0.75, 16, 12);
     const coronaMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
       blending: THREE.AdditiveBlending
     });
     const coronaMesh = new THREE.Mesh(coronaGeom, coronaMat);
     group.add(coronaMesh);
+
+    // Surrounding raging turbulent fire envelope (fire around the asteroid)
+    const fireEnvelopeGeom = new THREE.IcosahedronGeometry(radius * 1.25, 2);
+    const fireEnvelopeMat = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const fireEnvelopeMesh = new THREE.Mesh(fireEnvelopeGeom, fireEnvelopeMat);
+    group.add(fireEnvelopeMesh);
+
+    // Outer blazing yellow plasma halo
+    const haloGeom = new THREE.IcosahedronGeometry(radius * 1.40, 2);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xffaa00,
+      transparent: true,
+      opacity: 0.45,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const haloMesh = new THREE.Mesh(haloGeom, haloMat);
+    group.add(haloMesh);
 
     this.scene.add(group);
 
     this.activeMeteor = {
       group,
       coreMesh,
+      fireEnvelopeMesh,
+      haloMesh,
       position: group.position,
       velocity,
       dir,
@@ -143,25 +169,39 @@ export class MeteorSystem {
       const m = this.activeMeteor;
       m.age += dt;
 
-      // Kinematic translation
+      // Kinematic translation & fire aura churning
       m.position.addScaledVector(m.velocity, dt);
-      m.coreMesh.rotation.x += dt * 3.5;
-      m.coreMesh.rotation.y += dt * 4.2;
+      m.coreMesh.rotation.x += dt * 1.8;
+      m.coreMesh.rotation.y += dt * 2.2;
+
+      // Roaring fire envelopes counter-rotate with turbulent pulsing
+      if (m.fireEnvelopeMesh) {
+        m.fireEnvelopeMesh.rotation.x -= dt * 3.5;
+        m.fireEnvelopeMesh.rotation.z += dt * 4.0;
+        const pulse = 1.0 + Math.sin(m.age * 14.0) * 0.06;
+        m.fireEnvelopeMesh.scale.set(pulse, pulse, pulse);
+      }
+      if (m.haloMesh) {
+        m.haloMesh.rotation.y += dt * 2.8;
+        m.haloMesh.rotation.z -= dt * 2.5;
+        const haloPulse = 1.0 + Math.cos(m.age * 10.0) * 0.08;
+        m.haloMesh.scale.set(haloPulse, haloPulse, haloPulse);
+      }
 
       // Sync pre-allocated meteor light
       if (this.spaceEnv && this.spaceEnv.meteorLight) {
         this.spaceEnv.meteorLight.position.copy(m.position);
       }
 
-      // Emit turbulent fire and smoke plume
-      this.emitTrailParticles(m.position, m.dir, 3);
+      // Emit turbulent massive fire and smoke plume behind the asteroid
+      this.emitTrailParticles(m.position, m.dir, 6);
 
       // Cockpit flyby audio trigger
       if (!m.flybyPlayed && playerShip && !playerShip.isDead) {
         const distToCockpit = m.position.distanceTo(playerShip.position);
-        if (distToCockpit < 280) {
+        if (distToCockpit < 450) {
           m.flybyPlayed = true;
-          audio.playMeteorFlyby();
+          audio.playMeteorFlyby(m.position);
         }
       }
 
@@ -235,21 +275,21 @@ export class MeteorSystem {
     this.updateTrailParticles(dt);
   }
 
-  emitTrailParticles(pos, dir, count = 3) {
+  emitTrailParticles(pos, dir, count = 6) {
     for (let i = 0; i < count; i++) {
       if (this.particles.length >= this.maxParticles) break;
       const jitter = new THREE.Vector3(
-        (Math.random() - 0.5) * 5.0,
-        (Math.random() - 0.5) * 5.0,
-        (Math.random() - 0.5) * 5.0
+        (Math.random() - 0.5) * 45.0,
+        (Math.random() - 0.5) * 45.0,
+        (Math.random() - 0.5) * 45.0
       );
       const pPos = pos.clone().add(jitter);
-      const pVel = dir.clone().multiplyScalar(-35.0).add(new THREE.Vector3(
-        (Math.random() - 0.5) * 15.0,
-        (Math.random() - 0.5) * 15.0,
-        (Math.random() - 0.5) * 15.0
+      const pVel = dir.clone().multiplyScalar(-40.0).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 25.0,
+        (Math.random() - 0.5) * 25.0,
+        (Math.random() - 0.5) * 25.0
       ));
-      const life = 0.5 + Math.random() * 0.35;
+      const life = 0.65 + Math.random() * 0.45;
       this.particles.push({
         pos: pPos,
         vel: pVel,

@@ -247,9 +247,20 @@ export class Cockpit {
     this.damageFlashTimer = 0.40;
   }
 
+  triggerBoostFlash() {
+    this.boostKickZ = -0.045; // Pilot kicked back into seat by boost surge
+    if (this.shieldGlassMat) {
+      this.shieldGlassMat.color.setHex(0x00ffff);
+      this.shieldGlassMat.opacity = 0.18;
+    }
+  }
+
   update(dt, flightInput, velocity) {
+    if (!this.boostKickZ) this.boostKickZ = 0;
+    this.boostKickZ += (0 - this.boostKickZ) * dt * 8.0;
+
     // Dynamic cockpit inertia & G-force reaction
-    const accelG = flightInput.thrust ? 0.016 : (flightInput.brake ? -0.016 : 0);
+    const accelG = (flightInput.thrust ? 0.016 : (flightInput.brake ? -0.016 : 0)) + this.boostKickZ;
     const strafeG = flightInput.strafe * 0.022;
     const pitchG = flightInput.pitch * 0.014;
     const rollG = flightInput.roll * 0.022;

@@ -14,9 +14,15 @@ export class PlayerShip {
     // Flight parameters
     this.maxSpeed = 90.0; // units per second
     this.forwardAccel = 45.0; // units per second squared
-    this.decelRate = this.maxSpeed / 2.0; // exactly 2.0s from max speed to 0 (45.0 u/s^2)
+    this.decelRate = (this.maxSpeed / 2.0) * 3.0; // 3x effective deceleration (stops in ~0.67s instead of 2.0s)
     this.strafeAccel = 40.0;
     this.maxStrafeSpeed = 35.0;
+
+    // Double-tap Thrust Boost (instant dodge surge forward every 5.0s)
+    this.boostCooldown = 5.0; // seconds
+    this.boostCooldownTimer = 0.0;
+    this.lastThrustTapTime = 0.0;
+    this.boostImpulse = 60.0; // instant forward velocity boost
 
     // Rotation speeds (radians per second)
     this.pitchSpeed = 1.6;
@@ -71,6 +77,8 @@ export class PlayerShip {
     this.hp = this.maxHp;
     this.shield = this.maxShield;
     this.shieldRechargeTimer = 0;
+    this.boostCooldownTimer = 0;
+    this.lastThrustTapTime = 0;
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
@@ -112,6 +120,36 @@ export class PlayerShip {
     this.score += 100;
   }
 
+  /**
+   * Double-tap thrust detection to activate instant evasive boost
+   * @param {number} now Timestamp in ms
+   * @returns {boolean} True if boost was successfully triggered
+   */
+  triggerThrustPress(now = performance.now()) {
+    const elapsed = now - this.lastThrustTapTime;
+    this.lastThrustTapTime = now;
+
+    // Double tap within 40ms to 380ms window
+    if (elapsed >= 40 && elapsed <= 380) {
+      if (this.boostCooldownTimer <= 0 && !this.isDead) {
+        return this.activateBoost();
+      }
+    }
+    return false;
+  }
+
+  activateBoost() {
+    this.boostCooldownTimer = this.boostCooldown;
+    const fwd = this.getForwardVector();
+    this.velocity.addScaledVector(fwd, this.boostImpulse);
+    // Clamp to max speed with boost allowance
+    const maxBoostSpeed = this.maxSpeed * 1.5;
+    if (this.velocity.length() > maxBoostSpeed) {
+      this.velocity.setLength(maxBoostSpeed);
+    }
+    return true;
+  }
+
   applyImpulse(impulseVector) {
     this.velocity.add(impulseVector);
     const speed = this.velocity.length();
@@ -123,6 +161,10 @@ export class PlayerShip {
   update(dt) {
     if (this.invulnerableTimer > 0) {
       this.invulnerableTimer = Math.max(0, this.invulnerableTimer - dt);
+    }
+
+    if (this.boostCooldownTimer > 0) {
+      this.boostCooldownTimer = Math.max(0, this.boostCooldownTimer - dt);
     }
 
     if (this.isDead) {

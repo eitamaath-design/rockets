@@ -37,7 +37,7 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.getSpeed()).toBeLessThanOrEqual(ship.maxSpeed);
   });
 
-  it('should come to a complete stop from full speed in EXACTLY 2.0 seconds holding the brake button', () => {
+  it('should come to a complete stop 3x faster holding the brake button (~0.67s)', () => {
     // 1. Bring ship to full speed (90 u/s)
     ship.velocity.set(0, 0, -ship.maxSpeed);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed, 1);
@@ -46,14 +46,43 @@ describe('Player Flight Physics & Momentum', () => {
     ship.input.thrust = false;
     ship.input.brake = true;
 
-    // 3. At 1.0 second, speed should be exactly half (45 u/s)
-    ship.update(1.0);
+    // 3. At 0.333s, speed should be approximately half (brakes are 3x more effective)
+    ship.update(0.333);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed / 2.0, 1);
 
-    // 4. At 2.0 seconds total, speed must reach exactly 0.0 (complete halt)
-    ship.update(1.0);
+    // 4. By 0.70 seconds total, speed must reach 0.0 (complete halt)
+    ship.update(0.367);
     expect(ship.getSpeed()).toBe(0);
     expect(ship.velocity.length()).toBe(0);
+  });
+
+  it('should trigger evasive boost on double-tapping thrust with 5.0s cooldown', () => {
+    expect(ship.boostCooldownTimer).toBe(0);
+    expect(ship.getSpeed()).toBe(0);
+
+    // First tap at t = 1000ms
+    const tap1 = ship.triggerThrustPress(1000);
+    expect(tap1).toBe(false); // First tap does not trigger boost yet
+    expect(ship.getSpeed()).toBe(0);
+
+    // Double tap within 150ms window (t = 1150ms)
+    const tap2 = ship.triggerThrustPress(1150);
+    expect(tap2).toBe(true); // Boost triggered!
+    expect(ship.getSpeed()).toBeGreaterThan(50); // Instant forward surge impulse
+    expect(ship.boostCooldownTimer).toBe(5.0); // 5-second cooldown started
+
+    // Third tap within cooldown window should be rejected
+    const tap3 = ship.triggerThrustPress(1300);
+    expect(tap3).toBe(false);
+
+    // Advance time by 5.0s: cooldown expires, boost ready again
+    ship.update(5.1);
+    expect(ship.boostCooldownTimer).toBe(0);
+
+    // New double tap activates boost again
+    ship.triggerThrustPress(7000);
+    const tapAfterCooldown = ship.triggerThrustPress(7150);
+    expect(tapAfterCooldown).toBe(true);
   });
 
   it('should strafe laterally using side thrusters', () => {

@@ -81,9 +81,6 @@ export class EngagementBeaconSystem {
 
       r.ringMesh.scale.set(currentRadius * 1.05, currentRadius * 1.05, currentRadius * 1.05);
       r.ringMesh.material.opacity = opacity * 1.2;
-
-      r.light.distance = currentRadius * 1.5;
-      r.light.intensity = Math.max(0, (1.0 - progress) * 4.5);
     }
   }
 

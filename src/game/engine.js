@@ -35,9 +35,9 @@ export class GameEngine {
     this.lastWidth = 0;
     this.lastHeight = 0;
 
-    // Mouse look state
+    // Mouse look state (3x sensitivity for rapid agile tracking)
     this.isPointerLocked = false;
-    this.mouseSensitivity = 0.0022;
+    this.mouseSensitivity = 0.0066;
 
     // Firing state
     this.isFiringCannon = false;
@@ -167,6 +167,20 @@ export class GameEngine {
     });
   }
 
+  triggerBoostAction() {
+    if (!this.playerShip) return false;
+    const boosted = this.playerShip.triggerThrustPress(performance.now());
+    if (boosted) {
+      audio.playBoost();
+      this.cockpit.triggerBoostFlash();
+      if (this.thrusterTrails) {
+        this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false);
+      }
+      return true;
+    }
+    return false;
+  }
+
   setupInputListeners() {
     // Keyboard handlers
     window.addEventListener('keydown', (e) => {
@@ -174,6 +188,9 @@ export class GameEngine {
 
       switch (e.code) {
         case 'KeyW':
+          if (!this.playerShip.input.thrust) {
+            this.triggerBoostAction();
+          }
           this.playerShip.input.thrust = true;
           break;
         case 'KeyS':
@@ -345,6 +362,9 @@ export class GameEngine {
       // 1. Update Player Ship Physics
       this.playerShip.update(dt);
 
+      // 3D Spatial Audio: track pilot head/camera in world coordinates
+      audio.updateListener(this.camera);
+
       // Dynamic engine audio updates (smooth thrust & reverse brake sound)
       audio.updateEngine(this.playerShip.input.thrust, this.playerShip.input.brake, dt);
 
@@ -501,6 +521,8 @@ export class GameEngine {
         isDead: this.playerShip.isDead,
         respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
         invulnerable: (this.playerShip.invulnerableTimer > 0),
+        boostReady: (this.playerShip.boostCooldownTimer <= 0),
+        boostCooldown: Math.ceil(this.playerShip.boostCooldownTimer),
         inactivityBeacon: (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0),
         score: this.playerShip.score,
         kills: this.playerShip.kills,
