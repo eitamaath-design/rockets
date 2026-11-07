@@ -41,16 +41,16 @@ export class GameHUD {
 
         <div class="hud-top-center">
           <div class="hud-header-scoreboard" id="hud-header-scoreboard">
-            <span>SCR: <strong id="hud-score-val">0</strong></span>
-            <span>K: <strong id="hud-kills-val">0</strong></span>
-            <span style="display:none;" id="hud-deaths-val">0</span>
+            <span>⏳ <strong id="hud-timer-val">10:00</strong></span>
+            <span>🌀 SAFE: <strong id="hud-safe-val">1100u</strong></span>
+            <span>👥 <strong id="hud-alive-val">1</strong> Alive</span>
             <span>SPD: <strong id="hud-speed-val">0</strong></span>
           </div>
 
-          <!-- Integrated Compact Flight Gauges (No Screen Clutter) -->
+          <!-- Integrated Compact Flight & Combat Gauges -->
           <div class="hud-top-meters">
             <div class="hud-compact-meter meter-shield">
-              <span class="meter-label">SHIELD</span>
+              <span class="meter-label" id="hud-shield-title">SHIELD</span>
               <div class="meter-track">
                 <div class="gauge-bar-fill bar-shield" id="hud-shield-bar" style="width: 100%;"></div>
               </div>
@@ -63,26 +63,28 @@ export class GameHUD {
                 <div class="gauge-bar-fill bar-hp" id="hud-hp-bar" style="width: 100%;"></div>
               </div>
               <span class="meter-val" id="hud-hp-num">100%</span>
-              <span id="hud-shield-status" style="display:none;">ACTIVE</span>
+            </div>
+
+            <div class="hud-compact-meter meter-laser">
+              <span class="meter-label">LASER [SHIELD]</span>
+              <div class="meter-track">
+                <div class="gauge-bar-fill bar-laser" id="hud-laser-bar" style="width: 100%;"></div>
+              </div>
+              <span class="meter-val" id="hud-laser-pct">100%</span>
             </div>
 
             <div class="hud-compact-meter meter-cannon">
-              <span class="meter-label">CANNON</span>
+              <span class="meter-label">CANNON [HULL/DIG]</span>
               <div class="meter-track">
                 <div class="gauge-bar-fill bar-cannon" id="hud-cannon-bar" style="width: 100%;"></div>
               </div>
               <span class="meter-val" id="hud-cannon-pct">100%</span>
-              <span id="hud-cannon-status" style="display:none;">READY</span>
             </div>
 
-            <div class="hud-compact-mines">
-              <span class="mine-mini-title">MINES:</span>
-              <div class="mine-dot active" id="mine-dot-1">💣</div>
-              <div class="mine-dot active" id="mine-dot-2">💣</div>
-            </div>
+            <div class="hud-powerup-badge" id="hud-powerup-badge" style="display: none;"></div>
 
             <div class="hud-beacon-pill" id="hud-beacon-pill" style="display: none;">
-              📡 BEACON ACTIVE (30s)
+              📡 BEACON ACTIVE
             </div>
           </div>
         </div>
@@ -103,8 +105,11 @@ export class GameHUD {
       </div>
 
       <div class="hud-combat-feed" id="hud-combat-feed"></div>
+      <div class="hud-victory-banner" id="hud-victory-banner" style="display: none;">
+        🏆 VICTORY ROYALE: LAST PILOT ALIVE!
+      </div>
       <div class="hud-respawn-overlay" id="hud-respawn-overlay" style="display: none;">
-        <div class="respawn-title">SHIP DESTROYED</div>
+        <div class="respawn-title" id="hud-respawn-title">SHIP DESTROYED</div>
         <div class="respawn-counter" id="hud-respawn-counter">Respawning in 3...</div>
       </div>
 
@@ -144,10 +149,16 @@ export class GameHUD {
             <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
 
-          <!-- Combat Weapons -->
+          <!-- Dual Forward Arsenals -->
           <div class="touch-weapon-cluster">
-            <button class="action-touch-btn btn-cannon" id="btn-cannon" title="Hold to Fire Cannon (Space / LMB)">⚡ <strong>CANNON</strong></button>
-            <button class="action-touch-btn btn-mine" id="btn-mine" title="Tap to Drop Rear Mine (F / RMB)">💣 <strong>MINE</strong></button>
+            <button class="action-touch-btn btn-laser" id="btn-laser" title="Hold to Fire Laser Beam / Hologram Decoy (Space / LMB)">
+              ⚡ <strong>LASER</strong>
+              <small class="weapon-subtext">[SHIELD]</small>
+            </button>
+            <button class="action-touch-btn btn-cannon" id="btn-cannon" title="Hold to Fire Kinetic Cannon / Dig Asteroids (F / RMB)">
+              🔥 <strong>CANNON</strong>
+              <small class="weapon-subtext">[HULL/DIG]</small>
+            </button>
           </div>
         </div>
       </div>
@@ -334,27 +345,9 @@ export class GameHUD {
     }, () => shipInput.thrust = false);
     setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
 
-    // Weapons
+    // Dual Forward Weapons
+    setupHoldButton('btn-laser', () => this.engine.isFiringLaser = true, () => this.engine.isFiringLaser = false);
     setupHoldButton('btn-cannon', () => this.engine.isFiringCannon = true, () => this.engine.isFiringCannon = false);
-
-    const mineBtn = document.getElementById('btn-mine');
-    if (mineBtn) {
-      const triggerMine = (e) => {
-        if (e) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-        this.engine.weaponsSystem.triggerRearMine(this.engine.playerShip);
-        mineBtn.classList.add('active');
-        logger.log('INPUT', 'Rear Mine Triggered');
-        setTimeout(() => mineBtn.classList.remove('active'), 150);
-      };
-      mineBtn.addEventListener('touchstart', triggerMine, { passive: false });
-      mineBtn.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'touch') return;
-        triggerMine(e);
-      });
-    }
 
     // Copy invite link
     const copyBtn = document.getElementById('hud-btn-copy');
@@ -544,30 +537,69 @@ export class GameHUD {
       }
     }
 
-    // Cannon Ammo
-    const cannonBar = document.getElementById('hud-cannon-bar');
-    const cannonPct = document.getElementById('hud-cannon-pct');
-    const cannonStatus = document.getElementById('hud-cannon-status');
-    if (cannonBar) cannonBar.style.width = `${state.cannonEnergy}%`;
-    if (cannonPct) cannonPct.textContent = `${state.cannonEnergy}%`;
-    if (cannonStatus) {
-      if (state.cannonRecharging) {
-        cannonStatus.textContent = 'RECHARGING...';
-        cannonStatus.style.color = '#00ffff';
-      } else if (state.cannonEnergy < 15) {
-        cannonStatus.textContent = 'COOLDOWN';
-        cannonStatus.style.color = '#ffaa00';
+    // Battle Royale Match Timer & Safe Zone
+    const timerVal = document.getElementById('hud-timer-val');
+    if (timerVal && state.matchTimeRemaining !== undefined) {
+      const mins = Math.floor(state.matchTimeRemaining / 60);
+      const secs = state.matchTimeRemaining % 60;
+      timerVal.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    const safeVal = document.getElementById('hud-safe-val');
+    if (safeVal && state.safeRadius !== undefined) {
+      safeVal.textContent = `${state.safeRadius}u`;
+    }
+
+    const aliveVal = document.getElementById('hud-alive-val');
+    if (aliveVal && state.alivePilotsCount !== undefined) {
+      aliveVal.textContent = state.alivePilotsCount;
+    }
+
+    // Broken Shield Alert
+    const shieldTitle = document.getElementById('hud-shield-title');
+    if (shieldTitle) {
+      if (state.isShieldBroken) {
+        shieldTitle.textContent = 'SHIELD [BROKEN]';
+        shieldTitle.style.color = '#ff3344';
       } else {
-        cannonStatus.textContent = 'READY (TTK 2s)';
-        cannonStatus.style.color = '#88aacc';
+        shieldTitle.textContent = 'SHIELD';
+        shieldTitle.style.color = '#00ffff';
       }
     }
 
-    // Mine Charges
-    const dot1 = document.getElementById('mine-dot-1');
-    const dot2 = document.getElementById('mine-dot-2');
-    if (dot1) dot1.className = state.mineCharges >= 1 ? 'mine-dot active' : 'mine-dot empty';
-    if (dot2) dot2.className = state.mineCharges >= 2 ? 'mine-dot active' : 'mine-dot empty';
+    // Laser Bar
+    const laserBar = document.getElementById('hud-laser-bar');
+    const laserPct = document.getElementById('hud-laser-pct');
+    if (laserBar) laserBar.style.width = `${state.laserEnergy || 0}%`;
+    if (laserPct) laserPct.textContent = `${state.laserEnergy || 0}%`;
+
+    // Cannon Bar
+    const cannonBar = document.getElementById('hud-cannon-bar');
+    const cannonPct = document.getElementById('hud-cannon-pct');
+    if (cannonBar) cannonBar.style.width = `${state.cannonEnergy || 0}%`;
+    if (cannonPct) cannonPct.textContent = `${state.cannonEnergy || 0}%`;
+
+    // Tactical Power-Up Badges
+    const powerupBadge = document.getElementById('hud-powerup-badge');
+    if (powerupBadge) {
+      if (state.isInvisible) {
+        powerupBadge.style.display = 'inline-flex';
+        powerupBadge.textContent = '👁️ CLOAKED';
+        powerupBadge.className = 'hud-powerup-badge cloak';
+      } else if (state.hasHologramDecoy) {
+        powerupBadge.style.display = 'inline-flex';
+        powerupBadge.textContent = '👥 DECOY ARMED';
+        powerupBadge.className = 'hud-powerup-badge decoy';
+      } else {
+        powerupBadge.style.display = 'none';
+      }
+    }
+
+    // Victory Royale Banner
+    const victoryBanner = document.getElementById('hud-victory-banner');
+    if (victoryBanner) {
+      victoryBanner.style.display = state.isVictoryRoyale ? 'block' : 'none';
+    }
 
     // Respawn Overlay
     const respawnOverlay = document.getElementById('hud-respawn-overlay');

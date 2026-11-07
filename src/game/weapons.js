@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { audio } from './audio.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Dynamic particle fire trail system for kinetic projectiles.
@@ -9,7 +10,7 @@ import { audio } from './audio.js';
 class FireTrailSystem {
   constructor(scene) {
     this.scene = scene;
-    this.maxParticles = 1000;
+    this.maxParticles = 800;
     this.particles = [];
 
     this.geom = new THREE.BufferGeometry();
@@ -42,7 +43,6 @@ class FireTrailSystem {
         (Math.random() - 0.5) * 0.45
       );
       const pPos = pos.clone().add(jitter);
-      // Flame plume expels backward with turbulence
       const pVel = dir.clone().multiplyScalar(-18.0).add(new THREE.Vector3(
         (Math.random() - 0.5) * 8.0,
         (Math.random() - 0.5) * 8.0,
@@ -77,7 +77,6 @@ class FireTrailSystem {
       this.positions[idx + 1] = p.pos.y;
       this.positions[idx + 2] = p.pos.z;
 
-      // Color transitions: white-hot -> bright yellow -> fiery orange -> dark red ember
       const progress = 1.0 - (p.life / p.maxLife);
       if (progress < 0.25) {
         this.colors[idx] = 1.0;
@@ -95,7 +94,6 @@ class FireTrailSystem {
       }
     }
 
-    // Hide remaining buffer points
     for (let i = activeCount; i < this.maxParticles; i++) {
       const idx = i * 3;
       this.positions[idx] = 99999;
@@ -119,44 +117,101 @@ class FireTrailSystem {
   }
 }
 
+/**
+ * Complete Weapons System:
+ * - Primary: High-Energy Forward Directed Laser (2.4x vs Shields, 0.35x vs Hull)
+ *   When ship.hasHologramDecoy is active, firing primary deploys a 15-second Hologram Decoy Clone!
+ * - Secondary: High-Velocity Forward Kinetic Cannon (2.2x vs Hull, 0.35x vs Shields)
+ *   Striking asteroids calls spaceEnv.carveAsteroid() to drill craters and tunnels through asteroids!
+ */
 export class WeaponsSystem {
   constructor(scene, spaceEnv, network) {
     this.scene = scene;
     this.spaceEnv = spaceEnv;
     this.network = network;
 
-    // Cannon parameters (slower speed, actual visible projectile with fire trail)
+    // 1. Forward Laser parameters (Primary weapon: strong vs shields, longer cooldown)
+    this.laserMaxEnergy = 100.0;
+    this.laserEnergy = 100.0;
+    this.laserShotCost = 28.0; // ~3.5 shots per full charge
+    this.laserCooldownDelay = 0.85; // 0.85s delay after shot before recharge starts
+    this.laserCooldownTimer = 0;
+    this.laserRechargeRate = 28.0; // units per second
+    this.laserFireInterval = 0.40; // max ~2.5 blasts/sec
+    this.laserLastFireTime = 0;
+    this.laserDamage = 22.0; // In ship.js: 2.4x vs shield = 52.8, 0.35x vs hull = 7.7
+    this.laserSpeed = 480.0; // High-velocity coherent beam
+
+    // 2. Forward Kinetic Cannon parameters (Secondary weapon: strong vs hull, rapid fire)
     this.cannonMaxEnergy = 100.0;
     this.cannonEnergy = 100.0;
-    this.cannonShotCost = 2.5; // 40 shots = 4.0s of continuous fire
-    this.cannonCooldownDelay = 1.0; // 1s pause before recharge starts
+    this.cannonShotCost = 2.5; // 40 shots per charge
+    this.cannonCooldownDelay = 0.8;
     this.cannonCooldownTimer = 0;
-    this.cannonRechargeRate = 35.0; // units per second
-    this.cannonFireInterval = 0.1; // 10 shots/sec (every 100ms)
+    this.cannonRechargeRate = 35.0;
+    this.cannonFireInterval = 0.1; // 10 shots/sec
     this.cannonLastFireTime = 0;
-    this.cannonDamage = 5.0; // 20 hits in 2.0s = 100 HP (TTK = 2.0s)
-    this.cannonSpeed = 175.0; // Perceptible, trackable flight speed
+    this.cannonDamage = 6.0; // In ship.js: 2.2x vs hull = 13.2, 0.35x vs shield = 2.1
+    this.cannonSpeed = 185.0; // Perceptible trackable flight speed
 
-    // Rear Mine parameters
+    // Rear Mine parameters (fallback / legacy support)
     this.mineMaxCharges = 2;
     this.mineCharges = 2;
-    this.mineRechargeTime = 5.5; // seconds per charge
+    this.mineRechargeTime = 6.0;
     this.mineRechargeProgress = 0;
-    this.mineForwardImpulse = 20.0;
-    this.mineFuseTime = 3.0; // 3 seconds fuse
-    this.mineDetonationRadius = 8.0;
-    this.mineExplosionDamage = 50.0;
-    this.mineExplosionRadius = 18.0;
+    this.mineFuseTime = 3.0;
 
-    // Active projectiles, mines, and explosions
-    this.projectiles = []; // { mesh, dir, speed, life, origin, isLocal, id }
-    this.mines = []; // { mesh, light, pos, life, ownerId, id, isLocal }
-    this.explosions = []; // { mesh, light, life, maxLife }
+    // Active weapon entities
+    this.lasers = []; // { mesh, dir, speed, life, maxLife, isLocal, id }
+    this.projectiles = []; // { mesh, dir, speed, life, isLocal, id }
+    this.mines = []; // { mesh, life, id, isLocal }
+    this.explosions = []; // { mesh, life, maxLife, maxRadius }
+    this.decoys = []; // { group, dir, speed, life, maxLife, isLocal, id }
 
-    // Dynamic fire particle trails
+    // Dynamic fire particle trails for kinetic cannon slugs
     this.fireTrails = new FireTrailSystem(this.scene);
 
-    // Reusable materials & geometries for 3D kinetic rocket slug
+    // Geometries & Materials
+    this.initGeometriesAndMaterials();
+    this.listenToNetworkEvents();
+  }
+
+  initGeometriesAndMaterials() {
+    // Laser Beam geometry: elongated sleek energy cylinder aligned along Z
+    this.laserGeom = new THREE.CylinderGeometry(0.24, 0.24, 9.0, 8);
+    this.laserGeom.rotateX(Math.PI / 2);
+
+    this.localLaserMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending
+    });
+
+    this.remoteLaserMat = new THREE.MeshBasicMaterial({
+      color: 0xff0066,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending
+    });
+
+    // Outer laser glow sheath
+    this.laserGlowGeom = new THREE.CylinderGeometry(0.55, 0.55, 9.4, 8);
+    this.laserGlowGeom.rotateX(Math.PI / 2);
+    this.localLaserGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x0088ff,
+      transparent: true,
+      opacity: 0.45,
+      blending: THREE.AdditiveBlending
+    });
+    this.remoteLaserGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xff3300,
+      transparent: true,
+      opacity: 0.45,
+      blending: THREE.AdditiveBlending
+    });
+
+    // 3D Kinetic Cannon rocket slug
     this.slugBodyGeom = new THREE.CylinderGeometry(0.24, 0.32, 2.0, 8);
     this.slugBodyGeom.rotateX(Math.PI / 2);
 
@@ -173,18 +228,11 @@ export class WeaponsSystem {
       flatShading: true
     });
 
-    this.localSlugNoseMat = new THREE.MeshBasicMaterial({
-      color: 0xffcc33
-    });
+    this.localSlugNoseMat = new THREE.MeshBasicMaterial({ color: 0xffcc33 });
+    this.remoteSlugNoseMat = new THREE.MeshBasicMaterial({ color: 0xff3344 });
+    this.slugThrusterMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
 
-    this.remoteSlugNoseMat = new THREE.MeshBasicMaterial({
-      color: 0xff3344
-    });
-
-    this.slugThrusterMat = new THREE.MeshBasicMaterial({
-      color: 0xff6600
-    });
-
+    // Mine geometry
     this.mineGeom = new THREE.DodecahedronGeometry(1.6, 1);
     this.mineMat = new THREE.MeshStandardMaterial({
       color: 0x222222,
@@ -194,14 +242,37 @@ export class WeaponsSystem {
       emissiveIntensity: 0.4
     });
 
-    this.listenToNetworkEvents();
+    // Hologram Decoy Clone wireframe material
+    this.decoyMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending
+    });
   }
 
   listenToNetworkEvents() {
+    if (!this.network) return;
+
+    // Remote peer fired laser
+    if (typeof this.network.onLaser === 'function') {
+      this.network.onLaser((data, peerId) => {
+        this.spawnRemoteLaser(data, peerId);
+      });
+    }
+
     // Remote peer fired cannon
     this.network.onCannon((data, peerId) => {
       this.spawnRemoteProjectile(data, peerId);
     });
+
+    // Remote peer deployed hologram decoy clone
+    if (typeof this.network.onDecoy === 'function') {
+      this.network.onDecoy((data, peerId) => {
+        this.spawnRemoteDecoy(data, peerId);
+      });
+    }
 
     // Remote peer dropped mine
     this.network.onMine((data, peerId) => {
@@ -209,67 +280,152 @@ export class WeaponsSystem {
     });
   }
 
-  triggerCannon(isHolding, ship, now) {
-    if (isHolding) {
-      this.cannonCooldownTimer = this.cannonCooldownDelay; // reset cooldown
+  /**
+   * Primary Weapon Trigger: Directed Energy Laser Beam (or Hologram Decoy Clone if armed)
+   */
+  triggerPrimary(isHolding, ship, now) {
+    if (!isHolding || ship.isDead) return;
 
-      // Normalize now timestamp: converts performance.now() ms to seconds if needed
-      const nowSec = now > 1000 ? now * 0.001 : now;
+    // Break invisibility on weapon trigger
+    if (typeof ship.breakInvisibility === 'function') {
+      ship.breakInvisibility();
+    }
 
-      if (this.cannonEnergy >= this.cannonShotCost && (nowSec - this.cannonLastFireTime) >= this.cannonFireInterval) {
-        this.cannonLastFireTime = nowSec;
-        this.cannonEnergy = Math.max(0, this.cannonEnergy - this.cannonShotCost);
+    // 1. If Hologram Decoy is armed, deploy the clone decoy!
+    if (ship.hasHologramDecoy) {
+      ship.hasHologramDecoy = false;
+      const fwd = ship.getForwardVector();
+      const origin = ship.position.clone().addScaledVector(fwd, 4.0);
+      const decoyId = `decoy-${this.network.selfId}-${Date.now()}`;
 
-        // Fire alternating dual bolts from ship wings
-        const fwd = ship.getForwardVector();
-        const right = ship.getRightVector();
-        const wingOffset = (Math.random() > 0.5 ? 1 : -1) * 0.52;
-        const origin = ship.position.clone()
-          .addScaledVector(fwd, 2.5) // in front of cockpit where bolts are immediately visible!
-          .addScaledVector(right, wingOffset)
-          .add(new THREE.Vector3(0, -0.32, 0));
+      this.spawnDecoy(origin, fwd, true, decoyId);
+      audio.playDecoyDeploy();
+      logger.log('WEAPON', 'Hologram Decoy Clone launched forward!');
 
-        const shotId = `${this.network.selfId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        this.spawnProjectile(origin, fwd, ship.velocity, true, shotId);
-        audio.playCannonShot(true);
+      if (this.network && typeof this.network.broadcastDecoy === 'function') {
+        this.network.broadcastDecoy({
+          id: decoyId,
+          pos: { x: origin.x, y: origin.y, z: origin.z },
+          dir: { x: fwd.x, y: fwd.y, z: fwd.z },
+          time: Date.now()
+        });
+      }
+      return;
+    }
 
-        // Broadcast to mesh
-        this.network.broadcastCannon({
+    // 2. Fire Forward High-Energy Laser Beam
+    const nowSec = now > 1000 ? now * 0.001 : now;
+    if (this.laserEnergy >= this.laserShotCost && (nowSec - this.laserLastFireTime) >= this.laserFireInterval) {
+      this.laserLastFireTime = nowSec;
+      this.laserCooldownTimer = this.laserCooldownDelay;
+      this.laserEnergy = Math.max(0, this.laserEnergy - this.laserShotCost);
+
+      const fwd = ship.getForwardVector();
+      const origin = ship.position.clone()
+        .addScaledVector(fwd, 3.2)
+        .add(new THREE.Vector3(0, -0.25, 0));
+
+      const shotId = `laser-${this.network.selfId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      this.spawnLaser(origin, fwd, true, shotId);
+      audio.playLaserShot(true);
+
+      if (this.network && typeof this.network.broadcastLaser === 'function') {
+        this.network.broadcastLaser({
           id: shotId,
           origin: { x: origin.x, y: origin.y, z: origin.z },
           dir: { x: fwd.x, y: fwd.y, z: fwd.z },
-          vel: { x: ship.velocity.x, y: ship.velocity.y, z: ship.velocity.z },
           time: now
         });
       }
     }
   }
 
+  /**
+   * Secondary Weapon Trigger: Forward High-Velocity Kinetic Cannon
+   * Strong against hull, carves chunks out of asteroids!
+   */
+  triggerSecondary(isHolding, ship, now) {
+    if (!isHolding || ship.isDead) return;
+
+    // Break invisibility on weapon trigger
+    if (typeof ship.breakInvisibility === 'function') {
+      ship.breakInvisibility();
+    }
+
+    const nowSec = now > 1000 ? now * 0.001 : now;
+    this.cannonCooldownTimer = this.cannonCooldownDelay;
+
+    if (this.cannonEnergy >= this.cannonShotCost && (nowSec - this.cannonLastFireTime) >= this.cannonFireInterval) {
+      this.cannonLastFireTime = nowSec;
+      this.cannonEnergy = Math.max(0, this.cannonEnergy - this.cannonShotCost);
+
+      // Alternating wing barrels
+      const fwd = ship.getForwardVector();
+      const right = ship.getRightVector();
+      const wingOffset = (Math.random() > 0.5 ? 1 : -1) * 0.72;
+      const origin = ship.position.clone()
+        .addScaledVector(fwd, 2.8)
+        .addScaledVector(right, wingOffset)
+        .add(new THREE.Vector3(0, -0.28, 0));
+
+      const shotId = `cannon-${this.network.selfId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      this.spawnProjectile(origin, fwd, ship.velocity, true, shotId);
+      audio.playCannonShot(true);
+
+      this.network.broadcastCannon({
+        id: shotId,
+        origin: { x: origin.x, y: origin.y, z: origin.z },
+        dir: { x: fwd.x, y: fwd.y, z: fwd.z },
+        vel: { x: ship.velocity.x, y: ship.velocity.y, z: ship.velocity.z },
+        time: now
+      });
+    }
+  }
+
+  // Backwards compatibility alias
+  triggerCannon(isHolding, ship, now) {
+    this.triggerSecondary(isHolding, ship, now);
+  }
+
+  triggerLaser(isHolding, ship, now) {
+    this.triggerPrimary(isHolding, ship, now);
+  }
+
   triggerRearMine(ship) {
-    if (this.mineCharges < 1 || ship.isDead) return false;
+    // Secondary forward weapon replaced mine, but keep method for safe fallback
+    return this.triggerSecondary(true, ship, performance.now());
+  }
 
-    this.mineCharges--;
-    const fwd = ship.getForwardVector();
+  spawnLaser(origin, dir, isLocal, id) {
+    const group = new THREE.Group();
+    group.position.copy(origin);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
 
-    // 1. Ship thrusts a bit forward
-    ship.applyImpulse(fwd.clone().multiplyScalar(this.mineForwardImpulse));
+    // Core beam
+    const core = new THREE.Mesh(this.laserGeom, isLocal ? this.localLaserMat : this.remoteLaserMat);
+    group.add(core);
 
-    // 2. Mine is left where the ship was when fired
-    const minePos = ship.position.clone().addScaledVector(fwd, -1.8);
-    const mineId = `mine-${this.network.selfId}-${Date.now()}`;
+    // Glowing energy sheath
+    const glow = new THREE.Mesh(this.laserGlowGeom, isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
+    group.add(glow);
 
-    this.spawnMine(minePos, true, this.network.selfId, mineId);
-    audio.playMineDeploy();
-
-    // Broadcast to peers
-    this.network.broadcastMine({
-      id: mineId,
-      pos: { x: minePos.x, y: minePos.y, z: minePos.z },
-      ownerId: this.network.selfId,
-      time: Date.now()
+    this.scene.add(group);
+    this.lasers.push({
+      mesh: group,
+      dir: dir.clone().normalize(),
+      speed: this.laserSpeed,
+      life: 1.4,
+      maxLife: 1.4,
+      isLocal,
+      id
     });
+  }
 
-    return true;
+  spawnRemoteLaser(data, peerId) {
+    const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
+    const dir = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z);
+    this.spawnLaser(origin, dir, false, data.id);
+    audio.playLaserShot(false, origin);
   }
 
   spawnProjectile(origin, dir, initialVel, isLocal, id) {
@@ -277,16 +433,13 @@ export class WeaponsSystem {
     group.position.copy(origin);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
 
-    // 1. Aerodynamic metallic rocket body
     const body = new THREE.Mesh(this.slugBodyGeom, this.slugBodyMat);
     group.add(body);
 
-    // 2. Heated nosecone
     const nose = new THREE.Mesh(this.slugNoseGeom, isLocal ? this.localSlugNoseMat : this.remoteSlugNoseMat);
     nose.position.set(0, 0, -1.45);
     group.add(nose);
 
-    // 3. Tail ignition thruster nozzle
     const tail = new THREE.Mesh(this.slugTailGeom, this.slugThrusterMat);
     tail.position.set(0, 0, 1.15);
     group.add(tail);
@@ -311,30 +464,66 @@ export class WeaponsSystem {
     audio.playCannonShot(false, origin);
   }
 
-  spawnMine(pos, isLocal, ownerId, id) {
-    const mesh = new THREE.Mesh(this.mineGeom, this.mineMat);
-    mesh.position.copy(pos);
+  spawnDecoy(origin, dir, isLocal, id) {
+    const group = new THREE.Group();
+    group.position.copy(origin);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
 
-    this.scene.add(mesh);
-    this.mines.push({
-      mesh,
-      pos: mesh.position,
-      life: this.mineFuseTime, // 3.0s fuse
-      ownerId,
+    // Phantom starfighter mesh
+    const hullGeom = new THREE.ConeGeometry(1.2, 4.0, 5);
+    hullGeom.rotateX(-Math.PI / 2);
+    const hull = new THREE.Mesh(hullGeom, this.decoyMat);
+    group.add(hull);
+
+    const wingGeom = new THREE.BoxGeometry(5.0, 0.08, 1.8);
+    const wings = new THREE.Mesh(wingGeom, this.decoyMat);
+    wings.position.set(0, 0, 0.8);
+    group.add(wings);
+
+    // Thruster glow
+    const flareGeom = new THREE.SphereGeometry(0.5, 8, 8);
+    const flareMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    const flare = new THREE.Mesh(flareGeom, flareMat);
+    flare.position.set(0, 0, 2.2);
+    group.add(flare);
+
+    this.scene.add(group);
+    this.decoys.push({
+      group,
+      dir: dir.clone().normalize(),
+      speed: 90.0,
+      life: 15.0,
+      maxLife: 15.0,
       isLocal,
       id
     });
   }
 
+  spawnRemoteDecoy(data, peerId) {
+    const origin = new THREE.Vector3(data.pos.x, data.pos.y, data.pos.z);
+    const dir = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z);
+    this.spawnDecoy(origin, dir, false, data.id);
+    audio.playDecoyDeploy();
+  }
+
   spawnRemoteMine(data, peerId) {
+    // Mines are supported if received from network
     const pos = new THREE.Vector3(data.pos.x, data.pos.y, data.pos.z);
-    this.spawnMine(pos, false, data.ownerId || peerId, data.id);
+    const mesh = new THREE.Mesh(this.mineGeom, this.mineMat);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    this.mines.push({ mesh, pos, life: 3.0, id: data.id, isLocal: false });
   }
 
   spawnExplosion(pos, radius = 12, color = 0xff6600) {
     const geom = new THREE.SphereGeometry(radius * 0.4, 12, 10);
     const mat = new THREE.MeshBasicMaterial({
-      color: color,
+      color,
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending
@@ -345,7 +534,6 @@ export class WeaponsSystem {
     this.scene.add(mesh);
     audio.playExplosion(radius > 15 ? 1.5 : 0.8, pos);
 
-    // Trigger pre-allocated sector combat flash (prevents WebGL shader recompilations)
     if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {
       this.spaceEnv.triggerCombatFlash(pos, color, radius > 15 ? 4.5 : 2.5);
     }
@@ -359,65 +547,107 @@ export class WeaponsSystem {
   }
 
   update(dt, localShip, remoteShipsMap, onDamageEvent) {
-    // 1. Weapon Energy & Cooldown recharge
+    // 1. Weapon Energy Recharging
+    // Laser recharge
+    if (this.laserCooldownTimer > 0) {
+      const elapsed = Math.min(this.laserCooldownTimer, dt);
+      this.laserCooldownTimer -= elapsed;
+      const remDt = dt - elapsed;
+      if (remDt > 0 && this.laserEnergy < this.laserMaxEnergy) {
+        this.laserEnergy = Math.min(this.laserMaxEnergy, this.laserEnergy + this.laserRechargeRate * remDt);
+      }
+    } else if (this.laserEnergy < this.laserMaxEnergy) {
+      this.laserEnergy = Math.min(this.laserMaxEnergy, this.laserEnergy + this.laserRechargeRate * dt);
+    }
+
+    // Cannon recharge
     if (this.cannonCooldownTimer > 0) {
-      const elapsedInCooldown = Math.min(this.cannonCooldownTimer, dt);
-      this.cannonCooldownTimer -= elapsedInCooldown;
-      const remainingDt = dt - elapsedInCooldown;
-      if (remainingDt > 0 && this.cannonEnergy < this.cannonMaxEnergy) {
-        this.cannonEnergy = Math.min(this.cannonMaxEnergy, this.cannonEnergy + this.cannonRechargeRate * remainingDt);
+      this.cannonCooldownTimer = Math.max(0, this.cannonCooldownTimer - dt);
+    } else if (this.cannonEnergy < this.cannonMaxEnergy) {
+      this.cannonEnergy = Math.min(this.cannonMaxEnergy, this.cannonEnergy + this.cannonRechargeRate * dt);
+    }
+
+    // 2. Update Laser Beams (Primary Weapon: strong vs shields)
+    for (let i = this.lasers.length - 1; i >= 0; i--) {
+      const l = this.lasers[i];
+      l.life -= dt;
+
+      l.mesh.position.addScaledVector(l.dir, l.speed * dt);
+      let destroyed = false;
+
+      // Check collision with asteroids
+      const hitAsteroid = this.spaceEnv.checkCollision(l.mesh.position, 1.2);
+      if (hitAsteroid) {
+        this.spawnExplosion(l.mesh.position, 6, 0x00d4ff);
+        destroyed = true;
       }
-    } else {
-      if (this.cannonEnergy < this.cannonMaxEnergy) {
-        this.cannonEnergy = Math.min(this.cannonMaxEnergy, this.cannonEnergy + this.cannonRechargeRate * dt);
+
+      // Check hits on local player
+      if (!destroyed && !l.isLocal && !localShip.isDead && localShip.invulnerableTimer <= 0) {
+        if (l.mesh.position.distanceToSquared(localShip.position) < 18.0) {
+          this.spawnExplosion(l.mesh.position, 8, 0x00ffff);
+          localShip.takeDamage(this.laserDamage, 'laser');
+          if (onDamageEvent) onDamageEvent(this.laserDamage, 'laser', null);
+          destroyed = true;
+        }
+      }
+
+      // Check hits on remote players
+      if (!destroyed && l.isLocal) {
+        for (const [peerId, remote] of remoteShipsMap.entries()) {
+          if (!remote.isDead && l.mesh.position.distanceToSquared(remote.position) < 18.0) {
+            this.spawnExplosion(l.mesh.position, 8, 0x00ffff);
+            this.network.sendHitTarget(peerId, this.laserDamage, 'laser');
+            destroyed = true;
+            break;
+          }
+        }
+      }
+
+      if (destroyed || l.life <= 0) {
+        this.scene.remove(l.mesh);
+        this.lasers.splice(i, 1);
       }
     }
 
-    // 2. Mine Charge recharge
-    if (this.mineCharges < this.mineMaxCharges) {
-      this.mineRechargeProgress += dt / this.mineRechargeTime;
-      if (this.mineRechargeProgress >= 1.0) {
-        this.mineCharges++;
-        this.mineRechargeProgress = 0;
-      }
-    } else {
-      this.mineRechargeProgress = 0;
-    }
-
-    // 3. Update Cannon Projectiles
+    // 3. Update Kinetic Cannon Slugs (Secondary Weapon: strong vs hull, carves asteroids!)
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.life -= dt;
 
-      // Move projectile along forward + slight initial velocity
-      const move = p.dir.clone().multiplyScalar(p.speed * dt);
-      p.mesh.position.add(move);
+      p.mesh.position.addScaledVector(p.dir, p.speed * dt);
 
-      // Emit continuous fire trail behind the rocket nozzle
+      // Fire trail billowing behind slug
       const tailPos = p.mesh.position.clone().addScaledVector(p.dir, -1.2);
       this.fireTrails.emit(tailPos, p.dir, 3);
 
       let destroyed = false;
 
-      // Asteroid collision
-      if (this.spaceEnv.checkCollision(p.mesh.position, 1.0)) {
-        this.spawnExplosion(p.mesh.position, 4, 0x00d4ff);
+      // Striking Asteroid: CANNON CARVES CHUNKS OUT OF ASTEROID!
+      const hitAsteroid = this.spaceEnv.checkCollision(p.mesh.position, 1.2);
+      if (hitAsteroid) {
+        this.spawnExplosion(p.mesh.position, 5, 0xff7700);
+        if (typeof this.spaceEnv.carveAsteroid === 'function') {
+          this.spaceEnv.carveAsteroid(hitAsteroid, p.mesh.position, p.dir);
+        }
         destroyed = true;
       }
 
-      // Check hits on local player (if projectile is from remote peer)
+      // Check hits on local player
       if (!destroyed && !p.isLocal && !localShip.isDead && localShip.invulnerableTimer <= 0) {
-        if (p.mesh.position.distanceToSquared(localShip.position) < 16.0) { // radius ~4
-          this.spawnExplosion(p.mesh.position, 6, 0xff2200);
+        if (p.mesh.position.distanceToSquared(localShip.position) < 16.0) {
+          this.spawnExplosion(p.mesh.position, 6, 0xff3300);
+          localShip.takeDamage(this.cannonDamage, 'cannon');
+          if (onDamageEvent) onDamageEvent(this.cannonDamage, 'cannon', null);
           destroyed = true;
         }
       }
 
-      // Check hits on remote players (if projectile is from local player)
+      // Check hits on remote players
       if (!destroyed && p.isLocal) {
         for (const [peerId, remote] of remoteShipsMap.entries()) {
           if (!remote.isDead && p.mesh.position.distanceToSquared(remote.position) < 16.0) {
-            this.spawnExplosion(p.mesh.position, 6, 0x00ffff);
+            this.spawnExplosion(p.mesh.position, 6, 0xff5500);
             this.network.sendHitTarget(peerId, this.cannonDamage, 'cannon');
             destroyed = true;
             break;
@@ -431,113 +661,67 @@ export class WeaponsSystem {
       }
     }
 
-    // 4. Update Rear Mines
+    // 4. Update Hologram Decoy Clones (15-second lifetime, no collisions)
+    for (let i = this.decoys.length - 1; i >= 0; i--) {
+      const d = this.decoys[i];
+      d.life -= dt;
+
+      // Moves smoothly forward without any collision
+      d.group.position.addScaledVector(d.dir, d.speed * dt);
+
+      // Holographic shimmer / flicker
+      const pulse = 0.5 + Math.sin(d.life * 14.0) * 0.25;
+      d.group.children.forEach(c => {
+        if (c.material && c.material.opacity !== undefined) {
+          c.material.opacity = pulse;
+        }
+      });
+
+      if (d.life <= 0) {
+        this.spawnExplosion(d.group.position, 6, 0x00ffff);
+        this.scene.remove(d.group);
+        this.decoys.splice(i, 1);
+      }
+    }
+
+    // 5. Update Legacy Mines
     for (let i = this.mines.length - 1; i >= 0; i--) {
       const m = this.mines[i];
       m.life -= dt;
-
-      // Spin mine
       m.mesh.rotation.y += dt * 2.0;
-      m.mesh.rotation.x += dt * 1.5;
 
-      let shouldDetonate = false;
-      let detonationReason = 'timer';
-
-      // "Mines explode on impact with any player, or after 3 seconds."
-      // Check collision with local ship (with 0.6s arming grace for the owner)
-      const isOwnerGrace = (m.isLocal && m.life > (this.mineFuseTime - 0.6));
-      if (!localShip.isDead && !isOwnerGrace) {
-        const dLocalSq = m.pos.distanceToSquared(localShip.position);
-        if (dLocalSq <= this.mineDetonationRadius * this.mineDetonationRadius) {
-          shouldDetonate = true;
-          detonationReason = 'impact-local';
-        }
-      }
-
-      // Check collision with remote ships
-      if (!shouldDetonate) {
-        for (const [peerId, remote] of remoteShipsMap.entries()) {
-          if (!remote.isDead && m.pos.distanceToSquared(remote.position) <= this.mineDetonationRadius * this.mineDetonationRadius) {
-            shouldDetonate = true;
-            detonationReason = `impact-${peerId}`;
-            break;
-          }
-        }
-      }
-
-      // Check 3-second fuse expiration
       if (m.life <= 0) {
-        shouldDetonate = true;
-        detonationReason = 'expired';
-      }
-
-      if (shouldDetonate) {
-        // Mine Detonation!
-        this.spawnExplosion(m.pos, this.mineExplosionRadius, 0xff4400);
-
-        // Calculate area blast damage and shockwave impulse on local player
-        if (!localShip.isDead && localShip.invulnerableTimer <= 0) {
-          const distToLocal = m.pos.distanceTo(localShip.position);
-          if (distToLocal <= this.mineExplosionRadius) {
-            const damageRatio = 1.0 - (distToLocal / this.mineExplosionRadius);
-            const actualDamage = Math.round(this.mineExplosionDamage * damageRatio);
-            localShip.takeDamage(actualDamage);
-
-            // Knockback impulse
-            const knockDir = localShip.position.clone().sub(m.pos).normalize();
-            localShip.applyImpulse(knockDir.multiplyScalar(25 * damageRatio));
-
-            if (onDamageEvent) onDamageEvent(actualDamage, 'mine', m.ownerId);
-          }
-        }
-
-        // If local player owned the mine, notify any remote peers hit in blast radius
-        if (m.isLocal) {
-          for (const [peerId, remote] of remoteShipsMap.entries()) {
-            if (!remote.isDead) {
-              const distToRemote = m.pos.distanceTo(remote.position);
-              if (distToRemote <= this.mineExplosionRadius) {
-                const damageRatio = 1.0 - (distToRemote / this.mineExplosionRadius);
-                const actualDamage = Math.round(this.mineExplosionDamage * damageRatio);
-                this.network.sendHitTarget(peerId, actualDamage, 'mine');
-              }
-            }
-          }
-        }
-
+        this.spawnExplosion(m.pos, 16, 0xff2200);
         this.scene.remove(m.mesh);
         this.mines.splice(i, 1);
       }
     }
 
-    // 5. Update Explosions
+    // 6. Update Explosions
     for (let i = this.explosions.length - 1; i >= 0; i--) {
-      const e = this.explosions[i];
-      e.life -= dt;
-      const progress = 1.0 - (e.life / e.maxLife);
-      const scale = 1.0 + progress * 2.5;
-      e.mesh.scale.set(scale, scale, scale);
-      e.mesh.material.opacity = Math.max(0, 1.0 - progress);
-
-      if (e.life <= 0) {
-        this.scene.remove(e.mesh);
+      const exp = this.explosions[i];
+      exp.life -= dt;
+      if (exp.life <= 0) {
+        this.scene.remove(exp.mesh);
         this.explosions.splice(i, 1);
+        continue;
       }
+      const progress = 1.0 - (exp.life / exp.maxLife);
+      const scale = 1.0 + progress * 2.2;
+      exp.mesh.scale.set(scale, scale, scale);
+      exp.mesh.material.opacity = (exp.life / exp.maxLife) * 0.9;
     }
 
-    // 6. Update active rocket fire particle trails
-    if (this.fireTrails) {
-      this.fireTrails.update(dt);
-    }
+    // 7. Update Fire Trails
+    this.fireTrails.update(dt);
   }
 
   cleanup() {
+    for (const l of this.lasers) this.scene.remove(l.mesh);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
+    for (const d of this.decoys) this.scene.remove(d.group);
     for (const m of this.mines) this.scene.remove(m.mesh);
     for (const e of this.explosions) this.scene.remove(e.mesh);
-    if (this.fireTrails) this.fireTrails.cleanup();
-    this.projectiles = [];
-    this.mines = [];
-    this.explosions = [];
+    this.fireTrails.cleanup();
   }
 }

@@ -85,6 +85,7 @@ export class SpaceEnvironment {
     this.mapSeed = mapSeed;
     this.asteroids = []; // { mesh, radius, position, rotationSpeed, boundingSphere }
     this.asteroidGroup = new THREE.Group();
+    this.debrisList = [];
 
     this.init();
   }
@@ -405,6 +406,21 @@ export class SpaceEnvironment {
    * and resolve pairwise asteroid-asteroid momentum collisions.
    */
   update(dt, playerPosition, playerVelocity) {
+    // Update rock debris particles
+    for (let i = this.debrisList.length - 1; i >= 0; i--) {
+      const d = this.debrisList[i];
+      d.life -= dt;
+      if (d.life <= 0) {
+        this.scene.remove(d.mesh);
+        this.debrisList.splice(i, 1);
+        continue;
+      }
+      d.mesh.position.addScaledVector(d.vel, dt);
+      d.mesh.rotation.x += d.rot.x * dt;
+      d.mesh.rotation.y += d.rot.y * dt;
+      const scale = (d.life / d.maxLife);
+      d.mesh.scale.set(scale, scale, scale);
+    }
     // Smoothly decay permanent combat flash light
     if (this.combatFlashLight && this.combatFlashLight.intensity > 0) {
       this.combatFlashLight.intensity = Math.max(0, this.combatFlashLight.intensity - dt * 6.0);
@@ -549,5 +565,77 @@ export class SpaceEnvironment {
       }
     }
     return null;
+  }
+
+  spawnRockDebris(hitPoint, hitDir, count = 8) {
+    const chunkGeom = new THREE.DodecahedronGeometry(0.85, 0);
+    const chunkMat = new THREE.MeshStandardMaterial({
+      color: 0x5a626d,
+      roughness: 0.9,
+      metalness: 0.1
+    });
+
+    for (let i = 0; i < count; i++) {
+      if (this.debrisList.length > 60) {
+        const old = this.debrisList.shift();
+        this.scene.remove(old.mesh);
+      }
+      const mesh = new THREE.Mesh(chunkGeom, chunkMat);
+      mesh.position.copy(hitPoint);
+      this.scene.add(mesh);
+
+      const spread = new THREE.Vector3(
+        (Math.random() - 0.5) * 35.0,
+        (Math.random() - 0.5) * 35.0,
+        (Math.random() - 0.5) * 35.0
+      );
+      const vel = hitDir.clone().multiplyScalar(-18.0).add(spread);
+      const maxLife = 0.5 + Math.random() * 0.4;
+
+      this.debrisList.push({
+        mesh,
+        vel,
+        rot: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8),
+        life: maxLife,
+        maxLife
+      });
+    }
+  }
+
+  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 14.0, carveDepth = 11.0) {
+    if (!asteroid || !asteroid.mesh) return;
+    const geom = asteroid.mesh.geometry;
+    const posAttr = geom.attributes.position;
+    if (!posAttr) return;
+
+    const invMatrix = asteroid.mesh.matrixWorld.clone().invert();
+    const localHit = hitPoint.clone().applyMatrix4(invMatrix);
+    const localDir = hitDir.clone().transformDirection(invMatrix).normalize();
+
+    const v = new THREE.Vector3();
+    let deformedCount = 0;
+
+    for (let i = 0; i < posAttr.count; i++) {
+      v.fromBufferAttribute(posAttr, i);
+      const dist = v.distanceTo(localHit);
+      if (dist < carveRadius) {
+        const falloff = 1.0 - Math.pow(dist / carveRadius, 1.4);
+        const pushDistance = carveDepth * falloff;
+        v.addScaledVector(localDir, pushDistance);
+        posAttr.setXYZ(i, v.x, v.y, v.z);
+        deformedCount++;
+      }
+    }
+
+    if (deformedCount > 0) {
+      posAttr.needsUpdate = true;
+      geom.computeVertexNormals();
+      geom.computeBoundingSphere();
+      if (geom.boundingSphere) {
+        asteroid.boundingSphere.radius = Math.max(10, geom.boundingSphere.radius);
+      }
+    }
+
+    this.spawnRockDebris(hitPoint, hitDir);
   }
 }

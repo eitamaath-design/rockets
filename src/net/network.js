@@ -28,12 +28,16 @@ export class GameNetwork {
     this.sendKill = null;
     this.sendPing = null;
     this.sendPong = null;
+    this.sendLaser = null;
+    this.sendDecoy = null;
 
     // Action listeners registered by game systems
     this.cannonListeners = new Set();
     this.mineListeners = new Set();
     this.hitListeners = new Set();
     this.killListeners = new Set();
+    this.laserListeners = new Set();
+    this.decoyListeners = new Set();
 
     this.pingInterval = null;
     this.stateBroadcastInterval = null;
@@ -53,6 +57,8 @@ export class GameNetwork {
     const killChannel = createActionChannel(this.room, 'kill');
     const pingChannel = createActionChannel(this.room, 'ping');
     const pongChannel = createActionChannel(this.room, 'pong');
+    const laserChannel = createActionChannel(this.room, 'laser');
+    const decoyChannel = createActionChannel(this.room, 'decoy');
 
     this.sendState = stateChannel.send;
     this.sendCannon = cannonChannel.send;
@@ -61,6 +67,8 @@ export class GameNetwork {
     this.sendKill = killChannel.send;
     this.sendPing = pingChannel.send;
     this.sendPong = pongChannel.send;
+    this.sendLaser = laserChannel.send;
+    this.sendDecoy = decoyChannel.send;
 
     // Incoming state packets
     stateChannel.onReceive((data, peerId) => {
@@ -83,6 +91,22 @@ export class GameNetwork {
     });
 
     // Mine drop events
+    
+    // Laser fire events
+    laserChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
+      for (const cb of this.laserListeners) {
+        cb(data, peerId);
+      }
+    });
+
+    // Decoy clone launch events
+    decoyChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
+      for (const cb of this.decoyListeners) {
+        cb(data, peerId);
+      }
+    });
     mineChannel.onReceive((data, peerId) => {
       if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.mineListeners) {
@@ -231,6 +255,28 @@ export class GameNetwork {
     }
   }
 
+  
+  broadcastLaser(laserData) {
+    if (this.sendLaser) {
+      this.sendLaser(laserData);
+    }
+  }
+
+  broadcastDecoy(decoyData) {
+    if (this.sendDecoy) {
+      this.sendDecoy(decoyData);
+    }
+  }
+
+  onLaser(cb) {
+    this.laserListeners.add(cb);
+    return () => this.laserListeners.delete(cb);
+  }
+
+  onDecoy(cb) {
+    this.decoyListeners.add(cb);
+    return () => this.decoyListeners.delete(cb);
+  }
   broadcastMine(mineData) {
     if (this.sendMine) {
       this.sendMine(mineData);
@@ -305,5 +351,7 @@ export class GameNetwork {
     this.mineListeners.clear();
     this.hitListeners.clear();
     this.killListeners.clear();
+    this.laserListeners.clear();
+    this.decoyListeners.clear();
   }
 }

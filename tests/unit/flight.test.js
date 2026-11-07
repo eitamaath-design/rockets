@@ -56,7 +56,7 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.velocity.length()).toBe(0);
   });
 
-  it('should trigger evasive boost on double-tapping thrust with 5.0s cooldown', () => {
+  it('should trigger evasive boost on double-tapping thrust with 2.0s cooldown and 300% surge', () => {
     expect(ship.boostCooldownTimer).toBe(0);
     expect(ship.getSpeed()).toBe(0);
 
@@ -68,20 +68,20 @@ describe('Player Flight Physics & Momentum', () => {
     // Double tap within 150ms window (t = 1150ms)
     const tap2 = ship.triggerThrustPress(1150);
     expect(tap2).toBe(true); // Boost triggered!
-    expect(ship.getSpeed()).toBeGreaterThan(50); // Instant forward surge impulse
-    expect(ship.boostCooldownTimer).toBe(5.0); // 5-second cooldown started
+    expect(ship.getSpeed()).toBeGreaterThan(120); // 300% forward surge impulse (180 u/s)
+    expect(ship.boostCooldownTimer).toBe(2.0); // 2-second cooldown started
 
     // Third tap within cooldown window should be rejected
     const tap3 = ship.triggerThrustPress(1300);
     expect(tap3).toBe(false);
 
-    // Advance time by 5.0s: cooldown expires, boost ready again
-    ship.update(5.1);
+    // Advance time by 2.1s: cooldown expires, boost ready again
+    ship.update(2.1);
     expect(ship.boostCooldownTimer).toBe(0);
 
     // New double tap activates boost again
-    ship.triggerThrustPress(7000);
-    const tapAfterCooldown = ship.triggerThrustPress(7150);
+    ship.triggerThrustPress(4000);
+    const tapAfterCooldown = ship.triggerThrustPress(4150);
     expect(tapAfterCooldown).toBe(true);
   });
 
@@ -115,7 +115,7 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.quaternion.equals(pitchedQuat)).toBe(false);
   });
 
-  it('should take damage, absorb via shield first, allow shields to recharge over 15s, and die when depleted', () => {
+  it('should take damage, absorb via shield first, allow shields to recharge over 15s if not broken, and break permanently if depleted to 0', () => {
     // During spawn invulnerability, damage should be ignored
     expect(ship.invulnerableTimer).toBeGreaterThan(0);
     ship.takeDamage(20);
@@ -129,22 +129,33 @@ describe('Player Flight Physics & Momentum', () => {
     ship.takeDamage(40);
     expect(ship.shield).toBe(60);
     expect(ship.hp).toBe(100);
+    expect(ship.isShieldBroken).toBe(false);
 
-    // Deplete shield (60) + penetrate 40 into hull
-    ship.takeDamage(100);
-    expect(ship.shield).toBe(0);
-    expect(ship.hp).toBe(60);
-
-    // Test shield auto-recharge over 15 seconds (after 2s delay)
+    // Test shield auto-recharge over 15 seconds (after 2s delay) while not broken
     ship.update(2.0); // Wait out 2.0s delay
-    expect(ship.shield).toBe(0);
+    expect(ship.shield).toBe(60);
     ship.update(7.5); // Halfway (7.5s)
-    expect(ship.shield).toBeCloseTo(50, 0);
-    ship.update(7.5); // Full 15.0s recharge
+    expect(ship.shield).toBeGreaterThan(75);
+    ship.update(7.5); // Full recharge
     expect(ship.shield).toBeCloseTo(100, 0);
 
-    // Lethal blow (depletes 100 shield + 60 hull)
-    const isKilled = ship.takeDamage(160);
+    // Deplete shield to 0 (isShieldBroken becomes true) + penetrate 20 into hull
+    ship.takeDamage(120);
+    expect(ship.shield).toBe(0);
+    expect(ship.isShieldBroken).toBe(true);
+    expect(ship.hp).toBe(80);
+
+    // Broken shield NEVER recharges automatically
+    ship.update(20.0);
+    expect(ship.shield).toBe(0);
+    expect(ship.isShieldBroken).toBe(true);
+
+    // Shield Repair restores shield to 100% and resets broken flag
+    ship.shield = 100;
+    ship.isShieldBroken = false;
+
+    // Lethal blow (depletes 100 shield + 80 hull)
+    const isKilled = ship.takeDamage(180);
     expect(isKilled).toBe(true);
     expect(ship.hp).toBe(0);
     expect(ship.isDead).toBe(true);

@@ -18,26 +18,33 @@ export class PlayerShip {
     this.strafeAccel = 40.0;
     this.maxStrafeSpeed = 35.0;
 
-    // Double-tap Thrust Boost (instant dodge surge forward every 5.0s)
-    this.boostCooldown = 5.0; // seconds
+    // Double-tap Thrust Boost (instant dodge surge forward every 2.0s, 300% stronger)
+    this.boostCooldown = 2.0; // seconds
     this.boostCooldownTimer = 0.0;
     this.lastThrustTapTime = 0.0;
-    this.boostImpulse = 60.0; // instant forward velocity boost
+    this.boostImpulse = 180.0; // 300% stronger forward surge impulse
 
     // Rotation speeds (radians per second)
     this.pitchSpeed = 1.6;
     this.yawSpeed = 1.6;
     this.rollSpeed = 2.0;
 
-    // Health, Shield & Score
+    // Health, Shield & Tactical Powerups
     this.maxHp = 100;
     this.hp = 100;
     this.maxShield = 100;
     this.shield = 100;
-    this.shieldRechargeDelay = 2.0; // delay in seconds after damage before shield starts recharging
+    this.isShieldBroken = false; // Once fully depleted, shields do NOT recharge without powerup
+    this.shieldRechargeDelay = 2.0;
     this.shieldRechargeTimer = 0;
-    this.shieldRechargeRate = 100 / 15.0; // 15 seconds full recharge (6.66% per second)
+    this.shieldRechargeRate = 100 / 15.0; // 15 seconds full recharge
     this.mass = 1200; // Ship inertial mass in kg
+
+    // Powerup Active States
+    this.isInvisible = false;
+    this.invisibilityTimer = 0.0;
+    this.hasHologramDecoy = false;
+
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5; // seconds of shield protection on spawn
@@ -76,9 +83,13 @@ export class PlayerShip {
 
     this.hp = this.maxHp;
     this.shield = this.maxShield;
+    this.isShieldBroken = false;
     this.shieldRechargeTimer = 0;
     this.boostCooldownTimer = 0;
     this.lastThrustTapTime = 0;
+    this.isInvisible = false;
+    this.invisibilityTimer = 0;
+    this.hasHologramDecoy = false;
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
@@ -87,23 +98,51 @@ export class PlayerShip {
     this.camera.quaternion.copy(this.quaternion);
   }
 
-  takeDamage(amount, bypassInvuln = false) {
+  takeDamage(amount, weaponType = 'generic', bypassInvuln = false) {
+    if (typeof weaponType === 'boolean') {
+      bypassInvuln = weaponType;
+      weaponType = 'generic';
+    }
+
     if (this.isDead) return false;
     if (!bypassInvuln && this.invulnerableTimer > 0) return false;
 
     // Reset shield recharge cooldown timer
     this.shieldRechargeTimer = this.shieldRechargeDelay;
 
-    // Shield absorbs impact first
-    if (this.shield > 0) {
-      const absorbed = Math.min(this.shield, amount);
-      this.shield -= absorbed;
-      amount -= absorbed;
+    // 1. Calculate weapon effectiveness against Shield vs Hull
+    // Laser is devastating to energy shields (2.4x) but weak vs metallic hull (0.35x)
+    // Cannon is weak vs energy shields (0.35x) but tears apart unshielded hull (2.2x)
+    let shieldDmg = amount;
+    let hullDmg = amount;
+
+    if (weaponType === 'laser') {
+      shieldDmg = amount * 2.4;
+      hullDmg = amount * 0.35;
+    } else if (weaponType === 'cannon') {
+      shieldDmg = amount * 0.35;
+      hullDmg = amount * 2.2;
     }
 
-    // Remainder penetrates into hull
-    if (amount > 0) {
-      this.hp = Math.max(0, this.hp - amount);
+    // 2. Shield absorbs impact first (if active and not broken)
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, shieldDmg);
+      this.shield -= absorbed;
+
+      // Check if shield was FULLY destroyed
+      if (this.shield <= 0) {
+        this.shield = 0;
+        this.isShieldBroken = true; // Permanently broken until Shield Repair powerup is collected!
+      }
+
+      // Remaining unabsorbed damage penetrates into hull
+      const remainderRatio = 1.0 - (absorbed / (shieldDmg || 1.0));
+      if (remainderRatio > 0.01) {
+        this.hp = Math.max(0, this.hp - (hullDmg * remainderRatio));
+      }
+    } else {
+      // Direct hull hit (shields depleted or broken)
+      this.hp = Math.max(0, this.hp - hullDmg);
     }
 
     if (this.hp <= 0) {
@@ -138,12 +177,17 @@ export class PlayerShip {
     return false;
   }
 
+  breakInvisibility() {
+    this.isInvisible = false;
+    this.invisibilityTimer = 0;
+  }
+
   activateBoost() {
     this.boostCooldownTimer = this.boostCooldown;
     const fwd = this.getForwardVector();
     this.velocity.addScaledVector(fwd, this.boostImpulse);
-    // Clamp to max speed with boost allowance
-    const maxBoostSpeed = this.maxSpeed * 1.5;
+    // Allow high velocity surge during 300% boost dodge
+    const maxBoostSpeed = this.maxSpeed * 3.0;
     if (this.velocity.length() > maxBoostSpeed) {
       this.velocity.setLength(maxBoostSpeed);
     }
@@ -167,6 +211,13 @@ export class PlayerShip {
       this.boostCooldownTimer = Math.max(0, this.boostCooldownTimer - dt);
     }
 
+    if (this.invisibilityTimer > 0) {
+      this.invisibilityTimer = Math.max(0, this.invisibilityTimer - dt);
+      if (this.invisibilityTimer <= 0) {
+        this.isInvisible = false;
+      }
+    }
+
     if (this.isDead) {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
@@ -175,8 +226,9 @@ export class PlayerShip {
       return;
     }
 
-    // Dynamic shield recharge: recharges to 100% over 15 seconds if careful
-    if (this.shield < this.maxShield) {
+    // Dynamic shield recharge: recharges to 100% over 15s ONLY IF NOT FULLY DESTROYED
+    // If shield hits 0 (isShieldBroken), it NEVER recharges unless replenished by a power-up!
+    if (!this.isShieldBroken && this.shield < this.maxShield) {
       if (this.shieldRechargeTimer > 0) {
         this.shieldRechargeTimer -= dt;
       } else {

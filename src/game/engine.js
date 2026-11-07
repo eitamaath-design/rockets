@@ -7,6 +7,8 @@ import { RemoteShip } from './remoteShip.js';
 import { ThrusterTrailSystem } from './trail.js';
 import { EngagementBeaconSystem } from './beacon.js';
 import { MeteorSystem } from './meteor.js';
+import { BlackHoleSystem } from './blackhole.js';
+import { PowerUpSystem } from './powerups.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
@@ -40,7 +42,10 @@ export class GameEngine {
     this.mouseSensitivity = 0.0066;
 
     // Firing state
+    this.isFiringLaser = false;
     this.isFiringCannon = false;
+    this.blackHoleSystem = null;
+    this.powerUpSystem = null;
 
     // State broadcast timer (20Hz)
     this.broadcastTimer = 0;
@@ -100,6 +105,8 @@ export class GameEngine {
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
     this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv);
+    this.blackHoleSystem = new BlackHoleSystem(this.scene, this.spaceEnv);
+    this.powerUpSystem = new PowerUpSystem(this.scene, this.blackHoleSystem);
 
     // Pre-warm and compile all WebGL materials and shaders upfront
     // This completely eliminates in-game shader compilation freezes when shots are fired!
@@ -368,17 +375,33 @@ export class GameEngine {
       // Dynamic engine audio updates (smooth thrust & reverse brake sound)
       audio.updateEngine(this.playerShip.input.thrust, this.playerShip.input.brake, dt);
 
-      // 2. Continuous Cannon Firing
-      if (this.isFiringCannon) {
+      // 2. Dual Forward Weapon Firing
+      if (this.isFiringLaser || this.isFiringCannon) {
         this.timeSinceLastCombat = 0;
       }
-      this.weaponsSystem.triggerCannon(this.isFiringCannon, this.playerShip, now);
+      this.weaponsSystem.triggerPrimary(this.isFiringLaser, this.playerShip, now);
+      this.weaponsSystem.triggerSecondary(this.isFiringCannon, this.playerShip, now);
 
       // 3. Update Weapons & Explosions
       this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
         this.timeSinceLastCombat = 0;
         this.cockpit.triggerDamageFlash();
       });
+
+      // Battle Royale: Encroaching Cosmic Black Hole & Safe Zone Gravity
+      if (this.blackHoleSystem) {
+        this.blackHoleSystem.update(dt, this.playerShip, this.remoteShips, this.spaceEnv, this.meteorSystem, (notice) => {
+          this.cockpit.triggerDamageFlash();
+          this.onDeathNotice(notice);
+        });
+      }
+
+      // Tactical Space Power-Ups (Shield Replenish, Cloak Invisibility, Hologram Decoy)
+      if (this.powerUpSystem) {
+        this.powerUpSystem.update(dt, this.playerShip, (notice) => {
+          this.onDeathNotice(notice);
+        });
+      }
 
       // 4. Update Remote Ships from network packets
       for (const [peerId, peerData] of this.network.peers.entries()) {
@@ -497,7 +520,8 @@ export class GameEngine {
           isDead: this.playerShip.isDead,
           score: this.playerShip.score,
           kills: this.playerShip.kills,
-          deaths: this.playerShip.deaths
+          deaths: this.playerShip.deaths,
+          isInvisible: this.playerShip.isInvisible
         });
       }
 
@@ -512,12 +536,19 @@ export class GameEngine {
         maxShield: this.playerShip.maxShield,
         speed: Math.round(this.playerShip.getSpeed()),
         maxSpeed: Math.round(this.playerShip.maxSpeed),
+        laserEnergy: Math.round(this.weaponsSystem.laserEnergy),
+        laserMaxEnergy: this.weaponsSystem.laserMaxEnergy,
+        laserRecharging: (this.weaponsSystem.laserCooldownTimer <= 0 && this.weaponsSystem.laserEnergy < this.weaponsSystem.laserMaxEnergy),
         cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
         cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,
         cannonRecharging: (this.weaponsSystem.cannonCooldownTimer <= 0 && this.weaponsSystem.cannonEnergy < this.weaponsSystem.cannonMaxEnergy),
-        mineCharges: this.weaponsSystem.mineCharges,
-        mineMaxCharges: this.weaponsSystem.mineMaxCharges,
-        mineRechargeProgress: this.weaponsSystem.mineRechargeProgress,
+        safeRadius: Math.round(this.blackHoleSystem ? this.blackHoleSystem.getSafeRadius() : 1000),
+        matchTimeRemaining: Math.max(0, Math.round(this.blackHoleSystem ? this.blackHoleSystem.getMatchTimeRemaining() : 600)),
+        isShieldBroken: this.playerShip.isShieldBroken,
+        isInvisible: this.playerShip.isInvisible,
+        hasHologramDecoy: this.playerShip.hasHologramDecoy,
+        alivePilotsCount: [this.playerShip, ...this.remoteShips.values()].filter(s => !s.isDead).length,
+        isVictoryRoyale: (this.network.peers.size > 0 && !this.playerShip.isDead && Array.from(this.remoteShips.values()).every(r => r.isDead)),
         isDead: this.playerShip.isDead,
         respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
         invulnerable: (this.playerShip.invulnerableTimer > 0),
@@ -543,6 +574,8 @@ export class GameEngine {
     if (this.thrusterTrails) this.thrusterTrails.cleanup();
     if (this.beaconSystem) this.beaconSystem.cleanup();
     if (this.meteorSystem) this.meteorSystem.cleanup();
+    if (this.blackHoleSystem) this.blackHoleSystem.cleanup();
+    if (this.powerUpSystem) this.powerUpSystem.cleanup();
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
     }

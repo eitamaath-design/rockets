@@ -255,6 +255,7 @@ export class RemoteShip {
     }
 
     this.isDead = !!state.isDead;
+    this.isInvisible = !!state.isInvisible;
     this.isThrusting = !!state.thrust;
     this.strafeState = state.strafe || 0;
 

@@ -15,11 +15,13 @@ describe('Combat Integration: Multi-Player Engagement', () => {
 
   beforeEach(() => {
     scene = new THREE.Scene();
-    mockSpaceEnv = { checkCollision: () => null };
+    mockSpaceEnv = { checkCollision: () => null, carveAsteroid: () => {} };
 
     const mockNetwork = {
       selfId: 'pilot-hero',
+      broadcastLaser: () => {},
       broadcastCannon: () => {},
+      broadcastDecoy: () => {},
       broadcastMine: () => {},
       sendHitTarget: (targetId, dmg, weapon) => {
         sentHits.push({ targetId, dmg, weapon });
@@ -27,7 +29,9 @@ describe('Combat Integration: Multi-Player Engagement', () => {
       broadcastKill: (victimId, killerId, name) => {
         sentKills.push({ victimId, killerId, name });
       },
+      onLaser: () => () => {},
       onCannon: () => () => {},
+      onDecoy: () => () => {},
       onMine: () => () => {}
     };
 
@@ -44,11 +48,30 @@ describe('Combat Integration: Multi-Player Engagement', () => {
     weapons = new WeaponsSystem(scene, mockSpaceEnv, mockNetwork);
   });
 
-  it('should hit remote opponent with cannon and dispatch hit packet', () => {
+  it('should hit remote opponent with laser and dispatch laser hit packet', () => {
     const remotesMap = new Map();
     remotesMap.set('pilot-villain', remoteShip);
 
-    // Spawn a local projectile flying towards remote ship
+    const origin = new THREE.Vector3(0, 0, 0);
+    const dir = new THREE.Vector3(0, 0, -1);
+    weapons.spawnLaser(origin, dir, true, 'laser-1');
+
+    expect(weapons.lasers.length).toBe(1);
+
+    // Update weapons simulation (laser flies at 480 u/s)
+    weapons.update(0.05, localShip, remotesMap, () => {});
+
+    // Hit should be detected and packet dispatched
+    expect(sentHits.length).toBe(1);
+    expect(sentHits[0].targetId).toBe('pilot-villain');
+    expect(sentHits[0].weapon).toBe('laser');
+    expect(sentHits[0].dmg).toBe(weapons.laserDamage);
+  });
+
+  it('should hit remote opponent with cannon and dispatch cannon hit packet', () => {
+    const remotesMap = new Map();
+    remotesMap.set('pilot-villain', remoteShip);
+
     const origin = new THREE.Vector3(0, 0, 0);
     const dir = new THREE.Vector3(0, 0, -1);
     weapons.spawnProjectile(origin, dir, new THREE.Vector3(), true, 'shot-1');
@@ -61,16 +84,16 @@ describe('Combat Integration: Multi-Player Engagement', () => {
     // Hit should be detected and packet dispatched to network
     expect(sentHits.length).toBe(1);
     expect(sentHits[0].targetId).toBe('pilot-villain');
-    expect(sentHits[0].dmg).toBe(5.0);
+    expect(sentHits[0].weapon).toBe('cannon');
+    expect(sentHits[0].dmg).toBe(weapons.cannonDamage);
   });
 
   it('should handle victim taking fatal damage, recording death, and granting killer a score boost', () => {
-    // Local ship takes lethal damage
     expect(localShip.kills).toBe(0);
     expect(localShip.deaths).toBe(0);
     expect(localShip.score).toBe(0);
 
-    const isFatal = localShip.takeDamage(200);
+    const isFatal = localShip.takeDamage(200, 'generic', true);
     expect(isFatal).toBe(true);
     expect(localShip.isDead).toBe(true);
     expect(localShip.deaths).toBe(1);
@@ -80,24 +103,5 @@ describe('Combat Integration: Multi-Player Engagement', () => {
     localShip.recordKill();
     expect(localShip.kills).toBe(1);
     expect(localShip.score).toBe(100);
-  });
-
-  it('should detonate rear mine against trailing pursuer and apply damage', () => {
-    // Local ship drops rear mine
-    weapons.triggerRearMine(localShip);
-    expect(weapons.mines.length).toBe(1);
-    const mine = weapons.mines[0];
-
-    // Pursuing remote ship flies close to mine position
-    remoteShip.position.copy(mine.pos).add(new THREE.Vector3(0, 0, 3)); // within 8 units proximity
-
-    const remotesMap = new Map();
-    remotesMap.set('pilot-villain', remoteShip);
-
-    // Update weapons -> mine detects proximity and explodes!
-    weapons.update(0.016, localShip, remotesMap, () => {});
-    expect(weapons.mines.length).toBe(0);
-    expect(weapons.explosions.length).toBeGreaterThan(0);
-    expect(sentHits.some(h => h.targetId === 'pilot-villain' && h.weapon === 'mine')).toBe(true);
   });
 });

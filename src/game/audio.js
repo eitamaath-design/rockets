@@ -250,6 +250,68 @@ export class AudioManager {
   /**
    * Front Cannon projectile blast: sharp transient + sweeping laser chirp
    */
+  /**
+   * High-Energy Forward Laser Beam: high-frequency ionized burst with resonant zap
+   */
+  playLaserShot(isLocal = true, pos = null) {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
+
+    // High harmonic sweep
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(isLocal ? 1650 : 1200, now);
+    osc.frequency.exponentialRampToValueAtTime(140, now + 0.18);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(3200, now);
+    filter.frequency.exponentialRampToValueAtTime(450, now + 0.18);
+    filter.Q.setValueAtTime(4.0, now);
+
+    const vol = isLocal ? 0.42 : 0.26;
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+
+    osc.start(now);
+    osc.stop(now + 0.20);
+  }
+
+  /**
+   * Hologram Decoy Deployment: shimmering phase-shift pulse
+   */
+  playDecoyDeploy() {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.linearRampToValueAtTime(1100, now + 0.15);
+    osc.frequency.linearRampToValueAtTime(880, now + 0.35);
+
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
+
+    osc.connect(gain);
+    gain.connect(this.compressor);
+
+    osc.start(now);
+    osc.stop(now + 0.42);
+  }
+
   playCannonShot(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();
