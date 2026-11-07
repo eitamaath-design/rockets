@@ -72,7 +72,10 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
     // Click Diagnostics button and verify modal opens with telemetry
     await page.click('#hud-btn-diag');
     await expect(page.locator('#hud-diag-backdrop')).toBeVisible();
-    await expect(page.locator('#diag-text-display')).toContainText('ROCKETS CLIENT DIAGNOSTICS');
+    const diagText = await page.locator('#diag-text-display').textContent();
+    console.log('--- DIAGNOSTIC TEXT FROM TEST ---\n', diagText);
+    expect(diagText).toContain('ROCKETS CLIENT DIAGNOSTICS');
+    expect(diagText).toContain('Is Engine Running: true');
     await page.click('#btn-close-diag');
     await expect(page.locator('#hud-diag-backdrop')).not.toBeVisible();
   });

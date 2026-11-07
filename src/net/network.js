@@ -1,5 +1,6 @@
 import { joinRoom, selfId } from '@trystero-p2p/nostr';
 import { lobbyService } from './lobby.js';
+import { createActionChannel } from './actions.js';
 
 const APP_ID = 'rockets-3d-space-shooter';
 
@@ -44,24 +45,24 @@ export class GameNetwork {
     this.room = joinRoom({ appId: APP_ID }, this.roomId);
 
     // Initialize WebRTC Actions
-    const [sendState, getState] = this.room.makeAction('state');
-    const [sendCannon, getCannon] = this.room.makeAction('cannon');
-    const [sendMine, getMine] = this.room.makeAction('mine');
-    const [sendHit, getHit] = this.room.makeAction('hit');
-    const [sendKill, getKill] = this.room.makeAction('kill');
-    const [sendPing, getPing] = this.room.makeAction('ping');
-    const [sendPong, getPong] = this.room.makeAction('pong');
+    const stateChannel = createActionChannel(this.room, 'state');
+    const cannonChannel = createActionChannel(this.room, 'cannon');
+    const mineChannel = createActionChannel(this.room, 'mine');
+    const hitChannel = createActionChannel(this.room, 'hit');
+    const killChannel = createActionChannel(this.room, 'kill');
+    const pingChannel = createActionChannel(this.room, 'ping');
+    const pongChannel = createActionChannel(this.room, 'pong');
 
-    this.sendState = sendState;
-    this.sendCannon = sendCannon;
-    this.sendMine = sendMine;
-    this.sendHit = sendHit;
-    this.sendKill = sendKill;
-    this.sendPing = sendPing;
-    this.sendPong = sendPong;
+    this.sendState = stateChannel.send;
+    this.sendCannon = cannonChannel.send;
+    this.sendMine = mineChannel.send;
+    this.sendHit = hitChannel.send;
+    this.sendKill = killChannel.send;
+    this.sendPing = pingChannel.send;
+    this.sendPong = pongChannel.send;
 
     // Incoming state packets
-    getState((data, peerId) => {
+    stateChannel.onReceive((data, peerId) => {
       if (!this.peers.has(peerId)) {
         this.peers.set(peerId, { id: peerId, ping: 30, lastSeen: Date.now() });
       }
@@ -71,63 +72,75 @@ export class GameNetwork {
     });
 
     // Cannon fire events
-    getCannon((data, peerId) => {
+    cannonChannel.onReceive((data, peerId) => {
       for (const cb of this.cannonListeners) {
         cb(data, peerId);
       }
     });
 
     // Mine drop events
-    getMine((data, peerId) => {
+    mineChannel.onReceive((data, peerId) => {
       for (const cb of this.mineListeners) {
         cb(data, peerId);
       }
     });
 
     // Damage / Hit events
-    getHit((data, peerId) => {
+    hitChannel.onReceive((data, peerId) => {
       for (const cb of this.hitListeners) {
         cb(data, peerId);
       }
     });
 
     // Kill events
-    getKill((data, peerId) => {
+    killChannel.onReceive((data, peerId) => {
       for (const cb of this.killListeners) {
         cb(data, peerId);
       }
     });
 
     // Ping / Pong for latency measurement
-    getPing((data, peerId) => {
+    pingChannel.onReceive((data, peerId) => {
       if (this.sendPong) {
         this.sendPong({ t: data.t }, peerId);
       }
     });
 
-    getPong((data, peerId) => {
+    pongChannel.onReceive((data, peerId) => {
       if (data && data.t && this.peers.has(peerId)) {
         const rtt = Math.max(1, Date.now() - data.t);
         this.peers.get(peerId).ping = rtt;
       }
     });
 
-    // Peer Join / Leave callbacks
-    this.room.onPeerJoin(peerId => {
+    // Peer Join / Leave callbacks (supports both modern setter and legacy function APIs)
+    const handlePeerJoin = (peerId) => {
       console.log(`[Mesh] Peer connected: ${peerId}`);
       this.peers.set(peerId, { id: peerId, ping: 40, lastSeen: Date.now() });
       this.updateMasterElection();
       this.onPeerJoined(peerId);
       this.onCombatLog(`🛰️ Pilot joined the mesh: ${peerId.slice(0, 5)}`);
-    });
+    };
 
-    this.room.onPeerLeave(peerId => {
+    const handlePeerLeave = (peerId) => {
       console.log(`[Mesh] Peer disconnected: ${peerId}`);
       this.peers.delete(peerId);
       this.updateMasterElection();
       this.onPeerLeft(peerId);
       this.onCombatLog(`💨 Pilot left the mesh: ${peerId.slice(0, 5)}`);
-    });
+    };
+
+    if (typeof this.room.onPeerJoin === 'function') {
+      this.room.onPeerJoin(handlePeerJoin);
+    } else {
+      this.room.onPeerJoin = handlePeerJoin;
+    }
+
+    if (typeof this.room.onPeerLeave === 'function') {
+      this.room.onPeerLeave(handlePeerLeave);
+    } else {
+      this.room.onPeerLeave = handlePeerLeave;
+    }
 
     // Initial master election check and immediate keep-alive activation
     this.updateMasterElection();

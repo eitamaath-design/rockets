@@ -311,7 +311,11 @@ class AppRouter {
     this.hud = new GameHUD(gameContainer, this.engine);
 
     // Join room & start engine
-    this.network.join();
+    try {
+      this.network.join();
+    } catch (netErr) {
+      console.error('[Network] joinRoom exception:', netErr?.message || netErr);
+    }
     this.engine.start();
   }
 }

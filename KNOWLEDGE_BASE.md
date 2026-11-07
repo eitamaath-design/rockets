@@ -47,7 +47,7 @@ This document serves as the permanent master reference for the **Rockets** multi
 
 | Decision Area | Choice Made | Rationale & Trade-offs |
 | :--- | :--- | :--- |
-| **P2P Signaling** | Trystero (`@trystero-p2p/nostr` + BitTorrent fallback) | Eliminates expensive backend signaling servers and user authentication. Provides instant, zero-cost matchmaking over open decentralized relays. |
+| **P2P Signaling** | Trystero (`@trystero-p2p/nostr` + BitTorrent fallback) with `createActionChannel` | Eliminates expensive backend signaling servers and user authentication. Uses universal action channel adapter supporting modern Trystero v0.26 action objects (`{ send, onReceive }`) and peer lifecycle property setters (`onPeerJoin`, `onPeerLeave`). |
 | **Session Discovery & TTL** | Ephemeral Lobby Broadcast with TTL expiration | The elected master broadcasts session metadata every 4s with a 10s TTL. If inactive, the lobby entry expires naturally without server cleanup. |
 | **Master Election Protocol** | Deterministic Sorted Peer UUID Leader Election | Ensures exactly one master peer is responsible for lobby TTL refreshes. When the master leaves, remaining peers instantly re-elect the next peer without any delay or collision. |
 | **Rendering Engine** | Three.js (WebGL) | Zero external engine bloat, superior performance on desktop and mobile, full control over custom shaders, procedural starfields, and cockpit geometry. |

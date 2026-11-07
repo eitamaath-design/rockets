@@ -6,7 +6,7 @@
 class DiagnosticLogger {
   constructor() {
     this.logs = [];
-    this.maxLogs = 250;
+    this.maxLogs = 500;
     this.engineRef = null;
     this.startTime = Date.now();
     this.webglInfo = null;

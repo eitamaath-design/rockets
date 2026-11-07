@@ -1,4 +1,5 @@
 import { joinRoom, selfId } from '@trystero-p2p/nostr';
+import { createActionChannel } from './actions.js';
 
 const APP_ID = 'rockets-3d-space-shooter';
 const LOBBY_ROOM_ID = 'rockets_public_directory_v1';
@@ -25,13 +26,13 @@ class LobbyService {
     try {
       this.lobbyRoom = joinRoom({ appId: APP_ID }, LOBBY_ROOM_ID);
 
-      const [sendHb, getHb] = this.lobbyRoom.makeAction('room_heartbeat');
-      const [sendQ, getQ] = this.lobbyRoom.makeAction('query_rooms');
+      const heartbeatChannel = createActionChannel(this.lobbyRoom, 'room_heartbeat');
+      const queryChannel = createActionChannel(this.lobbyRoom, 'query_rooms');
 
-      this.sendHeartbeat = sendHb;
-      this.sendQuery = sendQ;
+      this.sendHeartbeat = heartbeatChannel.send;
+      this.sendQuery = queryChannel.send;
 
-      getHb((data, peerId) => {
+      heartbeatChannel.onReceive((data, peerId) => {
         if (!data || !data.roomId) return;
         this.activeRooms.set(data.roomId, {
           ...data,
@@ -41,7 +42,7 @@ class LobbyService {
         this.notifyListeners();
       });
 
-      getQ((data, peerId) => {
+      queryChannel.onReceive((data, peerId) => {
         // If we are hosting a match and are the designated master, respond immediately
         if (this.currentHostingMatch && this.currentHostingMatch.isMaster()) {
           this.broadcastCurrentRoom();
