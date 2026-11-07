@@ -418,6 +418,37 @@ export class AudioManager {
     osc.start(now);
     osc.stop(now + 1.0);
   }
+
+  /**
+   * Fiery rogue meteor screaming past close to cockpit
+   */
+  playMeteorFlyby() {
+    if (!this.ctx || this.isMuted || !this.noiseBuffer) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(180, now);
+    filter.frequency.exponentialRampToValueAtTime(680, now + 0.35);
+    filter.frequency.exponentialRampToValueAtTime(120, now + 1.1);
+    filter.Q.setValueAtTime(1.8, now);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.45, now + 0.35);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.15);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.compressor);
+
+    noise.start(now);
+    noise.stop(now + 1.2);
+  }
 }
 
 export const audio = new AudioManager();

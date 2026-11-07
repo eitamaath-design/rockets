@@ -38,90 +38,150 @@ export class RemoteShip {
 
   createShipMesh() {
     const hullMat = new THREE.MeshStandardMaterial({
-      color: 0x992222, // Opponent red / crimson fighter
+      color: 0x9e2424, // Opponent crimson stealth armor
       roughness: 0.35,
-      metalness: 0.8,
+      metalness: 0.85,
       flatShading: true
     });
 
-    const darkMat = new THREE.MeshStandardMaterial({
-      color: 0x22252a,
-      roughness: 0.5,
-      metalness: 0.6
+    const darkAlloyMat = new THREE.MeshStandardMaterial({
+      color: 0x181c24,
+      roughness: 0.45,
+      metalness: 0.80,
+      flatShading: true
     });
 
     const canopyMat = new THREE.MeshStandardMaterial({
       color: 0x00d4ff,
-      roughness: 0.1,
-      metalness: 0.9,
-      emissive: 0x004466,
-      emissiveIntensity: 0.5
+      roughness: 0.12,
+      metalness: 0.95,
+      emissive: 0x003b52,
+      emissiveIntensity: 0.6
     });
 
-    // 1. Main Fuselage
-    const fuselageGeom = new THREE.ConeGeometry(1.2, 5.0, 5);
-    fuselageGeom.rotateX(Math.PI / 2);
-    const fuselage = new THREE.Mesh(fuselageGeom, hullMat);
-    this.group.add(fuselage);
+    const glowAccentMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff
+    });
 
-    // 2. Cockpit Canopy
-    const canopyGeom = new THREE.ConeGeometry(0.55, 2.2, 4);
-    canopyGeom.rotateX(Math.PI / 2);
+    // 1. Chiseled Forward Stealth Nosecone (Faceted needle nose)
+    const noseGeom = new THREE.ConeGeometry(0.75, 2.6, 5);
+    noseGeom.rotateX(-Math.PI / 2);
+    const nose = new THREE.Mesh(noseGeom, hullMat);
+    nose.position.set(0, 0, -2.1);
+    this.group.add(nose);
+
+    // Forward Canard Wings
+    const canardGeom = new THREE.BoxGeometry(1.8, 0.04, 0.6);
+    const canards = new THREE.Mesh(canardGeom, darkAlloyMat);
+    canards.position.set(0, 0.05, -1.5);
+    this.group.add(canards);
+
+    // 2. Main Center Hull Chassis
+    const hullGeom = new THREE.BoxGeometry(1.4, 0.8, 3.2);
+    const mainHull = new THREE.Mesh(hullGeom, hullMat);
+    mainHull.position.set(0, 0, 0.2);
+    this.group.add(mainHull);
+
+    // Lateral Recessed Plasma Intake Cowlings
+    const intakeGeom = new THREE.BoxGeometry(0.35, 0.55, 1.8);
+    const leftIntake = new THREE.Mesh(intakeGeom, darkAlloyMat);
+    leftIntake.position.set(-0.85, -0.05, 0.1);
+    this.group.add(leftIntake);
+
+    const rightIntake = leftIntake.clone();
+    rightIntake.position.set(0.85, -0.05, 0.1);
+    this.group.add(rightIntake);
+
+    // 3. Faceted Stealth Cockpit Canopy
+    const canopyGeom = new THREE.ConeGeometry(0.48, 1.8, 5);
+    canopyGeom.rotateX(-Math.PI / 2);
     const canopy = new THREE.Mesh(canopyGeom, canopyMat);
-    canopy.position.set(0, 0.45, -0.4);
+    canopy.position.set(0, 0.44, -0.4);
     this.group.add(canopy);
 
-    // 3. Swept Wings
-    const wingGeom = new THREE.BoxGeometry(5.2, 0.1, 1.8);
+    // 4. Swept Compound Delta Wings
+    const wingGeom = new THREE.BoxGeometry(5.8, 0.08, 2.0);
     const wing = new THREE.Mesh(wingGeom, hullMat);
-    wing.position.set(0, -0.1, 0.5);
-    wing.rotation.y = 0.1;
+    wing.position.set(0, -0.08, 0.6);
     this.group.add(wing);
 
-    // Wingtip fins
-    const finGeom = new THREE.BoxGeometry(0.1, 1.2, 1.4);
-    const leftFin = new THREE.Mesh(finGeom, darkMat);
-    leftFin.position.set(-2.55, 0.45, 0.6);
+    // Underwing Heavy Plasma Cannon Pods
+    const podGeom = new THREE.CylinderGeometry(0.10, 0.12, 1.6, 8);
+    podGeom.rotateX(Math.PI / 2);
+    const leftPod = new THREE.Mesh(podGeom, darkAlloyMat);
+    leftPod.position.set(-1.8, -0.22, 0.3);
+    this.group.add(leftPod);
+
+    const rightPod = leftPod.clone();
+    rightPod.position.set(1.8, -0.22, 0.3);
+    this.group.add(rightPod);
+
+    // Wingtip Plasma Accelerator Rings
+    const ringGeom = new THREE.TorusGeometry(0.12, 0.02, 6, 12);
+    const leftRing = new THREE.Mesh(ringGeom, glowAccentMat);
+    leftRing.position.set(-1.8, -0.22, -0.5);
+    this.group.add(leftRing);
+
+    const rightRing = leftRing.clone();
+    rightRing.position.set(1.8, -0.22, -0.5);
+    this.group.add(rightRing);
+
+    // 5. Twin Canted Vertical Stabilizer Tailfins (Stealth V-Tail)
+    const finGeom = new THREE.BoxGeometry(0.08, 1.25, 1.2);
+    const leftFin = new THREE.Mesh(finGeom, darkAlloyMat);
+    leftFin.position.set(-0.65, 0.62, 1.2);
+    leftFin.rotation.z = -0.32; // canted outwards
     this.group.add(leftFin);
 
     const rightFin = leftFin.clone();
-    rightFin.position.set(2.55, 0.45, 0.6);
+    rightFin.position.set(0.65, 0.62, 1.2);
+    rightFin.rotation.z = 0.32;
     this.group.add(rightFin);
 
-    // 4. Rear Engine Thruster Nozzles
-    const nozzleGeom = new THREE.CylinderGeometry(0.4, 0.5, 0.8, 8);
+    // 6. Dual Heavy Ion Thruster Nozzles
+    const nozzleGeom = new THREE.CylinderGeometry(0.32, 0.42, 0.75, 10);
     nozzleGeom.rotateX(Math.PI / 2);
 
-    const leftNozzle = new THREE.Mesh(nozzleGeom, darkMat);
-    leftNozzle.position.set(-0.7, 0, 2.3);
+    const leftNozzle = new THREE.Mesh(nozzleGeom, darkAlloyMat);
+    leftNozzle.position.set(-0.48, 0, 1.95);
     this.group.add(leftNozzle);
 
     const rightNozzle = leftNozzle.clone();
-    rightNozzle.position.set(0.7, 0, 2.3);
+    rightNozzle.position.set(0.48, 0, 1.95);
     this.group.add(rightNozzle);
 
-    // 5. Thruster Exhaust Flares (Visible when thrusting)
-    const flareGeom = new THREE.ConeGeometry(0.35, 2.2, 8);
+    // Glowing Ion Thruster Exhaust Coils
+    const nozzleRingGeom = new THREE.TorusGeometry(0.30, 0.03, 6, 12);
+    const leftNozzleRing = new THREE.Mesh(nozzleRingGeom, glowAccentMat);
+    leftNozzleRing.position.set(-0.48, 0, 2.32);
+    this.group.add(leftNozzleRing);
+
+    const rightNozzleRing = leftNozzleRing.clone();
+    rightNozzleRing.position.set(0.48, 0, 2.32);
+    this.group.add(rightNozzleRing);
+
+    // 7. Dynamic Plasma Thruster Exhaust Flares (Visible during active thrust)
+    const flareGeom = new THREE.ConeGeometry(0.32, 2.6, 8);
     flareGeom.rotateX(-Math.PI / 2);
     const flareMat = new THREE.MeshBasicMaterial({
-      color: 0x00aaff,
+      color: 0x00c8ff,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.90,
       blending: THREE.AdditiveBlending
     });
 
     const leftFlare = new THREE.Mesh(flareGeom, flareMat);
-    leftFlare.position.set(-0.7, 0, 3.4);
+    leftFlare.position.set(-0.48, 0, 3.6);
     this.group.add(leftFlare);
     this.engineFlares.push(leftFlare);
 
     const rightFlare = leftFlare.clone();
-    rightFlare.position.set(0.7, 0, 3.4);
+    rightFlare.position.set(0.48, 0, 3.6);
     this.group.add(rightFlare);
     this.engineFlares.push(rightFlare);
 
-    // 6. Shield Dome (flashes when taking hits)
-    const shieldGeom = new THREE.SphereGeometry(3.2, 16, 12);
+    // 8. Shield Dome (flashes when taking hits)
+    const shieldGeom = new THREE.SphereGeometry(3.4, 16, 12);
     const shieldMat = new THREE.MeshBasicMaterial({
       color: 0x00e5ff,
       wireframe: true,

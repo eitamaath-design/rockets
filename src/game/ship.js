@@ -79,8 +79,9 @@ export class PlayerShip {
     this.camera.quaternion.copy(this.quaternion);
   }
 
-  takeDamage(amount) {
-    if (this.isDead || this.invulnerableTimer > 0) return false;
+  takeDamage(amount, bypassInvuln = false) {
+    if (this.isDead) return false;
+    if (!bypassInvuln && this.invulnerableTimer > 0) return false;
 
     // Reset shield recharge cooldown timer
     this.shieldRechargeTimer = this.shieldRechargeDelay;

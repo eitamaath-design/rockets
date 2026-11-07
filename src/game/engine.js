@@ -6,6 +6,7 @@ import { WeaponsSystem } from './weapons.js';
 import { RemoteShip } from './remoteShip.js';
 import { ThrusterTrailSystem } from './trail.js';
 import { EngagementBeaconSystem } from './beacon.js';
+import { MeteorSystem } from './meteor.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
@@ -48,6 +49,7 @@ export class GameEngine {
     // Subsystem instances
     this.thrusterTrails = null;
     this.beaconSystem = null;
+    this.meteorSystem = null;
     this.trailEmitTimer = 0;
     this.timeSinceLastCombat = 0;
     this.beaconPulseTimer = 0;
@@ -97,6 +99,13 @@ export class GameEngine {
 
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
+    this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv);
+
+    // Pre-warm and compile all WebGL materials and shaders upfront
+    // This completely eliminates in-game shader compilation freezes when shots are fired!
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } catch (_) {}
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
   }
@@ -391,11 +400,13 @@ export class GameEngine {
       this.trailEmitTimer += dt;
       if (this.trailEmitTimer >= 0.12) {
         this.trailEmitTimer = 0;
-        if (this.playerShip.input.thrust || this.playerShip.getSpeed() > 10) {
+        // Thruster trails are emitted ONLY when active engine propulsion is engaged
+        // If drifting with momentum, no trail is left behind
+        if (this.playerShip.input.thrust) {
           this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false);
         }
         for (const remote of this.remoteShips.values()) {
-          if (!remote.isDead && (remote.isThrusting || remote.targetVelocity.length() > 10)) {
+          if (!remote.isDead && remote.isThrusting) {
             const rFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(remote.quaternion);
             this.thrusterTrails.emit(remote.position, rFwd, true);
           }
@@ -403,6 +414,14 @@ export class GameEngine {
       }
       this.thrusterTrails.update(dt);
       this.beaconSystem.update(dt);
+
+      // 7. Chaotic Fiery Meteor Event (Every 10 seconds)
+      if (this.meteorSystem) {
+        this.meteorSystem.update(dt, this.playerShip, this.remoteShips, (notice) => {
+          this.cockpit.triggerDamageFlash();
+          this.onDeathNotice(notice);
+        });
+      }
 
       // 7. 5-Second Diagnostics Telemetry Stats
       this.netStatsTimer += dt;
@@ -501,6 +520,7 @@ export class GameEngine {
     if (this.weaponsSystem) this.weaponsSystem.cleanup();
     if (this.thrusterTrails) this.thrusterTrails.cleanup();
     if (this.beaconSystem) this.beaconSystem.cleanup();
+    if (this.meteorSystem) this.meteorSystem.cleanup();
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
     }

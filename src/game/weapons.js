@@ -291,11 +291,6 @@ export class WeaponsSystem {
     tail.position.set(0, 0, 1.15);
     group.add(tail);
 
-    // 4. Fiery illuminating point light
-    const light = new THREE.PointLight(isLocal ? 0xff8800 : 0xff2244, 2.8, 22);
-    light.position.set(0, 0, 0.5);
-    group.add(light);
-
     this.scene.add(group);
     this.projectiles.push({
       mesh: group,
@@ -320,14 +315,9 @@ export class WeaponsSystem {
     const mesh = new THREE.Mesh(this.mineGeom, this.mineMat);
     mesh.position.copy(pos);
 
-    // Flashing red beacon point light
-    const light = new THREE.PointLight(0xff2200, 2.5, 30);
-    mesh.add(light);
-
     this.scene.add(mesh);
     this.mines.push({
       mesh,
-      light,
       pos: mesh.position,
       life: this.mineFuseTime, // 3.0s fuse
       ownerId,
@@ -352,14 +342,16 @@ export class WeaponsSystem {
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.copy(pos);
 
-    const light = new THREE.PointLight(color, 4.0, radius * 3.5);
-    mesh.add(light);
-
     this.scene.add(mesh);
     audio.playExplosion(radius > 15 ? 1.5 : 0.8);
+
+    // Trigger pre-allocated sector combat flash (prevents WebGL shader recompilations)
+    if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {
+      this.spaceEnv.triggerCombatFlash(pos, color, radius > 15 ? 4.5 : 2.5);
+    }
+
     this.explosions.push({
       mesh,
-      light,
       maxLife: 0.45,
       life: 0.45,
       maxRadius: radius
@@ -417,8 +409,6 @@ export class WeaponsSystem {
       if (!destroyed && !p.isLocal && !localShip.isDead && localShip.invulnerableTimer <= 0) {
         if (p.mesh.position.distanceToSquared(localShip.position) < 16.0) { // radius ~4
           this.spawnExplosion(p.mesh.position, 6, 0xff2200);
-          localShip.takeDamage(this.cannonDamage);
-          if (onDamageEvent) onDamageEvent(this.cannonDamage, 'cannon', null);
           destroyed = true;
         }
       }
@@ -446,11 +436,9 @@ export class WeaponsSystem {
       const m = this.mines[i];
       m.life -= dt;
 
-      // Pulse beacon light and spin
+      // Spin mine
       m.mesh.rotation.y += dt * 2.0;
       m.mesh.rotation.x += dt * 1.5;
-      const flash = Math.sin(m.life * 12.0) > 0;
-      m.light.intensity = flash ? 3.5 : 0.8;
 
       let shouldDetonate = false;
       let detonationReason = 'timer';
@@ -530,7 +518,6 @@ export class WeaponsSystem {
       const scale = 1.0 + progress * 2.5;
       e.mesh.scale.set(scale, scale, scale);
       e.mesh.material.opacity = Math.max(0, 1.0 - progress);
-      e.light.intensity = Math.max(0, (1.0 - progress) * 4.0);
 
       if (e.life <= 0) {
         this.scene.remove(e.mesh);

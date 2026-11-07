@@ -48,17 +48,12 @@ export class EngagementBeaconSystem {
     const ringMesh = new THREE.Mesh(this.ringGeom, ringMat);
     group.add(ringMesh);
 
-    // 3. Dynamic pulsed point light
-    const light = new THREE.PointLight(color, 4.0, 180);
-    group.add(light);
-
     this.scene.add(group);
 
     this.ripples.push({
       group,
       sphereMesh,
       ringMesh,
-      light,
       age: 0,
       maxAge: 2.5, // 2.5s expansion
       maxRadius: 280

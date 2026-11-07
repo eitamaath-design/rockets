@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createPRNG } from '../utils/math.js';
 
 /**
@@ -117,24 +118,34 @@ export class SpaceEnvironment {
     const spawnLight = new THREE.PointLight(0xffeedd, 3.2, 900);
     spawnLight.position.set(0, 60, 160);
     this.scene.add(spawnLight);
+
+    // Permanent combat flash point light (pre-allocated to eliminate WebGL shader recompilations)
+    this.combatFlashLight = new THREE.PointLight(0xff6600, 0.0, 120);
+    this.combatFlashLight.position.set(0, 0, 0);
+    this.scene.add(this.combatFlashLight);
+
+    // Permanent meteor hazard light (pre-allocated to eliminate WebGL shader recompilations)
+    this.meteorLight = new THREE.PointLight(0xff3300, 0.0, 350);
+    this.meteorLight.position.set(0, 0, 0);
+    this.scene.add(this.meteorLight);
   }
 
   createStarfield() {
-    // Reduced to 5% of previous 4000 (200 soft glowing stars) and limited to shorter visible range
-    const starCount = 200;
+    // True distant celestial sphere (r = 2900-3400) - completely outside player sector.
+    // Zero white dust / blocks floating anywhere near the cockpit!
+    const starCount = 350;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
 
-    const prng = createPRNG('stars-fixed-background');
+    const prng = createPRNG('stars-fixed-celestial');
     for (let i = 0; i < starCount; i++) {
       const idx = i * 3;
       const u = prng();
       const v = prng();
       const theta = u * 2.0 * Math.PI;
       const phi = Math.acos(2.0 * v - 1.0);
-      // Shorter distance (350 to 800 units instead of 1400-2000)
-      const r = 350 + prng() * 450;
+      const r = 2900 + prng() * 500; // Far celestial sphere
 
       positions[idx] = r * Math.sin(phi) * Math.cos(theta);
       positions[idx + 1] = r * Math.sin(phi) * Math.sin(theta);
@@ -157,71 +168,19 @@ export class SpaceEnvironment {
 
     const starTexture = createGlowPointTexture();
     const material = new THREE.PointsMaterial({
-      size: 4.0,
+      size: 2.5,
       map: starTexture || undefined,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      sizeAttenuation: true,
+      sizeAttenuation: false, // Consistent pinprick star sizing without blocky artifacts
       fog: false
     });
 
     const starfield = new THREE.Points(geometry, material);
     this.scene.add(starfield);
-
-    // Glowing deep space nebulae clouds (also reduced to 5% = 25 clouds at shorter range)
-    this.createNebulae(prng, starTexture);
-  }
-
-  createNebulae(prng, starTexture) {
-    const nebulaCount = 25;
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(nebulaCount * 3);
-    const colors = new Float32Array(nebulaCount * 3);
-
-    const clusterColors = [
-      new THREE.Color(0x0088ff),
-      new THREE.Color(0x9922ff),
-      new THREE.Color(0x00ffcc),
-      new THREE.Color(0xff3388)
-    ];
-
-    for (let i = 0; i < nebulaCount; i++) {
-      const idx = i * 3;
-      const clusterIdx = Math.floor(prng() * clusterColors.length);
-      const baseColor = clusterColors[clusterIdx];
-
-      const angle = (clusterIdx / clusterColors.length) * Math.PI * 2 + (prng() - 0.5) * 0.8;
-      const dist = 550 + prng() * 350;
-
-      positions[idx] = Math.cos(angle) * dist + (prng() - 0.5) * 200;
-      positions[idx + 1] = (prng() - 0.5) * 400;
-      positions[idx + 2] = Math.sin(angle) * dist + (prng() - 0.5) * 200;
-
-      colors[idx] = baseColor.r;
-      colors[idx + 1] = baseColor.g;
-      colors[idx + 2] = baseColor.b;
-    }
-
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const mat = new THREE.PointsMaterial({
-      size: 60.0,
-      map: starTexture || undefined,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.28,
-      blending: THREE.AdditiveBlending,
-      sizeAttenuation: true,
-      depthWrite: false,
-      fog: false
-    });
-
-    const nebula = new THREE.Points(geom, mat);
-    this.scene.add(nebula);
   }
 
   /**
@@ -299,7 +258,7 @@ export class SpaceEnvironment {
         detail = 3;
       }
 
-      const geom = new THREE.IcosahedronGeometry(radius, detail);
+      let geom = mergeVertices(new THREE.IcosahedronGeometry(radius, detail));
       const posAttr = geom.attributes.position;
       const vertex = new THREE.Vector3();
 
@@ -434,11 +393,23 @@ export class SpaceEnvironment {
     this.scene.add(this.asteroidGroup);
   }
 
+  triggerCombatFlash(pos, color = 0xff6600, intensity = 4.0) {
+    if (!this.combatFlashLight) return;
+    this.combatFlashLight.position.copy(pos);
+    this.combatFlashLight.color.setHex(color);
+    this.combatFlashLight.intensity = intensity;
+  }
+
   /**
    * Update asteroid drift, rotational kinematics, boundary confinement,
    * and resolve pairwise asteroid-asteroid momentum collisions.
    */
   update(dt, playerPosition, playerVelocity) {
+    // Smoothly decay permanent combat flash light
+    if (this.combatFlashLight && this.combatFlashLight.intensity > 0) {
+      this.combatFlashLight.intensity = Math.max(0, this.combatFlashLight.intensity - dt * 6.0);
+    }
+
     const playAreaRadius = 1000;
     const numAsteroids = this.asteroids.length;
 
