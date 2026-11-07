@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { PlayerShip } from '../../src/game/ship.js';
+import { SpaceEnvironment } from '../../src/game/space.js';
 
 describe('Player Flight Physics & Momentum', () => {
   let camera;
@@ -85,19 +86,36 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.quaternion.equals(pitchedQuat)).toBe(false);
   });
 
-  it('should take damage, prevent lethal damage during invulnerability, and die when depleted', () => {
+  it('should take damage, absorb via shield first, allow shields to recharge over 15s, and die when depleted', () => {
     // During spawn invulnerability, damage should be ignored
     expect(ship.invulnerableTimer).toBeGreaterThan(0);
     ship.takeDamage(20);
     expect(ship.hp).toBe(100);
+    expect(ship.shield).toBe(100);
 
     // Expire invulnerability timer
     ship.invulnerableTimer = 0;
+
+    // Shield absorbs first 40 damage
     ship.takeDamage(40);
+    expect(ship.shield).toBe(60);
+    expect(ship.hp).toBe(100);
+
+    // Deplete shield (60) + penetrate 40 into hull
+    ship.takeDamage(100);
+    expect(ship.shield).toBe(0);
     expect(ship.hp).toBe(60);
 
-    // Lethal blow
-    const isKilled = ship.takeDamage(70);
+    // Test shield auto-recharge over 15 seconds (after 2s delay)
+    ship.update(2.0); // Wait out 2.0s delay
+    expect(ship.shield).toBe(0);
+    ship.update(7.5); // Halfway (7.5s)
+    expect(ship.shield).toBeCloseTo(50, 0);
+    ship.update(7.5); // Full 15.0s recharge
+    expect(ship.shield).toBeCloseTo(100, 0);
+
+    // Lethal blow (depletes 100 shield + 60 hull)
+    const isKilled = ship.takeDamage(160);
     expect(isKilled).toBe(true);
     expect(ship.hp).toBe(0);
     expect(ship.isDead).toBe(true);
@@ -125,5 +143,20 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.quaternion.y).toBeCloseTo(restingQuat.y, 3);
     expect(ship.quaternion.z).toBeCloseTo(restingQuat.z, 3);
     expect(ship.quaternion.w).toBeCloseTo(restingQuat.w, 3);
+  });
+
+  it('should calculate asteroid-asteroid mass collisions with volume-based momentum scaling', () => {
+    const scene = new THREE.Scene();
+    const space = new SpaceEnvironment(scene, 12345);
+
+    expect(space.asteroids.length).toBeGreaterThan(0);
+    const a1 = space.asteroids[0];
+    const a2 = space.asteroids[1];
+
+    expect(a1.mass).toBeGreaterThan(0);
+    expect(a2.mass).toBeGreaterThan(0);
+    // Mass scales with r^3
+    const radiusRatioCubed = Math.pow(a1.radius / a2.radius, 3);
+    expect(a1.mass / a2.mass).toBeCloseTo(radiusRatioCubed, 1);
   });
 });

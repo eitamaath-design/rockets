@@ -70,7 +70,7 @@ describe('Combat Integration: Multi-Player Engagement', () => {
     expect(localShip.deaths).toBe(0);
     expect(localShip.score).toBe(0);
 
-    const isFatal = localShip.takeDamage(100);
+    const isFatal = localShip.takeDamage(200);
     expect(isFatal).toBe(true);
     expect(localShip.isDead).toBe(true);
     expect(localShip.deaths).toBe(1);

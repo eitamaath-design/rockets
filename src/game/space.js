@@ -405,32 +405,124 @@ export class SpaceEnvironment {
 
       this.asteroidGroup.add(mesh);
 
+      // Mass proportional to spherical volume (r^3)
+      // Titan (r~100): mass ~ 4,188,000 | Large (r~50): mass ~ 523,000 | Medium (r~25): mass ~ 65,000
+      const mass = (4 / 3) * Math.PI * Math.pow(radius, 3) * 0.001;
+
+      // Deterministic slow drift velocity for dynamic orbital motion
+      const driftVelocity = new THREE.Vector3(
+        (prng() - 0.5) * 4.0,
+        (prng() - 0.5) * 2.2,
+        (prng() - 0.5) * 4.0
+      );
+
       this.asteroids.push({
         mesh,
         radius,
+        mass,
         position: mesh.position,
+        velocity: driftVelocity,
         rotationSpeed: new THREE.Vector3(
-          (prng() - 0.5) * 0.003,
-          (prng() - 0.5) * 0.003,
-          (prng() - 0.5) * 0.003
+          (prng() - 0.5) * 0.08,
+          (prng() - 0.5) * 0.08,
+          (prng() - 0.5) * 0.08
         ),
-        boundingSphere: new THREE.Sphere(mesh.position, radius * 1.1)
+        boundingSphere: new THREE.Sphere(mesh.position, radius * 1.05)
       });
     }
 
     this.scene.add(this.asteroidGroup);
   }
 
+  /**
+   * Update asteroid drift, rotational kinematics, boundary confinement,
+   * and resolve pairwise asteroid-asteroid momentum collisions.
+   */
   update(dt, playerPosition, playerVelocity) {
-    // Slowly rotate asteroids
-    for (let i = 0; i < this.asteroids.length; i++) {
+    const playAreaRadius = 1000;
+    const numAsteroids = this.asteroids.length;
+
+    // 1. Move and rotate asteroids
+    for (let i = 0; i < numAsteroids; i++) {
       const a = this.asteroids[i];
-      a.mesh.rotation.x += a.rotationSpeed.x;
-      a.mesh.rotation.y += a.rotationSpeed.y;
-      a.mesh.rotation.z += a.rotationSpeed.z;
+      a.position.addScaledVector(a.velocity, dt);
+      a.boundingSphere.center.copy(a.position);
+
+      a.mesh.rotation.x += a.rotationSpeed.x * dt;
+      a.mesh.rotation.y += a.rotationSpeed.y * dt;
+      a.mesh.rotation.z += a.rotationSpeed.z * dt;
+
+      // Soft boundary confinement: gently steer asteroids back toward sector center
+      const distFromCenter = a.position.length();
+      if (distFromCenter > playAreaRadius) {
+        const pull = a.position.clone().normalize().multiplyScalar(-6.0 * dt);
+        a.velocity.add(pull);
+      }
+    }
+
+    // 2. Asteroid-Asteroid Pairwise Collision & Momentum Exchange
+    // Mass-based momentum transfer: m1*v1 + m2*v2 = m1*v1' + m2*v2'
+    for (let i = 0; i < numAsteroids; i++) {
+      const a1 = this.asteroids[i];
+      const p1 = a1.position;
+
+      for (let j = i + 1; j < numAsteroids; j++) {
+        const a2 = this.asteroids[j];
+        const p2 = a2.position;
+
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        const dz = p1.z - p2.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const minDist = a1.radius + a2.radius;
+
+        if (distSq < minDist * minDist && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const nz = dz / dist;
+
+          // Mass-weighted positional separation (heavier asteroid budges less)
+          const overlap = minDist - dist;
+          const totalMass = a1.mass + a2.mass;
+          const ratio1 = a2.mass / totalMass;
+          const ratio2 = a1.mass / totalMass;
+
+          p1.x += nx * overlap * ratio1;
+          p1.y += ny * overlap * ratio1;
+          p1.z += nz * overlap * ratio1;
+
+          p2.x -= nx * overlap * ratio2;
+          p2.y -= ny * overlap * ratio2;
+          p2.z -= nz * overlap * ratio2;
+
+          // Relative velocity along collision normal
+          const rvx = a1.velocity.x - a2.velocity.x;
+          const rvy = a1.velocity.y - a2.velocity.y;
+          const rvz = a1.velocity.z - a2.velocity.z;
+          const velAlongNormal = rvx * nx + rvy * ny + rvz * nz;
+
+          // Only transfer momentum if asteroids are moving toward each other
+          if (velAlongNormal < 0) {
+            const restitution = 0.65; // Inelastic planetary rock impact
+            const impulse = -(1 + restitution) * velAlongNormal / (1 / a1.mass + 1 / a2.mass);
+
+            a1.velocity.x += (impulse / a1.mass) * nx;
+            a1.velocity.y += (impulse / a1.mass) * ny;
+            a1.velocity.z += (impulse / a1.mass) * nz;
+
+            a2.velocity.x -= (impulse / a2.mass) * nx;
+            a2.velocity.y -= (impulse / a2.mass) * ny;
+            a2.velocity.z -= (impulse / a2.mass) * nz;
+          }
+        }
+      }
     }
   }
 
+  /**
+   * Fast collision query for projectiles and weapons
+   */
   checkCollision(position, radius = 2.5) {
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
@@ -438,6 +530,51 @@ export class SpaceEnvironment {
       const combinedRadius = a.radius + radius;
       if (distSq < combinedRadius * combinedRadius) {
         return a;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolves physical collision between a ship and asteroids with Newtonian momentum bounce
+   */
+  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200) {
+    for (let i = 0; i < this.asteroids.length; i++) {
+      const a = this.asteroids[i];
+      const dist = position.distanceTo(a.position);
+      const minDist = a.radius + shipRadius;
+
+      if (dist < minDist) {
+        const normal = position.clone().sub(a.position);
+        if (normal.lengthSq() < 0.0001) {
+          normal.set(0, 1, 0);
+        } else {
+          normal.normalize();
+        }
+
+        // Push ship out of penetration along surface normal
+        position.copy(a.position).addScaledVector(normal, minDist + 0.3);
+
+        // Normal relative velocity
+        const relVel = velocity.clone().sub(a.velocity);
+        const vNorm = relVel.dot(normal);
+
+        if (vNorm < 0) {
+          const restitution = 0.85; // Bouncy shield restitution
+          const impulse = -(1 + restitution) * vNorm * shipMass;
+
+          // Ship bounces away along the normal
+          velocity.addScaledVector(normal, (impulse / shipMass));
+
+          // Asteroid receives reaction impulse based on mass ratio
+          a.velocity.addScaledVector(normal, -(impulse / a.mass));
+
+          // Calculate impact speed & damage
+          const impactSpeed = Math.abs(vNorm);
+          const impactDamage = Math.round(Math.min(45, Math.max(10, impactSpeed * 0.75)));
+
+          return { asteroid: a, normal, impactDamage, impactSpeed };
+        }
       }
     }
     return null;

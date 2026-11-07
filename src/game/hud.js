@@ -49,6 +49,14 @@ export class GameHUD {
 
           <!-- Integrated Compact Flight Gauges (No Screen Clutter) -->
           <div class="hud-top-meters">
+            <div class="hud-compact-meter meter-shield">
+              <span class="meter-label">SHIELD</span>
+              <div class="meter-track">
+                <div class="gauge-bar-fill bar-shield" id="hud-shield-bar" style="width: 100%;"></div>
+              </div>
+              <span class="meter-val" id="hud-shield-num">100%</span>
+            </div>
+
             <div class="hud-compact-meter meter-hp">
               <span class="meter-label">HULL</span>
               <div class="meter-track">
@@ -71,6 +79,10 @@ export class GameHUD {
               <span class="mine-mini-title">MINES:</span>
               <div class="mine-dot active" id="mine-dot-1">💣</div>
               <div class="mine-dot active" id="mine-dot-2">💣</div>
+            </div>
+
+            <div class="hud-beacon-pill" id="hud-beacon-pill" style="display: none;">
+              📡 BEACON ACTIVE (30s)
             </div>
           </div>
         </div>
@@ -458,6 +470,15 @@ export class GameHUD {
     const pingEl = document.getElementById('hud-ping-val');
     if (pingEl) pingEl.textContent = `📡 ${state.avgPing}ms`;
 
+    // Shield Bar (recharges over 15s)
+    const shieldBar = document.getElementById('hud-shield-bar');
+    const shieldNum = document.getElementById('hud-shield-num');
+    const shieldPct = Math.round(((state.shield !== undefined ? state.shield : 100) / (state.maxShield || 100)) * 100);
+    if (shieldBar) {
+      shieldBar.style.width = `${shieldPct}%`;
+    }
+    if (shieldNum) shieldNum.textContent = `${shieldPct}%`;
+
     // Health Bar
     const hpBar = document.getElementById('hud-hp-bar');
     const hpNum = document.getElementById('hud-hp-num');
@@ -467,6 +488,12 @@ export class GameHUD {
       hpBar.className = hpPct > 35 ? 'gauge-bar-fill bar-hp' : 'gauge-bar-fill bar-hp bar-hp-critical';
     }
     if (hpNum) hpNum.textContent = `${hpPct}%`;
+
+    // 30s Inactivity Beacon Indicator
+    const beaconPill = document.getElementById('hud-beacon-pill');
+    if (beaconPill) {
+      beaconPill.style.display = state.inactivityBeacon ? 'inline-flex' : 'none';
+    }
 
     const shieldStatus = document.getElementById('hud-shield-status');
     if (shieldStatus) {

@@ -1,10 +1,17 @@
 import { joinRoom, selfId } from '@trystero-p2p/nostr';
 import { createActionChannel } from './actions.js';
 
-const APP_ID = 'rockets-3d-space-shooter';
-const LOBBY_ROOM_ID = 'rockets_public_directory_v1';
-const HEARTBEAT_INTERVAL_MS = 3500;
-const ROOM_TTL_MS = 10000;
+export const APP_ID = 'rockets-3d-space-shooter';
+export const LOBBY_ROOM_ID = 'rockets_public_directory_v1';
+export const HEARTBEAT_INTERVAL_MS = 3000;
+export const ROOM_TTL_MS = 12000;
+
+export const RELIABLE_NOSTR_RELAYS = [
+  'wss://nos.lol',
+  'wss://relay.damus.io',
+  'wss://relay.snort.social',
+  'wss://nostr.mom'
+];
 
 class LobbyService {
   constructor() {
@@ -13,7 +20,7 @@ class LobbyService {
     this.listeners = new Set();
     this.heartbeatTimer = null;
     this.purgeTimer = null;
-    this.currentHostingMatch = null; // { roomId, roomName, mapSeed, getPlayerCount }
+    this.currentHostingMatch = null; // { roomId, roomName, mapSeed, getPlayerCount, isMaster }
     this.sendHeartbeat = null;
     this.sendQuery = null;
     this.isInitialized = false;
@@ -24,7 +31,10 @@ class LobbyService {
     this.isInitialized = true;
 
     try {
-      this.lobbyRoom = joinRoom({ appId: APP_ID }, LOBBY_ROOM_ID);
+      this.lobbyRoom = joinRoom({
+        appId: APP_ID,
+        relayConfig: { urls: RELIABLE_NOSTR_RELAYS }
+      }, LOBBY_ROOM_ID);
 
       const heartbeatChannel = createActionChannel(this.lobbyRoom, 'room_heartbeat');
       const queryChannel = createActionChannel(this.lobbyRoom, 'query_rooms');
@@ -49,6 +59,18 @@ class LobbyService {
         }
       });
 
+      // When a new peer connects to the public lobby directory, immediately announce our active room
+      const handlePeerJoin = () => {
+        if (this.currentHostingMatch && this.currentHostingMatch.isMaster()) {
+          this.broadcastCurrentRoom();
+        }
+      };
+      if (typeof this.lobbyRoom.onPeerJoin === 'function') {
+        this.lobbyRoom.onPeerJoin(handlePeerJoin);
+      } else {
+        this.lobbyRoom.onPeerJoin = handlePeerJoin;
+      }
+
       // Periodic check to purge dead rooms that exceeded TTL
       this.purgeTimer = setInterval(() => {
         const now = Date.now();
@@ -72,6 +94,7 @@ class LobbyService {
   }
 
   refreshRooms() {
+    this.init();
     if (this.sendQuery) {
       try {
         this.sendQuery({ req: 'list', from: selfId });
@@ -85,6 +108,7 @@ class LobbyService {
    * Called by the game session when the local player is (or becomes) the master of an active game.
    */
   startMasterKeepAlive(matchInfo) {
+    this.init();
     this.currentHostingMatch = matchInfo;
     this.stopMasterKeepAlive();
 
@@ -107,7 +131,10 @@ class LobbyService {
   }
 
   broadcastCurrentRoom() {
-    if (!this.currentHostingMatch || !this.sendHeartbeat) return;
+    if (!this.currentHostingMatch) return;
+    this.init();
+    if (!this.sendHeartbeat) return;
+
     try {
       const match = this.currentHostingMatch;
       const count = match.getPlayerCount ? match.getPlayerCount() : 1;
@@ -170,6 +197,7 @@ class LobbyService {
     }
     this.activeRooms.clear();
     this.listeners.clear();
+    this.isInitialized = false;
   }
 }
 

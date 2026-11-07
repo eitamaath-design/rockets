@@ -386,6 +386,38 @@ export class AudioManager {
     noise.start(now);
     noise.stop(now + 0.13);
   }
+
+  /**
+   * 30-Second Inactivity Engagement Beacon: resonant high-tech sonar ping
+   */
+  playEngagementBeacon() {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1480, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.45);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, now);
+    filter.Q.setValueAtTime(4.0, now);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.38, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.95);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.compressor);
+
+    osc.start(now);
+    osc.stop(now + 1.0);
+  }
 }
 
 export const audio = new AudioManager();

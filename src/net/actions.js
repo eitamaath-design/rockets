@@ -16,12 +16,16 @@ export function createActionChannel(room, actionName) {
 
   const rawAction = room.makeAction(actionName);
 
-  // Helper to extract clean peerId string from either string or metadata object
-  const extractPeerId = (meta) => {
-    if (typeof meta === 'string') return meta;
+  // Helper to extract clean peerId string from string, metadata object, or payload id
+  const extractPeerId = (meta, payload) => {
+    if (typeof meta === 'string' && meta.length > 0) return meta;
     if (meta && typeof meta === 'object') {
-      if (typeof meta.peerId === 'string') return meta.peerId;
-      if (typeof meta.id === 'string') return meta.id;
+      if (typeof meta.peerId === 'string' && meta.peerId.length > 0) return meta.peerId;
+      if (typeof meta.id === 'string' && meta.id.length > 0) return meta.id;
+    }
+    if (payload && typeof payload === 'object') {
+      if (typeof payload.id === 'string' && payload.id.length > 0) return payload.id;
+      if (typeof payload.senderId === 'string' && payload.senderId.length > 0) return payload.senderId;
     }
     return null;
   };
@@ -39,7 +43,7 @@ export function createActionChannel(room, actionName) {
       onReceive: (handler) => {
         try {
           rawAction[1]((data, peerMeta) => {
-            const peerId = extractPeerId(peerMeta);
+            const peerId = extractPeerId(peerMeta, data);
             if (peerId) {
               handler(data, peerId);
             }
@@ -56,14 +60,11 @@ export function createActionChannel(room, actionName) {
     send: (data, target) => {
       try {
         if (rawAction && typeof rawAction.send === 'function') {
-          // Modern Trystero expects options object { target: peerId }
-          const options = typeof target === 'string' ? { target } : (target || {});
           let res;
-          try {
-            res = rawAction.send(data, options);
-          } catch (_) {
-            // Fallback for signatures expecting (data, target)
-            res = rawAction.send(data, target);
+          if (target && typeof target === 'string') {
+            res = rawAction.send(data, { target });
+          } else {
+            res = rawAction.send(data);
           }
           if (res && typeof res.catch === 'function') {
             res.catch(() => {});
@@ -78,19 +79,17 @@ export function createActionChannel(room, actionName) {
         if (!rawAction) return;
 
         const normalizedCallback = (payload, meta) => {
-          const peerId = extractPeerId(meta);
+          const peerId = extractPeerId(meta, payload);
           if (peerId) {
             handler(payload, peerId);
           }
         };
 
-        // Modern Trystero uses onMessage for message-type actions
+        // Modern Trystero uses onMessage for message actions.
+        // DO NOT set onReceive if onMessage exists, as onReceive configures binary stream mode!
         if ('onMessage' in rawAction) {
           rawAction.onMessage = normalizedCallback;
-        }
-
-        // Also bind onReceive as fallback if onMessage was not provided or for older v0.2x
-        if ('onReceive' in rawAction) {
+        } else if ('onReceive' in rawAction) {
           if (typeof rawAction.onReceive === 'function') {
             rawAction.onReceive(normalizedCallback);
           } else {

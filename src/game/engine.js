@@ -4,6 +4,8 @@ import { Cockpit } from './cockpit.js';
 import { PlayerShip } from './ship.js';
 import { WeaponsSystem } from './weapons.js';
 import { RemoteShip } from './remoteShip.js';
+import { ThrusterTrailSystem } from './trail.js';
+import { EngagementBeaconSystem } from './beacon.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
@@ -42,6 +44,14 @@ export class GameEngine {
     // State broadcast timer (20Hz)
     this.broadcastTimer = 0;
     this.broadcastInterval = 1 / 20;
+
+    // Subsystem instances
+    this.thrusterTrails = null;
+    this.beaconSystem = null;
+    this.trailEmitTimer = 0;
+    this.timeSinceLastCombat = 0;
+    this.beaconPulseTimer = 0;
+    this.netStatsTimer = 0;
 
     this.initThree();
     this.setupNetworkHandlers();
@@ -85,6 +95,9 @@ export class GameEngine {
     this.cockpit = new Cockpit(this.camera);
     this.weaponsSystem = new WeaponsSystem(this.scene, this.spaceEnv, this.network);
 
+    this.thrusterTrails = new ThrusterTrailSystem(this.scene);
+    this.beaconSystem = new EngagementBeaconSystem(this.scene);
+
     window.addEventListener('resize', this.onWindowResize.bind(this));
   }
 
@@ -96,6 +109,7 @@ export class GameEngine {
         const remote = new RemoteShip(peerId, this.scene, `Pilot-${peerId.slice(0, 4)}`);
         this.remoteShips.set(peerId, remote);
       }
+      logger.log('NET', `Peer joined: ${peerId}`);
     };
 
     this.network.onPeerLeft = (peerId) => {
@@ -105,10 +119,12 @@ export class GameEngine {
         remote.destroy();
         this.remoteShips.delete(peerId);
       }
+      logger.log('NET', `Peer left: ${peerId}`);
     };
 
     // Incoming damage from other peers
     this.network.onHit((data) => {
+      this.timeSinceLastCombat = 0; // Combat activity reset!
       if (data.targetId === this.network.selfId) {
         const wasKilled = this.playerShip.takeDamage(data.damage);
         this.cockpit.triggerDamageFlash();
@@ -125,8 +141,15 @@ export class GameEngine {
       }
     });
 
+    // Reset combat inactivity when network shots fire
+    if (this.weaponsSystem) {
+      this.network.onCannon(() => { this.timeSinceLastCombat = 0; });
+      this.network.onMine(() => { this.timeSinceLastCombat = 0; });
+    }
+
     // Kill feed events
     this.network.onKill((data) => {
+      this.timeSinceLastCombat = 0;
       if (data.killerId === this.network.selfId) {
         this.playerShip.recordKill();
         audio.playScoreChime();
@@ -317,10 +340,14 @@ export class GameEngine {
       audio.updateEngine(this.playerShip.input.thrust, this.playerShip.input.brake, dt);
 
       // 2. Continuous Cannon Firing
+      if (this.isFiringCannon) {
+        this.timeSinceLastCombat = 0;
+      }
       this.weaponsSystem.triggerCannon(this.isFiringCannon, this.playerShip, now);
 
       // 3. Update Weapons & Explosions
       this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
+        this.timeSinceLastCombat = 0;
         this.cockpit.triggerDamageFlash();
       });
 
@@ -341,7 +368,64 @@ export class GameEngine {
         }
       }
 
-      // 5. Update Cockpit visual tilt and shield glass
+      // 5. Inactivity Engagement Beacon (30s+ no combat between ships)
+      this.timeSinceLastCombat += dt;
+      if (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0) {
+        this.beaconPulseTimer += dt;
+        if (this.beaconPulseTimer >= 3.5) {
+          this.beaconPulseTimer = 0;
+          this.beaconSystem.emitRipple(this.playerShip.position, 0x00d4ff);
+          for (const remote of this.remoteShips.values()) {
+            if (!remote.isDead) {
+              this.beaconSystem.emitRipple(remote.position, 0xff3355);
+            }
+          }
+          audio.playEngagementBeacon();
+          logger.log('BEACON', `Engagement beacon pulse emitted across sector (inactivity: ${Math.round(this.timeSinceLastCombat)}s)`);
+        }
+      } else {
+        this.beaconPulseTimer = 0;
+      }
+
+      // 6. Decaying Ship Thruster Trails (15s lifetime)
+      this.trailEmitTimer += dt;
+      if (this.trailEmitTimer >= 0.12) {
+        this.trailEmitTimer = 0;
+        if (this.playerShip.input.thrust || this.playerShip.getSpeed() > 10) {
+          this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false);
+        }
+        for (const remote of this.remoteShips.values()) {
+          if (!remote.isDead && (remote.isThrusting || remote.targetVelocity.length() > 10)) {
+            const rFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(remote.quaternion);
+            this.thrusterTrails.emit(remote.position, rFwd, true);
+          }
+        }
+      }
+      this.thrusterTrails.update(dt);
+      this.beaconSystem.update(dt);
+
+      // 7. 5-Second Diagnostics Telemetry Stats
+      this.netStatsTimer += dt;
+      if (this.netStatsTimer >= 5.0) {
+        this.netStatsTimer = 0;
+        const peers = Array.from(this.network.peers.entries());
+        if (peers.length === 0) {
+          logger.log('NET_STATS', `Connected Peers: 0 | Inactivity: ${Math.round(this.timeSinceLastCombat)}s | Master: ${this.network.isMaster}`);
+        } else {
+          const stats = peers.map(([pId, pData]) => {
+            const remote = this.remoteShips.get(pId);
+            const dist = remote ? Math.round(this.playerShip.position.distanceTo(remote.position)) : 'N/A';
+            const rate = pData.packetsReceived ? (pData.packetsReceived / 5.0).toFixed(1) : '0.0';
+            const lastSeenMs = Date.now() - (pData.lastSeen || Date.now());
+            pData.packetsReceived = 0; // reset window
+            const posStr = remote ? `(${remote.position.x.toFixed(1)}, ${remote.position.y.toFixed(1)}, ${remote.position.z.toFixed(1)})` : 'N/A';
+            return `Peer[${pId.slice(0, 5)}]: ${rate} pkt/s, ping ${pData.ping || 0}ms, seen ${lastSeenMs}ms ago, dist ${dist}u, pos ${posStr}, inScene: ${remote ? !!remote.group.parent : false}`;
+          }).join(' | ');
+          logger.log('NET_STATS', `Peers (${peers.length}): ${stats}`);
+        }
+      }
+
+      // 8. Update Cockpit visual tilt and shield glass
       const flightInput = {
         thrust: this.playerShip.input.thrust,
         brake: this.playerShip.input.brake,
@@ -351,10 +435,10 @@ export class GameEngine {
       };
       this.cockpit.update(dt, flightInput, this.playerShip.velocity);
 
-      // 6. Update Space Environment (asteroids rotation, speed dust)
+      // 9. Update Space Environment (asteroid physics & pairwise collisions)
       this.spaceEnv.update(dt, this.playerShip.position, this.playerShip.velocity);
 
-      // 7. Network State Broadcast (20Hz)
+      // 10. Network State Broadcast (20Hz)
       this.broadcastTimer += dt;
       if (this.broadcastTimer >= this.broadcastInterval) {
         this.broadcastTimer = 0;
@@ -370,6 +454,7 @@ export class GameEngine {
           thrust: this.playerShip.input.thrust,
           strafe: (this.playerShip.input.strafeRight ? 1 : 0) - (this.playerShip.input.strafeLeft ? 1 : 0),
           hp: this.playerShip.hp,
+          shield: this.playerShip.shield,
           isDead: this.playerShip.isDead,
           score: this.playerShip.score,
           kills: this.playerShip.kills,
@@ -377,13 +462,15 @@ export class GameEngine {
         });
       }
 
-      // 8. Render Scene
+      // 11. Render Scene
       this.renderer.render(this.scene, this.camera);
 
-      // 9. Inform HUD
+      // 12. Inform HUD
       this.onHudUpdate({
         hp: this.playerShip.hp,
         maxHp: this.playerShip.maxHp,
+        shield: Math.round(this.playerShip.shield),
+        maxShield: this.playerShip.maxShield,
         speed: Math.round(this.playerShip.getSpeed()),
         maxSpeed: Math.round(this.playerShip.maxSpeed),
         cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
@@ -395,6 +482,7 @@ export class GameEngine {
         isDead: this.playerShip.isDead,
         respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
         invulnerable: (this.playerShip.invulnerableTimer > 0),
+        inactivityBeacon: (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0),
         score: this.playerShip.score,
         kills: this.playerShip.kills,
         deaths: this.playerShip.deaths,
@@ -411,6 +499,8 @@ export class GameEngine {
   destroy() {
     this.stop();
     if (this.weaponsSystem) this.weaponsSystem.cleanup();
+    if (this.thrusterTrails) this.thrusterTrails.cleanup();
+    if (this.beaconSystem) this.beaconSystem.cleanup();
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
     }

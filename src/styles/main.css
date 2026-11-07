@@ -588,6 +588,11 @@ html, body {
   transition: width 0.1s ease-out;
 }
 
+.bar-shield {
+  background: linear-gradient(90deg, #00d4ff 0%, #38bdf8 100%);
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.6);
+}
+
 .bar-hp {
   background: linear-gradient(90deg, #10b981 0%, #06b6d4 100%);
   box-shadow: 0 0 6px rgba(6, 182, 212, 0.5);
@@ -596,6 +601,25 @@ html, body {
 .bar-hp-critical {
   background: #ef4444;
   box-shadow: 0 0 8px #ef4444;
+}
+
+.hud-beacon-pill {
+  background: rgba(239, 68, 68, 0.35);
+  border: 1px solid #ef4444;
+  color: #fecaca;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  animation: beaconPulse 1.2s infinite ease-in-out;
+}
+
+@keyframes beaconPulse {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
 }
 
 .bar-cannon {

@@ -23,9 +23,15 @@ export class PlayerShip {
     this.yawSpeed = 1.6;
     this.rollSpeed = 2.0;
 
-    // Health & Score
+    // Health, Shield & Score
     this.maxHp = 100;
     this.hp = 100;
+    this.maxShield = 100;
+    this.shield = 100;
+    this.shieldRechargeDelay = 2.0; // delay in seconds after damage before shield starts recharging
+    this.shieldRechargeTimer = 0;
+    this.shieldRechargeRate = 100 / 15.0; // 15 seconds full recharge (6.66% per second)
+    this.mass = 1200; // Ship inertial mass in kg
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5; // seconds of shield protection on spawn
@@ -63,6 +69,8 @@ export class PlayerShip {
     this.quaternion.set(0, 0, 0, 1); // Looking straight down -Z
 
     this.hp = this.maxHp;
+    this.shield = this.maxShield;
+    this.shieldRechargeTimer = 0;
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
@@ -73,7 +81,22 @@ export class PlayerShip {
 
   takeDamage(amount) {
     if (this.isDead || this.invulnerableTimer > 0) return false;
-    this.hp = Math.max(0, this.hp - amount);
+
+    // Reset shield recharge cooldown timer
+    this.shieldRechargeTimer = this.shieldRechargeDelay;
+
+    // Shield absorbs impact first
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, amount);
+      this.shield -= absorbed;
+      amount -= absorbed;
+    }
+
+    // Remainder penetrates into hull
+    if (amount > 0) {
+      this.hp = Math.max(0, this.hp - amount);
+    }
+
     if (this.hp <= 0) {
       this.isDead = true;
       this.deaths++;
@@ -107,6 +130,15 @@ export class PlayerShip {
         this.resetSpawn();
       }
       return;
+    }
+
+    // Dynamic shield recharge: recharges to 100% over 15 seconds if careful
+    if (this.shield < this.maxShield) {
+      if (this.shieldRechargeTimer > 0) {
+        this.shieldRechargeTimer -= dt;
+      } else {
+        this.shield = Math.min(this.maxShield, this.shield + this.shieldRechargeRate * dt);
+      }
     }
 
     // Safety checks against NaN corruption
@@ -237,26 +269,28 @@ export class PlayerShip {
 
   handleAsteroidCollisions() {
     const shipRadius = 2.8;
-    const hitAsteroid = this.spaceEnv.checkCollision(this.position, shipRadius);
-    if (hitAsteroid) {
-      // Collision normal with safe zero check
-      const normal = this.position.clone().sub(hitAsteroid.position);
-      if (normal.lengthSq() < 0.001) {
-        normal.set(0, 0, 1);
-      } else {
-        normal.normalize();
-      }
-      // Push ship out of penetration
-      this.position.copy(hitAsteroid.position).addScaledVector(normal, hitAsteroid.radius + shipRadius + 0.5);
 
-      // Bounce velocity
-      const dot = this.velocity.dot(normal);
-      if (dot < 0) {
-        this.velocity.subScaledVector(normal, 1.6 * dot);
+    // Use full Newtonian momentum resolution if supported by space environment
+    if (this.spaceEnv && typeof this.spaceEnv.resolveShipCollision === 'function') {
+      const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass);
+      if (collisionResult) {
+        this.takeDamage(collisionResult.impactDamage);
+        return collisionResult;
       }
+    } else if (this.spaceEnv && typeof this.spaceEnv.checkCollision === 'function') {
+      const hitAsteroid = this.spaceEnv.checkCollision(this.position, shipRadius);
+      if (hitAsteroid) {
+        const normal = this.position.clone().sub(hitAsteroid.position);
+        if (normal.lengthSq() < 0.001) normal.set(0, 1, 0);
+        else normal.normalize();
 
-      // Minor collision damage (12 HP)
-      this.takeDamage(12);
+        this.position.copy(hitAsteroid.position).addScaledVector(normal, hitAsteroid.radius + shipRadius + 0.4);
+        const dot = this.velocity.dot(normal);
+        if (dot < 0) {
+          this.velocity.subScaledVector(normal, 1.8 * dot);
+        }
+        this.takeDamage(15);
+      }
     }
   }
 

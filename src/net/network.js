@@ -1,8 +1,6 @@
 import { joinRoom, selfId } from '@trystero-p2p/nostr';
-import { lobbyService } from './lobby.js';
+import { lobbyService, APP_ID, RELIABLE_NOSTR_RELAYS } from './lobby.js';
 import { createActionChannel } from './actions.js';
-
-const APP_ID = 'rockets-3d-space-shooter';
 
 export class GameNetwork {
   constructor({ roomId, roomName, mapSeed, playerName, onPeerJoined, onPeerLeft, onMasterChanged, onCombatLog }) {
@@ -42,7 +40,10 @@ export class GameNetwork {
   }
 
   join() {
-    this.room = joinRoom({ appId: APP_ID }, this.roomId);
+    this.room = joinRoom({
+      appId: APP_ID,
+      relayConfig: { urls: RELIABLE_NOSTR_RELAYS }
+    }, this.roomId);
 
     // Initialize WebRTC Actions
     const stateChannel = createActionChannel(this.room, 'state');
@@ -65,11 +66,12 @@ export class GameNetwork {
     stateChannel.onReceive((data, peerId) => {
       if (!peerId || typeof peerId !== 'string') return;
       if (!this.peers.has(peerId)) {
-        this.peers.set(peerId, { id: peerId, ping: 30, lastSeen: Date.now() });
+        this.peers.set(peerId, { id: peerId, ping: 30, lastSeen: Date.now(), packetsReceived: 0 });
       }
       const p = this.peers.get(peerId);
       p.lastState = data;
       p.lastSeen = Date.now();
+      p.packetsReceived = (p.packetsReceived || 0) + 1;
     });
 
     // Cannon fire events
