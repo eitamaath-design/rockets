@@ -149,6 +149,7 @@ export class RemoteShip {
   updateNameplateTexture() {
     if (!this.nameCanvas) return;
     const ctx = this.nameCanvas.getContext('2d');
+    if (!ctx) return;
     ctx.clearRect(0, 0, 256, 64);
 
     // Background pill

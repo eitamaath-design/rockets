@@ -1,0 +1,20 @@
+{
+  "name": "Rockets: 3D P2P Space Shooter",
+  "short_name": "Rockets",
+  "description": "Serverless 3D multiplayer WebRTC space shooter with first-person cockpit and decentralized mesh networking.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "theme_color": "#04070f",
+  "background_color": "#04070f",
+  "categories": ["games", "action"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

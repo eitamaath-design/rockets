@@ -199,7 +199,12 @@ export class WeaponsSystem {
   update(dt, localShip, remoteShipsMap, onDamageEvent) {
     // 1. Weapon Energy & Cooldown recharge
     if (this.cannonCooldownTimer > 0) {
-      this.cannonCooldownTimer = Math.max(0, this.cannonCooldownTimer - dt);
+      const elapsedInCooldown = Math.min(this.cannonCooldownTimer, dt);
+      this.cannonCooldownTimer -= elapsedInCooldown;
+      const remainingDt = dt - elapsedInCooldown;
+      if (remainingDt > 0 && this.cannonEnergy < this.cannonMaxEnergy) {
+        this.cannonEnergy = Math.min(this.cannonMaxEnergy, this.cannonEnergy + this.cannonRechargeRate * remainingDt);
+      }
     } else {
       if (this.cannonEnergy < this.cannonMaxEnergy) {
         this.cannonEnergy = Math.min(this.cannonMaxEnergy, this.cannonEnergy + this.cannonRechargeRate * dt);
@@ -277,8 +282,9 @@ export class WeaponsSystem {
       let detonationReason = 'timer';
 
       // "Mines explode on impact with any player, or after 3 seconds."
-      // Check collision with local ship
-      if (!localShip.isDead) {
+      // Check collision with local ship (with 0.6s arming grace for the owner)
+      const isOwnerGrace = (m.isLocal && m.life > (this.mineFuseTime - 0.6));
+      if (!localShip.isDead && !isOwnerGrace) {
         const dLocalSq = m.pos.distanceToSquared(localShip.position);
         if (dLocalSq <= this.mineDetonationRadius * this.mineDetonationRadius) {
           shouldDetonate = true;

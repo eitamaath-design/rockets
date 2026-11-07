@@ -85,18 +85,25 @@ This document serves as the permanent master reference for the **Rockets** multi
   ```bash
   npm run dev
   ```
+- **Run Unit & Integration Tests (Vitest):**
+  ```bash
+  npm run test:unit
+  ```
+- **Run Headless Browser E2E Tests (Playwright):**
+  ```bash
+  npm run test:e2e
+  ```
+- **Run Full Test Suite:**
+  ```bash
+  npm run test
+  ```
 - **Production Build:**
   ```bash
   npm run build
   ```
-- **Preview Production Build:**
-  ```bash
-  npm run preview
-  ```
 - **Deploy to GitHub Pages:**
   ```bash
-  git push origin main
-  # Deployed automatically via GitHub Actions or manual gh-pages branch deploy
+  npm run deploy
   ```
 
 ---
@@ -114,9 +121,12 @@ This document serves as the permanent master reference for the **Rockets** multi
 
 | File / Directory | Purpose |
 | :--- | :--- |
-| `index.html` | Application shell, viewport configuration, and DOM HUD containers |
-| `src/main.js` | Main application bootstrap and router (Lobby vs Match state) |
-| `src/styles/main.css` | Futuristic sci-fi HUD theme, responsive touch layout, animations |
+| `index.html` | Application shell, PWA manifest links, viewport-fit=cover, ServiceWorker registration |
+| `public/manifest.json` | PWA web app manifest (display: fullscreen, orientation: landscape) |
+| `public/sw.js` | Service worker for offline caching and PWA installation |
+| `public/icon.svg` | Vector PWA app icon |
+| `src/main.js` | Main application bootstrap, PWA install prompt handler, and lobby router |
+| `src/styles/main.css` | Futuristic sci-fi HUD theme, responsive touch layout, safe-area insets |
 | `src/net/network.js` | Trystero WebRTC mesh manager, deterministic master election, heartbeat TTL |
 | `src/net/lobby.js` | Serverless public room directory with TTL expiration and ping discovery |
 | `src/game/engine.js` | Three.js scene setup, render loop, post-processing, and resize handlers |
@@ -125,6 +135,14 @@ This document serves as the permanent master reference for the **Rockets** multi
 | `src/game/cockpit.js` | 3D first-person cockpit frame, targeting reticle, radar display |
 | `src/game/remoteShip.js`| 3D peer ship model, thruster exhaust trails, interpolation/dead reckoning |
 | `src/game/weapons.js` | Cannon projectiles (TTK 2s, recharge) and Rear Mines (2 charges, 3s fuse) |
-| `src/game/hud.js` | On-screen responsive HUD: health, ammo, mine charges, D-pad, scoreboard |
+| `src/game/hud.js` | Responsive HUD: fullscreen toggle, floating gauge pills, D-pad & action clusters |
 | `src/utils/math.js` | Seeded PRNG, vector math, interpolation, and collision detection helpers |
+| `tests/unit/math.test.js` | Unit tests for Mulberry32 determinism, vectors, and clamping |
+| `tests/unit/flight.test.js` | Flight physics tests (maxSpeed, exact 2.0s halt braking, strafing) |
+| `tests/unit/weapons.test.js` | Weapon tests (2.0s TTK, 1s cooldown recharge, rear mine 3s fuse & impulse) |
+| `tests/unit/netcode.test.js` | Unit tests for master election, failover, TTL pruning, and dead reckoning |
+| `tests/integration/combat.test.js` | Combat integration test (hits, lethal blows, kills, mine detonations) |
+| `tests/e2e/browser.test.js` | Playwright headless browser E2E tests (Lobby, 3D Canvas, Touch Controls, PWA) |
+| `vitest.config.js` | Vitest configuration for unit & integration test runner |
+| `playwright.config.js` | Playwright configuration for headless Chromium & Mobile landscape E2E |
 | `vite.config.js` | Vite build configuration with correct base path for GitHub Pages |

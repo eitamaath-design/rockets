@@ -2,14 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Rockets - Responsive P2P WebRTC 3D Multiplayer Space Shooter" />
     <meta name="theme-color" content="#04070f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Rockets" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
     <title>Rockets | P2P 3D Space Shooter</title>
     <link rel="stylesheet" href="./src/styles/main.css" />
   </head>
   <body>
     <div id="app"></div>
     <script type="module" src="./src/main.js"></script>
+    <script>
+      // Register Progressive Web App Service Worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').catch((err) => {
+            console.log('PWA ServiceWorker registration notice:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

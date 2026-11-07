@@ -73,6 +73,11 @@ class AppRouter {
           <input type="text" id="pilot-name-input" value="${this.playerName}" maxlength="16" placeholder="Pilot Name" />
         </div>
 
+        <div class="pwa-install-banner" id="pwa-install-banner">
+          <span>📲 Install Rockets as Fullscreen App on your phone:</span>
+          <button class="btn-pwa-install" id="btn-pwa-install">INSTALL</button>
+        </div>
+
         <div class="lobby-grid">
           <!-- Create Match Card -->
           <div class="lobby-card">
@@ -148,6 +153,30 @@ class AppRouter {
       nameInput.addEventListener('input', (e) => {
         this.playerName = e.target.value.trim() || 'Pilot';
         localStorage.setItem('rockets_pilot_name', this.playerName);
+      });
+    }
+
+    // Hook PWA Installation
+    let deferredPrompt = window.__pwaDeferredPrompt;
+    const pwaBanner = document.getElementById('pwa-install-banner');
+    const pwaBtn = document.getElementById('btn-pwa-install');
+    if (deferredPrompt && pwaBanner) {
+      pwaBanner.style.display = 'flex';
+    }
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.__pwaDeferredPrompt = e;
+      if (pwaBanner) pwaBanner.style.display = 'flex';
+    });
+    if (pwaBtn) {
+      pwaBtn.addEventListener('click', () => {
+        const promptEvent = window.__pwaDeferredPrompt;
+        if (promptEvent) {
+          promptEvent.prompt();
+          promptEvent.userChoice.then(() => {
+            if (pwaBanner) pwaBanner.style.display = 'none';
+          });
+        }
       });
     }
 
