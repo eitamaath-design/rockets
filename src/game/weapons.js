@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { audio } from './audio.js';
 
 /**
  * Dynamic particle fire trail system for kinetic projectiles.
@@ -230,6 +231,7 @@ export class WeaponsSystem {
 
         const shotId = `${this.network.selfId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         this.spawnProjectile(origin, fwd, ship.velocity, true, shotId);
+        audio.playCannonShot(true);
 
         // Broadcast to mesh
         this.network.broadcastCannon({
@@ -257,6 +259,7 @@ export class WeaponsSystem {
     const mineId = `mine-${this.network.selfId}-${Date.now()}`;
 
     this.spawnMine(minePos, true, this.network.selfId, mineId);
+    audio.playMineDeploy();
 
     // Broadcast to peers
     this.network.broadcastMine({
@@ -310,6 +313,7 @@ export class WeaponsSystem {
     const dir = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z);
     const vel = data.vel ? new THREE.Vector3(data.vel.x, data.vel.y, data.vel.z) : new THREE.Vector3();
     this.spawnProjectile(origin, dir, vel, false, data.id);
+    audio.playCannonShot(false);
   }
 
   spawnMine(pos, isLocal, ownerId, id) {
@@ -352,6 +356,7 @@ export class WeaponsSystem {
     mesh.add(light);
 
     this.scene.add(mesh);
+    audio.playExplosion(radius > 15 ? 1.5 : 0.8);
     this.explosions.push({
       mesh,
       light,

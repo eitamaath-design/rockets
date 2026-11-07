@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { audio } from './audio.js';
 
 export class GameHUD {
   constructor(container, engine) {
@@ -302,8 +303,14 @@ export class GameHUD {
     setupHoldButton('btn-roll-right', () => shipInput.rollRight = true, () => shipInput.rollRight = false);
 
     // Lateral Strafing (Side thrusters)
-    setupHoldButton('btn-strafe-left', () => shipInput.strafeLeft = true, () => shipInput.strafeLeft = false);
-    setupHoldButton('btn-strafe-right', () => shipInput.strafeRight = true, () => shipInput.strafeRight = false);
+    setupHoldButton('btn-strafe-left', () => {
+      audio.playStrafeBurst();
+      shipInput.strafeLeft = true;
+    }, () => shipInput.strafeLeft = false);
+    setupHoldButton('btn-strafe-right', () => {
+      audio.playStrafeBurst();
+      shipInput.strafeRight = true;
+    }, () => shipInput.strafeRight = false);
 
     // Main Thrust & Brake
     setupHoldButton('btn-thrust', () => shipInput.thrust = true, () => shipInput.thrust = false);

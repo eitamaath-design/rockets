@@ -150,18 +150,7 @@ export class PlayerShip {
     if (this.input.rollLeft) rollInput += 1;
     if (this.input.rollRight) rollInput -= 1;
     rollInput += this.input.analogRoll;
-
-    // Auto-banking roll: applying yaw with touch D-pad automatically rolls into the turn
-    if (this.input.analogYaw !== 0) {
-      rollInput += this.input.analogYaw * 0.85;
-    } else if (!this.input.rollLeft && !this.input.rollRight && this.input.analogRoll === 0) {
-      // Soft auto-leveling towards horizon when centered
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
-      if (Math.abs(right.y) > 0.01) {
-        rollInput += clamp(right.y * 1.5, -0.6, 0.6);
-      }
-    }
-    rollInput = clamp(rollInput, -1.5, 1.5);
+    rollInput = clamp(rollInput, -1.0, 1.0);
 
     // Local rotation axes
     const pitchAxis = new THREE.Vector3(1, 0, 0);

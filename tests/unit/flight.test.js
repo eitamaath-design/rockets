@@ -104,4 +104,26 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.deaths).toBe(1);
     expect(ship.respawnTimer).toBe(3.0);
   });
+
+  it('should maintain exact 3D orientation without auto-leveling to an imaginary horizon', () => {
+    // 1. Roll 45 degrees
+    ship.input.rollLeft = true;
+    ship.update(0.5);
+    ship.input.rollLeft = false;
+
+    // 2. Yaw left
+    ship.input.yawLeft = true;
+    ship.update(1.0);
+    ship.input.yawLeft = false;
+
+    // 3. Resting in space for 2 seconds with zero input
+    const restingQuat = ship.quaternion.clone();
+    ship.update(2.0);
+
+    // Orientation must remain strictly stable and NOT spring/level back towards world horizon
+    expect(ship.quaternion.x).toBeCloseTo(restingQuat.x, 3);
+    expect(ship.quaternion.y).toBeCloseTo(restingQuat.y, 3);
+    expect(ship.quaternion.z).toBeCloseTo(restingQuat.z, 3);
+    expect(ship.quaternion.w).toBeCloseTo(restingQuat.w, 3);
+  });
 });

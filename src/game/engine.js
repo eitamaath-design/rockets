@@ -4,6 +4,7 @@ import { Cockpit } from './cockpit.js';
 import { PlayerShip } from './ship.js';
 import { WeaponsSystem } from './weapons.js';
 import { RemoteShip } from './remoteShip.js';
+import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
 export class GameEngine {
@@ -61,11 +62,19 @@ export class GameEngine {
     this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 4000);
     this.scene.add(this.camera); // Ensure camera and its children (3D cockpit) are in the scene
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+      precision: 'highp',
+      stencil: false,
+      alpha: false
+    });
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
+    this.renderer.domElement.style.transform = 'translateZ(0)';
+    this.renderer.domElement.style.willChange = 'transform';
     this.container.appendChild(this.renderer.domElement);
 
     // Initialize subsystems
@@ -101,8 +110,10 @@ export class GameEngine {
       if (data.targetId === this.network.selfId) {
         const wasKilled = this.playerShip.takeDamage(data.damage);
         this.cockpit.triggerDamageFlash();
+        audio.playDamageHit();
 
         if (wasKilled) {
+          audio.playExplosion(2.2);
           this.network.broadcastKill(this.network.selfId, data.attackerId, data.attackerName);
           this.onDeathNotice(`💥 Destroyed by ${data.attackerName || 'Unknown Pilot'}`);
         }
@@ -116,6 +127,7 @@ export class GameEngine {
     this.network.onKill((data) => {
       if (data.killerId === this.network.selfId) {
         this.playerShip.recordKill();
+        audio.playScoreChime();
         this.onDeathNotice(`🎯 You eliminated ${data.victimId ? data.victimId.slice(0, 5) : 'Enemy'}! (+100 PTS)`);
       }
     });
@@ -134,9 +146,11 @@ export class GameEngine {
           this.playerShip.input.brake = true;
           break;
         case 'KeyA':
+          if (!this.playerShip.input.strafeLeft) audio.playStrafeBurst();
           this.playerShip.input.strafeLeft = true;
           break;
         case 'KeyD':
+          if (!this.playerShip.input.strafeRight) audio.playStrafeBurst();
           this.playerShip.input.strafeRight = true;
           break;
         case 'KeyQ':
@@ -296,6 +310,9 @@ export class GameEngine {
 
       // 1. Update Player Ship Physics
       this.playerShip.update(dt);
+
+      // Dynamic engine audio updates (smooth thrust & reverse brake sound)
+      audio.updateEngine(this.playerShip.input.thrust, this.playerShip.input.brake, dt);
 
       // 2. Continuous Cannon Firing
       this.weaponsSystem.triggerCannon(this.isFiringCannon, this.playerShip, now);

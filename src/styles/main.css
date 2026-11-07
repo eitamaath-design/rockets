@@ -55,6 +55,9 @@ html, body {
   display: block;
   z-index: 1;
   touch-action: none;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 
 /* =========================================

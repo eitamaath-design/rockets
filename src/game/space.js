@@ -1,6 +1,83 @@
 import * as THREE from 'three';
 import { createPRNG } from '../utils/math.js';
 
+/**
+ * Creates a circular soft glow texture so point particles render as
+ * smooth celestial orbs instead of hard square pixel blocks on any GPU.
+ */
+function createGlowPointTexture() {
+  if (typeof document === 'undefined') return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+    grad.addColorStop(0.25, 'rgba(235, 245, 255, 0.85)');
+    grad.addColorStop(0.55, 'rgba(160, 205, 255, 0.35)');
+    grad.addColorStop(0.85, 'rgba(100, 150, 255, 0.08)');
+    grad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.generateMipmaps = true;
+    return texture;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Creates high-frequency procedural rock surface micro-texture for realistic
+ * stony roughness and elevation grain without visible polygon facets.
+ */
+function createRockBumpTexture() {
+  if (typeof document === 'undefined') return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const imgData = ctx.createImageData(256, 256);
+    const data = imgData.data;
+
+    for (let y = 0; y < 256; y++) {
+      for (let x = 0; x < 256; x++) {
+        const idx = (y * 256 + x) * 4;
+        const nx = x / 256;
+        const ny = y / 256;
+
+        const n = Math.sin(nx * 32.0) * Math.cos(ny * 32.0) * 0.35 +
+                  Math.sin(nx * 64.0 + ny * 48.0) * 0.25 +
+                  Math.sin(nx * 128.0 - ny * 96.0) * 0.15;
+        const grit = (Math.random() - 0.5) * 0.25;
+        const val = Math.floor(Math.min(255, Math.max(0, (n + grit + 0.5) * 255)));
+
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(4, 4);
+    return texture;
+  } catch (_) {
+    return null;
+  }
+}
+
 export class SpaceEnvironment {
   constructor(scene, mapSeed = 42) {
     this.scene = scene;
@@ -43,7 +120,8 @@ export class SpaceEnvironment {
   }
 
   createStarfield() {
-    const starCount = 4000;
+    // Reduced to 5% of previous 4000 (200 soft glowing stars) and limited to shorter visible range
+    const starCount = 200;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
@@ -55,7 +133,8 @@ export class SpaceEnvironment {
       const v = prng();
       const theta = u * 2.0 * Math.PI;
       const phi = Math.acos(2.0 * v - 1.0);
-      const r = 1400 + prng() * 600;
+      // Shorter distance (350 to 800 units instead of 1400-2000)
+      const r = 350 + prng() * 450;
 
       positions[idx] = r * Math.sin(phi) * Math.cos(theta);
       positions[idx + 1] = r * Math.sin(phi) * Math.sin(theta);
@@ -63,11 +142,11 @@ export class SpaceEnvironment {
 
       const colorType = prng();
       if (colorType < 0.25) {
-        colors[idx] = 0.6; colors[idx + 1] = 0.85; colors[idx + 2] = 1.0; // electric blue
+        colors[idx] = 0.65; colors[idx + 1] = 0.88; colors[idx + 2] = 1.0; // electric blue
       } else if (colorType < 0.45) {
-        colors[idx] = 1.0; colors[idx + 1] = 0.85; colors[idx + 2] = 0.6; // golden yellow
+        colors[idx] = 1.0; colors[idx + 1] = 0.88; colors[idx + 2] = 0.65; // golden yellow
       } else if (colorType < 0.6) {
-        colors[idx] = 0.9; colors[idx + 1] = 0.6; colors[idx + 2] = 1.0; // magenta star
+        colors[idx] = 0.92; colors[idx + 1] = 0.65; colors[idx + 2] = 1.0; // soft magenta
       } else {
         colors[idx] = 1.0; colors[idx + 1] = 1.0; colors[idx + 2] = 1.0; // pure diamond white
       }
@@ -76,24 +155,28 @@ export class SpaceEnvironment {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
+    const starTexture = createGlowPointTexture();
     const material = new THREE.PointsMaterial({
-      size: 3.2,
+      size: 4.0,
+      map: starTexture || undefined,
       vertexColors: true,
       transparent: true,
-      opacity: 0.95,
-      sizeAttenuation: false,
-      fog: false // Crucial: stars remain crystal clear without fogging to black
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+      fog: false
     });
 
     const starfield = new THREE.Points(geometry, material);
     this.scene.add(starfield);
 
-    // Glowing deep space nebulae clouds
-    this.createNebulae(prng);
+    // Glowing deep space nebulae clouds (also reduced to 5% = 25 clouds at shorter range)
+    this.createNebulae(prng, starTexture);
   }
 
-  createNebulae(prng) {
-    const nebulaCount = 500;
+  createNebulae(prng, starTexture) {
+    const nebulaCount = 25;
     const geom = new THREE.BufferGeometry();
     const positions = new Float32Array(nebulaCount * 3);
     const colors = new Float32Array(nebulaCount * 3);
@@ -111,11 +194,11 @@ export class SpaceEnvironment {
       const baseColor = clusterColors[clusterIdx];
 
       const angle = (clusterIdx / clusterColors.length) * Math.PI * 2 + (prng() - 0.5) * 0.8;
-      const dist = 1100 + prng() * 400;
+      const dist = 550 + prng() * 350;
 
-      positions[idx] = Math.cos(angle) * dist + (prng() - 0.5) * 300;
-      positions[idx + 1] = (prng() - 0.5) * 600;
-      positions[idx + 2] = Math.sin(angle) * dist + (prng() - 0.5) * 300;
+      positions[idx] = Math.cos(angle) * dist + (prng() - 0.5) * 200;
+      positions[idx + 1] = (prng() - 0.5) * 400;
+      positions[idx + 2] = Math.sin(angle) * dist + (prng() - 0.5) * 200;
 
       colors[idx] = baseColor.r;
       colors[idx + 1] = baseColor.g;
@@ -126,12 +209,14 @@ export class SpaceEnvironment {
     geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 45.0,
+      size: 60.0,
+      map: starTexture || undefined,
       vertexColors: true,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.28,
       blending: THREE.AdditiveBlending,
       sizeAttenuation: true,
+      depthWrite: false,
       fog: false
     });
 
@@ -149,39 +234,49 @@ export class SpaceEnvironment {
     const count = 120;
     const playAreaRadius = 1000;
 
-    // Solid opaque planetary rock materials
+    const rockBump = createRockBumpTexture();
+
+    // High-quality smooth-shaded planetary rock materials with subtle micro-relief bump mapping
     const rustChondrite = new THREE.MeshStandardMaterial({
-      color: 0xa25f46,
+      color: 0x9b5842,
       roughness: 0.88,
-      metalness: 0.18,
-      flatShading: true,
+      metalness: 0.16,
+      flatShading: false,
+      bumpMap: rockBump || null,
+      bumpScale: 1.2,
       depthWrite: true,
       side: THREE.FrontSide
     });
 
     const charcoalBasalt = new THREE.MeshStandardMaterial({
-      color: 0x3d434c,
+      color: 0x383e46,
       roughness: 0.92,
       metalness: 0.10,
-      flatShading: true,
+      flatShading: false,
+      bumpMap: rockBump || null,
+      bumpScale: 1.2,
       depthWrite: true,
       side: THREE.FrontSide
     });
 
     const slateRock = new THREE.MeshStandardMaterial({
-      color: 0x677280,
+      color: 0x5e6875,
       roughness: 0.86,
       metalness: 0.14,
-      flatShading: true,
+      flatShading: false,
+      bumpMap: rockBump || null,
+      bumpScale: 1.2,
       depthWrite: true,
       side: THREE.FrontSide
     });
 
     const nickelGranite = new THREE.MeshStandardMaterial({
-      color: 0x8898a7,
-      roughness: 0.78,
-      metalness: 0.28,
-      flatShading: true,
+      color: 0x7e8c9a,
+      roughness: 0.80,
+      metalness: 0.26,
+      flatShading: false,
+      bumpMap: rockBump || null,
+      bumpScale: 1.2,
       depthWrite: true,
       side: THREE.FrontSide
     });
@@ -189,18 +284,19 @@ export class SpaceEnvironment {
     const materials = [rustChondrite, charcoalBasalt, slateRock, nickelGranite];
 
     for (let i = 0; i < count; i++) {
-      // Scale distribution: Titan (75-140), Large (42-75), Medium (22-42)
+      // High-resolution subdivision so individual polygons are completely imperceptible:
+      // Titan (detail 4 = 5,120 faces), Large (detail 3 = 1,280 faces), Medium (detail 3 = 1,280 faces)
       let radius;
       let detail;
       if (i < 20) {
         radius = 75 + prng() * 65; // 75 to 140 units
-        detail = 3;
+        detail = 4;
       } else if (i < 65) {
         radius = 42 + prng() * 33; // 42 to 75 units
-        detail = 2;
+        detail = 3;
       } else {
         radius = 22 + prng() * 20; // 22 to 42 units
-        detail = 2;
+        detail = 3;
       }
 
       const geom = new THREE.IcosahedronGeometry(radius, detail);
