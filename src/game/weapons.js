@@ -1,12 +1,130 @@
 import * as THREE from 'three';
 
+/**
+ * Dynamic particle fire trail system for kinetic projectiles.
+ * Emits blazing white/yellow/orange/red plasma flame particles that billow
+ * behind projectiles as they streak through space.
+ */
+class FireTrailSystem {
+  constructor(scene) {
+    this.scene = scene;
+    this.maxParticles = 1000;
+    this.particles = [];
+
+    this.geom = new THREE.BufferGeometry();
+    this.positions = new Float32Array(this.maxParticles * 3);
+    this.colors = new Float32Array(this.maxParticles * 3);
+
+    this.geom.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geom.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+
+    this.material = new THREE.PointsMaterial({
+      size: 4.8,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true
+    });
+
+    this.points = new THREE.Points(this.geom, this.material);
+    this.scene.add(this.points);
+  }
+
+  emit(pos, dir, count = 2) {
+    for (let i = 0; i < count; i++) {
+      if (this.particles.length >= this.maxParticles) break;
+      const jitter = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.45,
+        (Math.random() - 0.5) * 0.45,
+        (Math.random() - 0.5) * 0.45
+      );
+      const pPos = pos.clone().add(jitter);
+      // Flame plume expels backward with turbulence
+      const pVel = dir.clone().multiplyScalar(-18.0).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 8.0,
+        (Math.random() - 0.5) * 8.0,
+        (Math.random() - 0.5) * 8.0
+      ));
+      const life = 0.28 + Math.random() * 0.18;
+      this.particles.push({
+        pos: pPos,
+        vel: pVel,
+        life,
+        maxLife: life
+      });
+    }
+  }
+
+  update(dt) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.pos.addScaledVector(p.vel, dt);
+    }
+
+    const activeCount = this.particles.length;
+    for (let i = 0; i < activeCount; i++) {
+      const p = this.particles[i];
+      const idx = i * 3;
+      this.positions[idx] = p.pos.x;
+      this.positions[idx + 1] = p.pos.y;
+      this.positions[idx + 2] = p.pos.z;
+
+      // Color transitions: white-hot -> bright yellow -> fiery orange -> dark red ember
+      const progress = 1.0 - (p.life / p.maxLife);
+      if (progress < 0.25) {
+        this.colors[idx] = 1.0;
+        this.colors[idx + 1] = 0.98;
+        this.colors[idx + 2] = 0.70;
+      } else if (progress < 0.65) {
+        this.colors[idx] = 1.0;
+        this.colors[idx + 1] = 0.55 * (1.0 - (progress - 0.25) / 0.4);
+        this.colors[idx + 2] = 0.05;
+      } else {
+        const fade = (1.0 - progress) / 0.35;
+        this.colors[idx] = 0.85 * fade;
+        this.colors[idx + 1] = 0.15 * fade;
+        this.colors[idx + 2] = 0.02 * fade;
+      }
+    }
+
+    // Hide remaining buffer points
+    for (let i = activeCount; i < this.maxParticles; i++) {
+      const idx = i * 3;
+      this.positions[idx] = 99999;
+      this.positions[idx + 1] = 99999;
+      this.positions[idx + 2] = 99999;
+      this.colors[idx] = 0;
+      this.colors[idx + 1] = 0;
+      this.colors[idx + 2] = 0;
+    }
+
+    this.geom.attributes.position.needsUpdate = true;
+    this.geom.attributes.color.needsUpdate = true;
+  }
+
+  cleanup() {
+    if (this.points && this.points.parent) {
+      this.points.parent.remove(this.points);
+    }
+    this.geom.dispose();
+    this.material.dispose();
+  }
+}
+
 export class WeaponsSystem {
   constructor(scene, spaceEnv, network) {
     this.scene = scene;
     this.spaceEnv = spaceEnv;
     this.network = network;
 
-    // Cannon parameters
+    // Cannon parameters (slower speed, actual visible projectile with fire trail)
     this.cannonMaxEnergy = 100.0;
     this.cannonEnergy = 100.0;
     this.cannonShotCost = 2.5; // 40 shots = 4.0s of continuous fire
@@ -16,7 +134,7 @@ export class WeaponsSystem {
     this.cannonFireInterval = 0.1; // 10 shots/sec (every 100ms)
     this.cannonLastFireTime = 0;
     this.cannonDamage = 5.0; // 20 hits in 2.0s = 100 HP (TTK = 2.0s)
-    this.cannonSpeed = 380.0;
+    this.cannonSpeed = 175.0; // Perceptible, trackable flight speed
 
     // Rear Mine parameters
     this.mineMaxCharges = 2;
@@ -34,25 +152,37 @@ export class WeaponsSystem {
     this.mines = []; // { mesh, light, pos, life, ownerId, id, isLocal }
     this.explosions = []; // { mesh, light, life, maxLife }
 
-    // Reusable materials & geometries for prominent, glowing plasma bolts
-    this.laserOuterGeom = new THREE.CylinderGeometry(0.35, 0.35, 6.0, 8);
-    this.laserOuterGeom.rotateX(Math.PI / 2);
-    this.laserCoreGeom = new THREE.CylinderGeometry(0.16, 0.16, 6.4, 6);
-    this.laserCoreGeom.rotateX(Math.PI / 2);
+    // Dynamic fire particle trails
+    this.fireTrails = new FireTrailSystem(this.scene);
 
-    this.localLaserOuterMat = new THREE.MeshBasicMaterial({
-      color: 0x00f0ff,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending
+    // Reusable materials & geometries for 3D kinetic rocket slug
+    this.slugBodyGeom = new THREE.CylinderGeometry(0.24, 0.32, 2.0, 8);
+    this.slugBodyGeom.rotateX(Math.PI / 2);
+
+    this.slugNoseGeom = new THREE.ConeGeometry(0.24, 0.9, 8);
+    this.slugNoseGeom.rotateX(-Math.PI / 2);
+
+    this.slugTailGeom = new THREE.CylinderGeometry(0.18, 0.28, 0.45, 8);
+    this.slugTailGeom.rotateX(Math.PI / 2);
+
+    this.slugBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x242e3d,
+      roughness: 0.35,
+      metalness: 0.85,
+      flatShading: true
     });
-    this.remoteLaserOuterMat = new THREE.MeshBasicMaterial({
-      color: 0xff3355,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending
+
+    this.localSlugNoseMat = new THREE.MeshBasicMaterial({
+      color: 0xffcc33
     });
-    this.laserCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    this.remoteSlugNoseMat = new THREE.MeshBasicMaterial({
+      color: 0xff3344
+    });
+
+    this.slugThrusterMat = new THREE.MeshBasicMaterial({
+      color: 0xff6600
+    });
 
     this.mineGeom = new THREE.DodecahedronGeometry(1.6, 1);
     this.mineMat = new THREE.MeshStandardMaterial({
@@ -144,16 +274,23 @@ export class WeaponsSystem {
     group.position.copy(origin);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
 
-    // Outer bright glowing beam
-    const outerBeam = new THREE.Mesh(this.laserOuterGeom, isLocal ? this.localLaserOuterMat : this.remoteLaserOuterMat);
-    group.add(outerBeam);
+    // 1. Aerodynamic metallic rocket body
+    const body = new THREE.Mesh(this.slugBodyGeom, this.slugBodyMat);
+    group.add(body);
 
-    // Inner brilliant white core
-    const innerCore = new THREE.Mesh(this.laserCoreGeom, this.laserCoreMat);
-    group.add(innerCore);
+    // 2. Heated nosecone
+    const nose = new THREE.Mesh(this.slugNoseGeom, isLocal ? this.localSlugNoseMat : this.remoteSlugNoseMat);
+    nose.position.set(0, 0, -1.45);
+    group.add(nose);
 
-    // Bolt point light for local illumination
-    const light = new THREE.PointLight(isLocal ? 0x00ffff : 0xff3344, 2.0, 18);
+    // 3. Tail ignition thruster nozzle
+    const tail = new THREE.Mesh(this.slugTailGeom, this.slugThrusterMat);
+    tail.position.set(0, 0, 1.15);
+    group.add(tail);
+
+    // 4. Fiery illuminating point light
+    const light = new THREE.PointLight(isLocal ? 0xff8800 : 0xff2244, 2.8, 22);
+    light.position.set(0, 0, 0.5);
     group.add(light);
 
     this.scene.add(group);
@@ -162,7 +299,7 @@ export class WeaponsSystem {
       dir: dir.clone().normalize(),
       speed: this.cannonSpeed,
       initialVel: initialVel ? initialVel.clone() : new THREE.Vector3(),
-      life: 1.8,
+      life: 2.8,
       isLocal,
       id
     });
@@ -258,6 +395,10 @@ export class WeaponsSystem {
       // Move projectile along forward + slight initial velocity
       const move = p.dir.clone().multiplyScalar(p.speed * dt);
       p.mesh.position.add(move);
+
+      // Emit continuous fire trail behind the rocket nozzle
+      const tailPos = p.mesh.position.clone().addScaledVector(p.dir, -1.2);
+      this.fireTrails.emit(tailPos, p.dir, 3);
 
       let destroyed = false;
 
@@ -391,12 +532,18 @@ export class WeaponsSystem {
         this.explosions.splice(i, 1);
       }
     }
+
+    // 6. Update active rocket fire particle trails
+    if (this.fireTrails) {
+      this.fireTrails.update(dt);
+    }
   }
 
   cleanup() {
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     for (const m of this.mines) this.scene.remove(m.mesh);
     for (const e of this.explosions) this.scene.remove(e.mesh);
+    if (this.fireTrails) this.fireTrails.cleanup();
     this.projectiles = [];
     this.mines = [];
     this.explosions = [];

@@ -56,7 +56,7 @@ describe('Combat Integration: Multi-Player Engagement', () => {
     expect(weapons.projectiles.length).toBe(1);
 
     // Update weapons simulation (projectile flies forward and intersects remote ship bounding area)
-    weapons.update(0.06, localShip, remotesMap, () => {});
+    weapons.update(0.12, localShip, remotesMap, () => {});
 
     // Hit should be detected and packet dispatched to network
     expect(sentHits.length).toBe(1);

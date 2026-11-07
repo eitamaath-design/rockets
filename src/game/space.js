@@ -6,9 +6,6 @@ export class SpaceEnvironment {
     this.scene = scene;
     this.mapSeed = mapSeed;
     this.asteroids = []; // { mesh, radius, position, rotationSpeed, boundingSphere }
-    this.dustParticles = null;
-    this.dustPositions = null;
-    this.dustCount = 1200;
     this.asteroidGroup = new THREE.Group();
 
     this.init();
@@ -18,7 +15,6 @@ export class SpaceEnvironment {
     this.setupLighting();
     this.createStarfield();
     this.createAsteroidField();
-    this.createSpeedDust();
   }
 
   setupLighting() {
@@ -145,59 +141,64 @@ export class SpaceEnvironment {
 
   /**
    * Deterministic asteroid generation based on room seed.
-   * Features massive Titan, Large, and Medium cratered asteroids
-   * that ships can easily hide behind for tactical dogfighting cover.
+   * Generates seamless, 100% watertight, solid rocky masses with deep impact craters,
+   * raised ridges, and dramatic elevation changes.
    */
   createAsteroidField() {
     const prng = createPRNG(this.mapSeed);
     const count = 120;
     const playAreaRadius = 1000;
 
-    // Rock materials with rich planetary rock colors and crisp flat shading
-    const grayChondrite = new THREE.MeshStandardMaterial({
-      color: 0x828b96,
-      roughness: 0.85,
-      metalness: 0.15,
-      flatShading: true
+    // Solid opaque planetary rock materials
+    const rustChondrite = new THREE.MeshStandardMaterial({
+      color: 0xa25f46,
+      roughness: 0.88,
+      metalness: 0.18,
+      flatShading: true,
+      depthWrite: true,
+      side: THREE.FrontSide
     });
 
-    const rustIron = new THREE.MeshStandardMaterial({
-      color: 0x9b6b55,
-      roughness: 0.75,
-      metalness: 0.35,
-      flatShading: true
+    const charcoalBasalt = new THREE.MeshStandardMaterial({
+      color: 0x3d434c,
+      roughness: 0.92,
+      metalness: 0.10,
+      flatShading: true,
+      depthWrite: true,
+      side: THREE.FrontSide
     });
 
-    const darkBasalt = new THREE.MeshStandardMaterial({
-      color: 0x48505a,
-      roughness: 0.9,
-      metalness: 0.1,
-      flatShading: true
+    const slateRock = new THREE.MeshStandardMaterial({
+      color: 0x677280,
+      roughness: 0.86,
+      metalness: 0.14,
+      flatShading: true,
+      depthWrite: true,
+      side: THREE.FrontSide
     });
 
     const nickelGranite = new THREE.MeshStandardMaterial({
-      color: 0x94a3af,
-      roughness: 0.7,
-      metalness: 0.25,
-      flatShading: true
+      color: 0x8898a7,
+      roughness: 0.78,
+      metalness: 0.28,
+      flatShading: true,
+      depthWrite: true,
+      side: THREE.FrontSide
     });
 
-    const materials = [grayChondrite, rustIron, darkBasalt, nickelGranite];
+    const materials = [rustChondrite, charcoalBasalt, slateRock, nickelGranite];
 
     for (let i = 0; i < count; i++) {
       // Scale distribution: Titan (75-140), Large (42-75), Medium (22-42)
       let radius;
       let detail;
       if (i < 20) {
-        // Massive Titan asteroids for ship cover & hiding
         radius = 75 + prng() * 65; // 75 to 140 units
         detail = 3;
       } else if (i < 65) {
-        // Large asteroids
         radius = 42 + prng() * 33; // 42 to 75 units
         detail = 2;
       } else {
-        // Medium asteroids
         radius = 22 + prng() * 20; // 22 to 42 units
         detail = 2;
       }
@@ -206,13 +207,18 @@ export class SpaceEnvironment {
       const posAttr = geom.attributes.position;
       const vertex = new THREE.Vector3();
 
-      // Oblong non-spherical shape factors
-      const stretchX = 0.8 + prng() * 0.45;
-      const stretchY = 0.75 + prng() * 0.5;
-      const stretchZ = 0.8 + prng() * 0.45;
+      // Oblong non-spherical stretch factors
+      const stretchX = 0.82 + prng() * 0.40;
+      const stretchY = 0.78 + prng() * 0.44;
+      const stretchZ = 0.82 + prng() * 0.40;
 
-      // 3-5 procedural crater indentation centers
-      const numCraters = Math.floor(3 + prng() * 3);
+      // Deterministic continuous 3D noise phases for this asteroid
+      const p1 = prng() * Math.PI * 2;
+      const p2 = prng() * Math.PI * 2;
+      const p3 = prng() * Math.PI * 2;
+
+      // 4-6 procedural crater indentation centers
+      const numCraters = Math.floor(4 + prng() * 3);
       const craters = [];
       for (let c = 0; c < numCraters; c++) {
         const cTheta = prng() * Math.PI * 2;
@@ -223,35 +229,49 @@ export class SpaceEnvironment {
             Math.sin(cPhi) * Math.sin(cTheta),
             Math.cos(cPhi)
           ),
-          depth: 0.18 + prng() * 0.16,
-          radiusCos: 0.75 + prng() * 0.18
+          depth: 0.16 + prng() * 0.16,
+          radiusCos: 0.78 + prng() * 0.14
         });
       }
 
-      // Deform vertices for craggy craters, ridges, and crags
+      // CRITICAL: Compute displacement ONLY from normalized spatial direction u!
+      // This ensures coincident vertices get the exact same displacement,
+      // guaranteeing the mesh remains 100% solid, unified, and watertight with NO split polygons.
       for (let v = 0; v < posAttr.count; v++) {
         vertex.fromBufferAttribute(posAttr, v);
-        const normDir = vertex.clone().normalize();
+        const u = vertex.clone().normalize();
 
-        // Apply oblong stretches
-        vertex.x *= stretchX;
-        vertex.y *= stretchY;
-        vertex.z *= stretchZ;
+        // 1. Multi-octave continuous trigonometric 3D noise for rocky crags & ridges
+        const n1 = 0.10 * Math.sin(u.x * 3.2 + p1) * Math.cos(u.y * 3.2 + p2) +
+                   0.08 * Math.sin(u.z * 3.8 + p3);
+        const n2 = 0.05 * Math.sin(u.x * 6.5 - u.z * 5.2) * Math.cos(u.y * 6.1);
+        const n3 = 0.025 * Math.sin(u.y * 12.0 + u.x * 10.5) * Math.sin(u.z * 11.8);
+        const ridgeNoise = n1 + n2 + n3;
 
-        // Apply craters
+        // 2. Smooth impact craters with raised debris rims
         let craterDisp = 0;
-        for (const crater of craters) {
-          const dot = normDir.dot(crater.dir);
+        for (let c = 0; c < craters.length; c++) {
+          const crater = craters[c];
+          const dot = u.dot(crater.dir);
           if (dot > crater.radiusCos) {
-            const factor = (dot - crater.radiusCos) / (1.0 - crater.radiusCos);
-            craterDisp += Math.sin(factor * Math.PI) * crater.depth;
+            // Inside crater bowl: dip inward smoothly
+            const insideFactor = (dot - crater.radiusCos) / (1.0 - crater.radiusCos);
+            craterDisp -= crater.depth * Math.cos(insideFactor * (Math.PI / 2));
+          } else if (dot > crater.radiusCos - 0.12) {
+            // Raised outer crater rim
+            const rimFactor = (dot - (crater.radiusCos - 0.12)) / 0.12;
+            craterDisp += 0.35 * crater.depth * Math.sin(rimFactor * Math.PI);
           }
         }
 
-        // Craggy noise
-        const crag = (prng() - 0.5) * 0.18;
-        const finalScale = Math.max(0.65, 1.0 - craterDisp + crag);
-        vertex.multiplyScalar(finalScale);
+        // 3. Final watertight radial displacement
+        const finalFactor = Math.max(0.60, 1.0 + ridgeNoise + craterDisp);
+        vertex.copy(u).multiplyScalar(radius * finalFactor);
+
+        // 4. Apply oblong stretch
+        vertex.x *= stretchX;
+        vertex.y *= stretchY;
+        vertex.z *= stretchZ;
 
         posAttr.setXYZ(v, vertex.x, vertex.y, vertex.z);
       }
@@ -263,11 +283,11 @@ export class SpaceEnvironment {
       let posX = 0, posY = 0, posZ = 0;
 
       // The first 12 asteroids are placed directly in the player's forward view down -Z
-      // (Player spawns at z = 180 looking down -Z, so z values from 70 down to -250 are 110 to 430 units ahead)
+      // (Spawns at z = 180 looking down -Z, so z from 60 down to -260 are 120 to 440 units ahead)
       if (i < 12) {
         posX = (prng() - 0.5) * 180;
         posY = (prng() - 0.5) * 90;
-        posZ = 70 - prng() * 320;
+        posZ = 60 - prng() * 320;
       } else {
         let posFound = false;
         let attempts = 0;
@@ -278,7 +298,7 @@ export class SpaceEnvironment {
           posZ = (prng() - 0.5) * playAreaRadius * 2;
           const distToSpawn = Math.hypot(posX - 0, posY - 0, posZ - 180);
           const distToCenter = Math.hypot(posX, posY, posZ);
-          if (distToSpawn > radius + 40 && distToCenter < playAreaRadius) {
+          if (distToSpawn > radius + 50 && distToCenter < playAreaRadius) {
             posFound = true;
           }
         }
@@ -305,37 +325,6 @@ export class SpaceEnvironment {
     this.scene.add(this.asteroidGroup);
   }
 
-  /**
-   * Floating space dust / warp streak particles around player to give velocity feedback.
-   */
-  createSpeedDust() {
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(this.dustCount * 3);
-    const boxSize = 250;
-
-    for (let i = 0; i < this.dustCount; i++) {
-      const idx = i * 3;
-      positions[idx] = (Math.random() - 0.5) * boxSize;
-      positions[idx + 1] = (Math.random() - 0.5) * boxSize;
-      positions[idx + 2] = (Math.random() - 0.5) * boxSize;
-    }
-
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const mat = new THREE.PointsMaterial({
-      color: 0x88ccff,
-      size: 2.5,
-      transparent: true,
-      opacity: 0.6,
-      blending: THREE.AdditiveBlending,
-      fog: false
-    });
-
-    this.dustParticles = new THREE.Points(geom, mat);
-    this.scene.add(this.dustParticles);
-    this.dustPositions = positions;
-  }
-
   update(dt, playerPosition, playerVelocity) {
     // Slowly rotate asteroids
     for (let i = 0; i < this.asteroids.length; i++) {
@@ -343,29 +332,6 @@ export class SpaceEnvironment {
       a.mesh.rotation.x += a.rotationSpeed.x;
       a.mesh.rotation.y += a.rotationSpeed.y;
       a.mesh.rotation.z += a.rotationSpeed.z;
-    }
-
-    // Keep speed dust centered on player
-    if (this.dustParticles && playerPosition) {
-      const boxSize = 250;
-      const halfBox = boxSize / 2;
-      const posAttr = this.dustParticles.geometry.attributes.position;
-      const array = posAttr.array;
-
-      for (let i = 0; i < this.dustCount; i++) {
-        const idx = i * 3;
-        let dx = array[idx] - playerPosition.x;
-        let dy = array[idx + 1] - playerPosition.y;
-        let dz = array[idx + 2] - playerPosition.z;
-
-        if (dx > halfBox) array[idx] -= boxSize;
-        if (dx < -halfBox) array[idx] += boxSize;
-        if (dy > halfBox) array[idx + 1] -= boxSize;
-        if (dy < -halfBox) array[idx + 1] += boxSize;
-        if (dz > halfBox) array[idx + 2] -= boxSize;
-        if (dz < -halfBox) array[idx + 2] += boxSize;
-      }
-      posAttr.needsUpdate = true;
     }
   }
 
