@@ -64,8 +64,9 @@ This document serves as the permanent master reference for the **Rockets** multi
 > Rockets is fully serverless. No paid backend, API keys, or private database credentials are required.
 
 ### Services & Infrastructure Inventory
-- **GitHub Repository:** `eitamaath-design/rockets`
-- **GitHub Pages URL:** `https://eitamaath-design.github.io/rockets/`
+- **GitHub Repository:** `https://github.com/eitamaath-design/rockets`
+- **GitHub Pages URL (Live):** `https://eitamaath-design.github.io/rockets/`
+- **Deployment Status:** Active & Built (`gh-pages` branch + GitHub Actions)
 - **Signaling Infrastructure:**
   - Public Nostr Relays: `wss://relay.damus.io`, `wss://nos.lol`, `wss://relay.snort.social`, `wss://nostr.mom`
   - Public STUN Servers: `stun:stun.l.google.com:19302`, `stun:stun1.l.google.com:19302`
