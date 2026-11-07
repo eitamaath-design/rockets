@@ -110,4 +110,63 @@ describe('Netcode & Leader Election', () => {
       expect(remote.position.x).toBeGreaterThan(0);
     });
   });
+
+  describe('Trystero Action Channel Adapter', () => {
+    it('should extract valid peerId string from modern Trystero metadata object', async () => {
+      const { createActionChannel } = await import('../../src/net/actions.js');
+      let registeredOnMessage = null;
+
+      const mockRoom = {
+        makeAction: (name) => ({
+          send: vi.fn(),
+          set onMessage(fn) { registeredOnMessage = fn; },
+          get onMessage() { return registeredOnMessage; },
+          set onReceive(fn) {},
+          get onReceive() { return null; }
+        })
+      };
+
+      const channel = createActionChannel(mockRoom, 'state');
+      let receivedData = null;
+      let receivedPeerId = null;
+
+      channel.onReceive((data, peerId) => {
+        receivedData = data;
+        receivedPeerId = peerId;
+      });
+
+      // Simulate incoming packet from modern Trystero
+      registeredOnMessage({ hp: 100 }, { peerId: 'peer-abc-999' });
+
+      expect(receivedData).toEqual({ hp: 100 });
+      expect(receivedPeerId).toBe('peer-abc-999');
+    });
+
+    it('should discard packets with undefined or invalid peerId', async () => {
+      const { createActionChannel } = await import('../../src/net/actions.js');
+      let registeredOnMessage = null;
+
+      const mockRoom = {
+        makeAction: (name) => ({
+          send: vi.fn(),
+          set onMessage(fn) { registeredOnMessage = fn; },
+          get onMessage() { return registeredOnMessage; }
+        })
+      };
+
+      const channel = createActionChannel(mockRoom, 'state');
+      let callCount = 0;
+
+      channel.onReceive(() => {
+        callCount++;
+      });
+
+      // Packet with undefined metadata
+      registeredOnMessage({ hp: 100 }, undefined);
+      // Packet with empty metadata object
+      registeredOnMessage({ hp: 100 }, {});
+
+      expect(callCount).toBe(0);
+    });
+  });
 });

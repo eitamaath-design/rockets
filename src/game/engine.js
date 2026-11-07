@@ -91,6 +91,7 @@ export class GameEngine {
   setupNetworkHandlers() {
     // When peers join or leave, track 3D remote ships
     this.network.onPeerJoined = (peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       if (!this.remoteShips.has(peerId)) {
         const remote = new RemoteShip(peerId, this.scene, `Pilot-${peerId.slice(0, 4)}`);
         this.remoteShips.set(peerId, remote);
@@ -98,6 +99,7 @@ export class GameEngine {
     };
 
     this.network.onPeerLeft = (peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       if (this.remoteShips.has(peerId)) {
         const remote = this.remoteShips.get(peerId);
         remote.destroy();
@@ -324,15 +326,19 @@ export class GameEngine {
 
       // 4. Update Remote Ships from network packets
       for (const [peerId, peerData] of this.network.peers.entries()) {
+        if (!peerId || typeof peerId !== 'string') continue;
         if (!this.remoteShips.has(peerId)) {
-          const remote = new RemoteShip(peerId, this.scene, peerData.name || `Pilot-${peerId.slice(0, 4)}`);
+          const remoteName = peerData?.name || `Pilot-${peerId.slice(0, 4)}`;
+          const remote = new RemoteShip(peerId, this.scene, remoteName);
           this.remoteShips.set(peerId, remote);
         }
         const remote = this.remoteShips.get(peerId);
-        if (peerData.lastState) {
+        if (remote && peerData?.lastState) {
           remote.receiveNetworkState(peerData.lastState);
         }
-        remote.update(dt);
+        if (remote) {
+          remote.update(dt);
+        }
       }
 
       // 5. Update Cockpit visual tilt and shield glass

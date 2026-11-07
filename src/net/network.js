@@ -9,7 +9,7 @@ export class GameNetwork {
     this.roomId = roomId;
     this.roomName = roomName || roomId;
     this.mapSeed = mapSeed || 42;
-    this.playerName = playerName || `Pilot-${selfId.slice(0, 4)}`;
+    this.playerName = playerName || `Pilot-${(selfId || 'Host').slice(0, 4)}`;
     this.selfId = selfId;
 
     this.onPeerJoined = onPeerJoined || (() => {});
@@ -63,6 +63,7 @@ export class GameNetwork {
 
     // Incoming state packets
     stateChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       if (!this.peers.has(peerId)) {
         this.peers.set(peerId, { id: peerId, ping: 30, lastSeen: Date.now() });
       }
@@ -73,6 +74,7 @@ export class GameNetwork {
 
     // Cannon fire events
     cannonChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.cannonListeners) {
         cb(data, peerId);
       }
@@ -80,6 +82,7 @@ export class GameNetwork {
 
     // Mine drop events
     mineChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.mineListeners) {
         cb(data, peerId);
       }
@@ -87,6 +90,7 @@ export class GameNetwork {
 
     // Damage / Hit events
     hitChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.hitListeners) {
         cb(data, peerId);
       }
@@ -94,6 +98,7 @@ export class GameNetwork {
 
     // Kill events
     killChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.killListeners) {
         cb(data, peerId);
       }
@@ -101,12 +106,14 @@ export class GameNetwork {
 
     // Ping / Pong for latency measurement
     pingChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       if (this.sendPong) {
         this.sendPong({ t: data.t }, peerId);
       }
     });
 
     pongChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       if (data && data.t && this.peers.has(peerId)) {
         const rtt = Math.max(1, Date.now() - data.t);
         this.peers.get(peerId).ping = rtt;
@@ -115,6 +122,7 @@ export class GameNetwork {
 
     // Peer Join / Leave callbacks (supports both modern setter and legacy function APIs)
     const handlePeerJoin = (peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       console.log(`[Mesh] Peer connected: ${peerId}`);
       this.peers.set(peerId, { id: peerId, ping: 40, lastSeen: Date.now() });
       this.updateMasterElection();
@@ -123,6 +131,7 @@ export class GameNetwork {
     };
 
     const handlePeerLeave = (peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
       console.log(`[Mesh] Peer disconnected: ${peerId}`);
       this.peers.delete(peerId);
       this.updateMasterElection();
