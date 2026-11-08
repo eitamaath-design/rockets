@@ -7,7 +7,6 @@ import { RemoteShip } from './remoteShip.js';
 import { ThrusterTrailSystem } from './trail.js';
 import { EngagementBeaconSystem } from './beacon.js';
 import { MeteorSystem } from './meteor.js';
-import { BlackHoleSystem } from './blackhole.js';
 import { PowerUpSystem } from './powerups.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
@@ -44,7 +43,6 @@ export class GameEngine {
     // Firing state
     this.isFiringLaser = false;
     this.isFiringCannon = false;
-    this.blackHoleSystem = null;
     this.powerUpSystem = null;
 
     // State broadcast timer (20Hz)
@@ -71,12 +69,12 @@ export class GameEngine {
   initThree() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x040814);
-    this.scene.fog = new THREE.FogExp2(0x040814, 0.0001);
+    this.scene.fog = new THREE.FogExp2(0x040814, 0.00004);
 
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 4000);
+    this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 12000);
     this.scene.add(this.camera); // Ensure camera and its children (3D cockpit) are in the scene
 
     this.renderer = new THREE.WebGLRenderer({
@@ -105,8 +103,7 @@ export class GameEngine {
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
     this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv);
-    this.blackHoleSystem = new BlackHoleSystem(this.scene, this.spaceEnv);
-    this.powerUpSystem = new PowerUpSystem(this.scene, this.blackHoleSystem);
+    this.powerUpSystem = new PowerUpSystem(this.scene);
 
     // Pre-warm and compile all WebGL materials and shaders upfront
     // This completely eliminates in-game shader compilation freezes when shots are fired!
@@ -172,6 +169,37 @@ export class GameEngine {
         this.onDeathNotice(`🎯 You eliminated ${data.victimId ? data.victimId.slice(0, 5) : 'Enemy'}! (+100 PTS)`);
       }
     });
+
+    // Synchronized Map Reset
+    this.network.onMapReset((seed) => {
+      this.resetMap(seed);
+    });
+  }
+
+  resetMap(newSeed) {
+    this.mapSeed = newSeed;
+    if (this.spaceEnv) {
+      this.spaceEnv.destroy();
+    }
+    this.spaceEnv = new SpaceEnvironment(this.scene, newSeed);
+    if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
+    if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
+    if (this.playerShip) {
+      this.playerShip.spaceEnv = this.spaceEnv;
+      this.playerShip.position.set(0, 80, 3200);
+      this.playerShip.velocity.set(0, 0, 0);
+      this.playerShip.quaternion.set(0, 0, 0, 1);
+    }
+    logger.log('MAP', `Map reseeded with ${newSeed}`);
+    this.onDeathNotice(`🔄 Sector reseeded! Map reset complete.`);
+  }
+
+  requestMapResetVote() {
+    return this.network.requestMapResetVote();
+  }
+
+  castMapResetVote(choice) {
+    return this.network.castMapResetVote(choice);
   }
 
   triggerBoostAction() {
@@ -397,14 +425,6 @@ export class GameEngine {
         this.cockpit.triggerDamageFlash();
       });
 
-      // Battle Royale: Encroaching Cosmic Black Hole & Safe Zone Gravity
-      if (this.blackHoleSystem) {
-        this.blackHoleSystem.update(dt, this.playerShip, this.remoteShips, this.spaceEnv, this.meteorSystem, (notice) => {
-          this.cockpit.triggerDamageFlash();
-          this.onDeathNotice(notice);
-        });
-      }
-
       // Tactical Space Power-Ups (Shield Replenish, Cloak Invisibility, Hologram Decoy)
       if (this.powerUpSystem) {
         this.powerUpSystem.update(dt, this.playerShip, (notice) => {
@@ -621,13 +641,10 @@ export class GameEngine {
         cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
         cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,
         cannonRecharging: (this.weaponsSystem.cannonCooldownTimer <= 0 && this.weaponsSystem.cannonEnergy < this.weaponsSystem.cannonMaxEnergy),
-        safeRadius: Math.round(this.blackHoleSystem ? this.blackHoleSystem.getSafeRadius() : 1000),
-        matchTimeRemaining: Math.max(0, Math.round(this.blackHoleSystem ? this.blackHoleSystem.getMatchTimeRemaining() : 600)),
         isShieldBroken: this.playerShip.isShieldBroken,
         isInvisible: this.playerShip.isInvisible,
         hasHologramDecoy: this.playerShip.hasHologramDecoy,
         alivePilotsCount: [this.playerShip, ...this.remoteShips.values()].filter(s => !s.isDead).length,
-        isVictoryRoyale: (this.network.peers.size > 0 && !this.playerShip.isDead && Array.from(this.remoteShips.values()).every(r => r.isDead)),
         isDead: this.playerShip.isDead,
         respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
         invulnerable: (this.playerShip.invulnerableTimer > 0),
@@ -649,11 +666,11 @@ export class GameEngine {
 
   destroy() {
     this.stop();
+    if (this.spaceEnv) this.spaceEnv.destroy();
     if (this.weaponsSystem) this.weaponsSystem.cleanup();
     if (this.thrusterTrails) this.thrusterTrails.cleanup();
     if (this.beaconSystem) this.beaconSystem.cleanup();
     if (this.meteorSystem) this.meteorSystem.cleanup();
-    if (this.blackHoleSystem) this.blackHoleSystem.cleanup();
     if (this.powerUpSystem) this.powerUpSystem.cleanup();
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);

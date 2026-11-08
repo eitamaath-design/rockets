@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
 import { RemoteShip } from '../../src/game/remoteShip.js';
+import { GameNetwork } from '../../src/net/network.js';
 
 describe('Netcode & Leader Election', () => {
   describe('Deterministic Master Election Protocol', () => {
@@ -167,6 +168,66 @@ describe('Netcode & Leader Election', () => {
       registeredOnMessage({ hp: 100 }, {});
 
       expect(callCount).toBe(0);
+    });
+  });
+
+  describe('Democratic 10-Second Map Reset Voting Protocol', () => {
+    it('should immediately reset map with a new random seed if playing solo', () => {
+      const net = new GameNetwork({ roomId: 'solo-room', mapSeed: 42 });
+      let resetSeed = null;
+      net.onMapReset((seed) => {
+        resetSeed = seed;
+      });
+
+      const res = net.requestMapResetVote();
+      expect(res.solo).toBe(true);
+      expect(res.passed).toBe(true);
+      expect(res.newSeed).toBeDefined();
+      expect(net.mapSeed).toBe(res.newSeed);
+      expect(resetSeed).toBe(res.newSeed);
+    });
+
+    it('should open a 10s ballot when peers are connected and pass on unanimous approval', () => {
+      const net = new GameNetwork({ roomId: 'mesh-room', mapSeed: 100 });
+      net.selfId = 'peer-1';
+      net.peers.set('peer-2', { id: 'peer-2', ping: 25 });
+
+      let voteEvents = [];
+      net.onMapResetVote((v) => voteEvents.push(v));
+
+      let resetSeed = null;
+      net.onMapReset((seed) => { resetSeed = seed; });
+
+      const res = net.requestMapResetVote();
+      expect(res.solo).toBe(false);
+      expect(net.currentMapResetVote).toBeDefined();
+      expect(net.currentMapResetVote.votes.get('peer-1')).toBe(true);
+
+      // Peer 2 casts YES vote
+      net.handleIncomingVoteCast({ voteId: res.voteId, choice: true }, 'peer-2');
+
+      // Both voted YES -> unanimous approval!
+      expect(net.currentMapResetVote).toBeNull();
+      expect(resetSeed).toBe(res.newSeed);
+      expect(net.mapSeed).toBe(res.newSeed);
+    });
+
+    it('should fail and not reset map if any peer votes NO', () => {
+      const net = new GameNetwork({ roomId: 'mesh-room-2', mapSeed: 200 });
+      net.selfId = 'peer-1';
+      net.peers.set('peer-2', { id: 'peer-2', ping: 30 });
+
+      let resetSeed = null;
+      net.onMapReset((seed) => { resetSeed = seed; });
+
+      const res = net.requestMapResetVote();
+      // Peer 2 votes NO
+      net.handleIncomingVoteCast({ voteId: res.voteId, choice: false }, 'peer-2');
+
+      // Failed -> vote closes without map reset
+      expect(net.currentMapResetVote).toBeNull();
+      expect(resetSeed).toBeNull();
+      expect(net.mapSeed).toBe(200);
     });
   });
 });

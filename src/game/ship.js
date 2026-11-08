@@ -7,7 +7,7 @@ export class PlayerShip {
     this.spaceEnv = spaceEnv;
 
     // Transform & Physics
-    this.position = new THREE.Vector3(0, 0, 100);
+    this.position = new THREE.Vector3(0, 80, 3200);
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.quaternion = new THREE.Quaternion();
 
@@ -79,8 +79,8 @@ export class PlayerShip {
   }
 
   resetSpawn() {
-    // Clear initial spawn coordinate facing directly forward down -Z into asteroid field
-    this.position.set(0, 0, 180);
+    // Clear initial spawn coordinate in orbital safe space facing forward
+    this.position.set(0, 80, 3200);
     this.velocity.set(0, 0, 0);
     this.quaternion.set(0, 0, 0, 1); // Looking straight down -Z
 
@@ -271,7 +271,7 @@ export class PlayerShip {
 
     // Safety checks against NaN corruption
     if (isNaN(this.position.x) || isNaN(this.position.y) || isNaN(this.position.z)) {
-      this.position.set(0, 0, 180);
+      this.position.set(0, 80, 3200);
       this.velocity.set(0, 0, 0);
     }
     if (isNaN(this.velocity.x) || isNaN(this.velocity.y) || isNaN(this.velocity.z)) {
@@ -386,9 +386,9 @@ export class PlayerShip {
     // 4. Update Position
     this.position.addScaledVector(this.velocity, dt);
 
-    // Keep ship within universe bounds (~1100 units from center)
+    // Keep ship within universe bounds (~6500 units from center)
     const distFromOrigin = this.position.length();
-    if (distFromOrigin > 1100) {
+    if (distFromOrigin > 6500) {
       // Elastic soft barrier pushing back inward
       const pull = this.position.clone().normalize().multiplyScalar(-30 * dt);
       this.velocity.add(pull);

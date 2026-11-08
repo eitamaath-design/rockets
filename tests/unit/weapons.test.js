@@ -150,7 +150,7 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
 
     it('should track target in forward line-of-sight and lock after 3.0 seconds', () => {
       const remoteShip = {
-        position: new THREE.Vector3(0, 0, -200), // Directly ahead
+        position: ship.position.clone().add(new THREE.Vector3(0, 0, -200)), // Directly ahead
         isDead: false,
         isInvisible: false
       };

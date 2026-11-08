@@ -45,32 +45,29 @@ export class MeteorSystem {
   spawnMeteor() {
     if (this.activeMeteor) return;
 
-    // 1. Coordinates: Outside asteroid sector at radius ~1300
+    // 1. Coordinates: Outside asteroid sector at radius 6500-7000u
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2.0 * Math.random() - 1.0);
-    const spawnDist = 1300;
+    const spawnDist = 6500 + Math.random() * 500;
 
     const spawnPos = new THREE.Vector3(
       spawnDist * Math.sin(phi) * Math.cos(theta),
-      spawnDist * Math.sin(phi) * Math.sin(theta) * 0.6,
+      spawnDist * Math.sin(phi) * Math.sin(theta) * 0.4,
       spawnDist * Math.cos(phi)
     );
 
-    // 2. Trajectory: Aimed across the inner sector or targeting an asteroid
+    // 2. Trajectory: Heading across the central colossus or orbital belt
     let targetPos = new THREE.Vector3(
-      (Math.random() - 0.5) * 400,
-      (Math.random() - 0.5) * 200,
-      (Math.random() - 0.5) * 400
+      (Math.random() - 0.5) * 600,
+      (Math.random() - 0.5) * 300,
+      (Math.random() - 0.5) * 600
     );
 
-    if (this.spaceEnv.asteroids.length > 0 && Math.random() < 0.65) {
-      const luckyAsteroid = this.spaceEnv.asteroids[Math.floor(Math.random() * this.spaceEnv.asteroids.length)];
+    if (this.spaceEnv && this.spaceEnv.asteroids.length > 1 && Math.random() < 0.45) {
+      const luckyIdx = Math.floor(1 + Math.random() * (this.spaceEnv.asteroids.length - 1));
+      const luckyAsteroid = this.spaceEnv.asteroids[luckyIdx];
       if (luckyAsteroid) {
-        targetPos.copy(luckyAsteroid.position).add(new THREE.Vector3(
-          (Math.random() - 0.5) * 30,
-          (Math.random() - 0.5) * 30,
-          (Math.random() - 0.5) * 30
-        ));
+        targetPos.copy(luckyAsteroid.position);
       }
     }
 
@@ -214,26 +211,38 @@ export class MeteorSystem {
         const minDist = a.radius + m.radius;
 
         if (distSq < minDist * minDist) {
-          // Deliver clamped kinetic momentum impulse to the asteroid
-          const normal = a.position.clone().sub(m.position).normalize();
-          const rawImpulse = (m.mass / Math.max(1, a.mass)) * m.speed * 1.8;
-          const impactImpulse = Math.min(30.0, rawImpulse);
-          a.velocity.addScaledVector(normal, impactImpulse);
+          const isMega = (a.radius >= 2500 || a.isMegaAsteroid);
+          if (isMega) {
+            // Stationary Mega-Asteroid: blast massive crater without shifting its position
+            logger.log('METEOR', 'Meteor IMPACT with Central Mega-Asteroid! Blasting massive crater.');
+            const hitPoint = m.position.clone();
+            const hitDir = m.dir.clone();
+            if (typeof this.spaceEnv.carveAsteroid === 'function') {
+              this.spaceEnv.carveAsteroid(a, hitPoint, hitDir, 130.0, 90.0);
+            }
+            this.triggerExplosion(m.position, 65, 0xff3300);
+          } else {
+            // Deliver clamped kinetic momentum impulse to the belt asteroid
+            const normal = a.position.clone().sub(m.position).normalize();
+            const rawImpulse = (m.mass / Math.max(1, a.mass)) * m.speed * 1.8;
+            const impactImpulse = Math.min(30.0, rawImpulse);
+            a.velocity.addScaledVector(normal, impactImpulse);
 
-          // Cap asteroid velocity to physically plausible limit
-          if (a.velocity.length() > 40.0) {
-            a.velocity.setLength(40.0);
+            // Cap asteroid velocity to physically plausible limit
+            if (a.velocity.length() > 40.0) {
+              a.velocity.setLength(40.0);
+            }
+
+            // Give the asteroid a violent rotational kick
+            a.rotationSpeed.add(new THREE.Vector3(
+              (Math.random() - 0.5) * 1.2,
+              (Math.random() - 0.5) * 1.2,
+              (Math.random() - 0.5) * 1.2
+            ));
+
+            logger.log('METEOR', `Meteor IMPACT with belt asteroid! Transferred impulse ${Math.round(impactImpulse)} u/s`);
+            this.triggerExplosion(m.position, 28, 0xff5500);
           }
-
-          // Give the asteroid a violent rotational kick
-          a.rotationSpeed.add(new THREE.Vector3(
-            (Math.random() - 0.5) * 1.2,
-            (Math.random() - 0.5) * 1.2,
-            (Math.random() - 0.5) * 1.2
-          ));
-
-          logger.log('METEOR', `Meteor IMPACT with asteroid! Transferred impulse ${Math.round(impactImpulse)} u/s (new ast speed: ${Math.round(a.velocity.length())})`);
-          this.triggerExplosion(m.position, 28, 0xff5500);
           destroyed = true;
           break;
         }
@@ -267,8 +276,8 @@ export class MeteorSystem {
         }
       }
 
-      // Clean despawn when meteor passes outside the sector boundary (r > 1600)
-      if (!destroyed && m.position.length() > 1600) {
+      // Clean despawn when meteor passes outside the sector boundary (r > 8000)
+      if (!destroyed && m.position.length() > 8000) {
         destroyed = true;
       }
 

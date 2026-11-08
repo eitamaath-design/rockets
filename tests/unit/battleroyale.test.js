@@ -244,16 +244,31 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
       expect(hpAfterSecond).toBe(hpAfterFirst); // No duplicate damage!
     });
 
-    it('should generate at least 3 Colossal Asteroids with R=160-240 and Poisson-spaced non-overlap', () => {
+    it('should generate Central Colossus Mega-Asteroid at (0,0,0) with R=2800 and Keplerian orbital belt with Poisson-spaced non-overlap', () => {
       const space = new SpaceEnvironment(scene, 12345);
-      const colossal = space.asteroids.filter(a => a.radius >= 160.0 && a.radius <= 245.0);
-      expect(colossal.length).toBeGreaterThanOrEqual(3);
+      const mega = space.asteroids[0];
+      expect(mega.radius).toBe(2800);
+      expect(mega.position.x).toBe(0);
+      expect(mega.position.y).toBe(0);
+      expect(mega.position.z).toBe(0);
+      expect(mega.isMegaAsteroid).toBe(true);
 
-      // Verify pairwise non-overlap across all generated asteroids
-      for (let i = 0; i < space.asteroids.length; i++) {
-        const a1 = space.asteroids[i];
-        for (let j = i + 1; j < space.asteroids.length; j++) {
-          const a2 = space.asteroids[j];
+      const belt = space.asteroids.slice(1);
+      expect(belt.length).toBeGreaterThanOrEqual(90);
+      expect(belt.length).toBeLessThanOrEqual(110);
+
+      // Verify orbital belt radius range [3300, 5500]
+      for (const a of belt) {
+        const orbitR = Math.hypot(a.position.x, a.position.z);
+        expect(orbitR).toBeGreaterThanOrEqual(3250);
+        expect(orbitR).toBeLessThanOrEqual(5550);
+      }
+
+      // Verify pairwise non-overlap across all belt asteroids
+      for (let i = 0; i < belt.length; i++) {
+        const a1 = belt[i];
+        for (let j = i + 1; j < belt.length; j++) {
+          const a2 = belt[j];
           const dist = a1.position.distanceTo(a2.position);
           expect(dist).toBeGreaterThanOrEqual(a1.radius + a2.radius + 15.0);
         }

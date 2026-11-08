@@ -31,6 +31,8 @@ export class GameNetwork {
     this.sendLaser = null;
     this.sendDecoy = null;
     this.sendMissile = null;
+    this.sendMapResetVote = null;
+    this.sendMapReset = null;
 
     // Action listeners registered by game systems
     this.cannonListeners = new Set();
@@ -40,6 +42,11 @@ export class GameNetwork {
     this.laserListeners = new Set();
     this.decoyListeners = new Set();
     this.missileListeners = new Set();
+    this.mapResetVoteListeners = new Set();
+    this.mapResetListeners = new Set();
+
+    this.currentMapResetVote = null;
+    this.voteTimeoutTimer = null;
 
     this.pingInterval = null;
     this.stateBroadcastInterval = null;
@@ -62,6 +69,8 @@ export class GameNetwork {
     const laserChannel = createActionChannel(this.room, 'laser');
     const missileChannel = createActionChannel(this.room, 'missile');
     const decoyChannel = createActionChannel(this.room, 'decoy');
+    const mapResetVoteChannel = createActionChannel(this.room, 'map_reset_vote');
+    const mapResetChannel = createActionChannel(this.room, 'map_reset');
 
     this.sendState = stateChannel.send;
     this.sendCannon = cannonChannel.send;
@@ -73,6 +82,24 @@ export class GameNetwork {
     this.sendLaser = laserChannel.send;
     this.sendMissile = missileChannel.send;
     this.sendDecoy = decoyChannel.send;
+    this.sendMapResetVote = mapResetVoteChannel.send;
+    this.sendMapReset = mapResetChannel.send;
+
+    // Incoming map reset vote actions
+    mapResetVoteChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string' || !data) return;
+      if (data.type === 'start') {
+        this.handleIncomingVoteStart(data);
+      } else if (data.type === 'vote') {
+        this.handleIncomingVoteCast(data, peerId);
+      }
+    });
+
+    // Synchronized map reset execution across peers
+    mapResetChannel.onReceive((data, peerId) => {
+      if (!data || data.seed === undefined) return;
+      this.triggerMapResetLocally(data.seed);
+    });
 
     // Incoming state packets
     stateChannel.onReceive((data, peerId) => {
@@ -354,6 +381,188 @@ export class GameNetwork {
     return () => this.killListeners.delete(cb);
   }
 
+  /**
+   * Request a sector map re-seed.
+   * If solo (0 peers), executes map reset immediately with a fresh random seed.
+   * If in mesh multiplayer, opens a 10-second interactive ballot requiring unanimous consensus.
+   */
+  requestMapResetVote() {
+    if (this.peers.size === 0) {
+      const newSeed = Math.floor(Math.random() * 1000000) + 1;
+      this.triggerMapResetLocally(newSeed);
+      return { solo: true, passed: true, newSeed };
+    }
+
+    if (this.currentMapResetVote) {
+      return { error: 'Vote already in progress' };
+    }
+
+    const voteId = 'vote-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const newSeed = Math.floor(Math.random() * 1000000) + 1;
+
+    this.currentMapResetVote = {
+      id: voteId,
+      initiatorId: this.selfId,
+      initiatorName: this.playerName,
+      newSeed,
+      startTime: Date.now(),
+      expiresAt: Date.now() + 10000,
+      votes: new Map([[this.selfId, true]]) // Initiator agrees
+    };
+
+    if (this.sendMapResetVote) {
+      this.sendMapResetVote({
+        type: 'start',
+        voteId,
+        initiatorId: this.selfId,
+        initiatorName: this.playerName,
+        newSeed
+      });
+    }
+
+    if (this.voteTimeoutTimer) clearTimeout(this.voteTimeoutTimer);
+    this.voteTimeoutTimer = setTimeout(() => {
+      this.finalizeMapResetVote(voteId);
+    }, 10000);
+
+    this.emitMapResetVoteUpdate();
+    return { solo: false, voteId, newSeed };
+  }
+
+  handleIncomingVoteStart(data) {
+    if (this.currentMapResetVote) return;
+    this.currentMapResetVote = {
+      id: data.voteId,
+      initiatorId: data.initiatorId,
+      initiatorName: data.initiatorName || 'Host',
+      newSeed: data.newSeed,
+      startTime: Date.now(),
+      expiresAt: Date.now() + 10000,
+      votes: new Map([[data.initiatorId, true]])
+    };
+
+    if (this.voteTimeoutTimer) clearTimeout(this.voteTimeoutTimer);
+    this.voteTimeoutTimer = setTimeout(() => {
+      this.finalizeMapResetVote(data.voteId);
+    }, 10000);
+
+    this.emitMapResetVoteUpdate();
+  }
+
+  castMapResetVote(choice) {
+    if (!this.currentMapResetVote) return;
+    const voteChoice = !!choice;
+    this.currentMapResetVote.votes.set(this.selfId, voteChoice);
+
+    if (this.sendMapResetVote) {
+      this.sendMapResetVote({
+        type: 'vote',
+        voteId: this.currentMapResetVote.id,
+        choice: voteChoice
+      });
+    }
+
+    this.emitMapResetVoteUpdate();
+
+    const totalPeers = this.peers.size + 1;
+    if (this.currentMapResetVote.votes.size >= totalPeers) {
+      this.finalizeMapResetVote(this.currentMapResetVote.id);
+    }
+  }
+
+  handleIncomingVoteCast(data, peerId) {
+    if (!this.currentMapResetVote || this.currentMapResetVote.id !== data.voteId) return;
+    this.currentMapResetVote.votes.set(peerId, !!data.choice);
+    this.emitMapResetVoteUpdate();
+
+    const totalPeers = this.peers.size + 1;
+    if (this.currentMapResetVote.votes.size >= totalPeers) {
+      this.finalizeMapResetVote(this.currentMapResetVote.id);
+    }
+  }
+
+  finalizeMapResetVote(voteId) {
+    if (!this.currentMapResetVote || this.currentMapResetVote.id !== voteId) return;
+    if (this.voteTimeoutTimer) {
+      clearTimeout(this.voteTimeoutTimer);
+      this.voteTimeoutTimer = null;
+    }
+
+    const vote = this.currentMapResetVote;
+    this.currentMapResetVote = null;
+
+    const totalPeers = this.peers.size + 1;
+    let yesCount = 0;
+    for (const [, choice] of vote.votes.entries()) {
+      if (choice === true) yesCount++;
+    }
+
+    const passed = (yesCount === totalPeers && yesCount > 0);
+
+    if (passed) {
+      this.onCombatLog(`✅ Map reset passed unanimously (${yesCount}/${totalPeers})! Reseeding sector...`);
+      if (vote.initiatorId === this.selfId || this.isMaster) {
+        if (this.sendMapReset) {
+          this.sendMapReset({ seed: vote.newSeed });
+        }
+      }
+      this.triggerMapResetLocally(vote.newSeed);
+    } else {
+      this.onCombatLog(`❌ Map reset vote failed (${yesCount}/${totalPeers} agreed).`);
+    }
+
+    this.emitMapResetVoteEnd(passed);
+  }
+
+  emitMapResetVoteUpdate() {
+    if (!this.currentMapResetVote) return;
+    const totalPeers = this.peers.size + 1;
+    let yesCount = 0;
+    let noCount = 0;
+    for (const [, choice] of this.currentMapResetVote.votes.entries()) {
+      if (choice) yesCount++;
+      else noCount++;
+    }
+    const remainingTime = Math.max(0, Math.ceil((this.currentMapResetVote.expiresAt - Date.now()) / 1000));
+    const voteData = {
+      active: true,
+      voteId: this.currentMapResetVote.id,
+      initiatorId: this.currentMapResetVote.initiatorId,
+      initiatorName: this.currentMapResetVote.initiatorName,
+      yesCount,
+      noCount,
+      totalPeers,
+      remainingTime,
+      hasVoted: this.currentMapResetVote.votes.has(this.selfId)
+    };
+    for (const cb of this.mapResetVoteListeners) {
+      cb(voteData);
+    }
+  }
+
+  emitMapResetVoteEnd(passed) {
+    for (const cb of this.mapResetVoteListeners) {
+      cb({ active: false, passed });
+    }
+  }
+
+  triggerMapResetLocally(seed) {
+    this.mapSeed = seed;
+    for (const cb of this.mapResetListeners) {
+      cb(seed);
+    }
+  }
+
+  onMapResetVote(cb) {
+    this.mapResetVoteListeners.add(cb);
+    return () => this.mapResetVoteListeners.delete(cb);
+  }
+
+  onMapReset(cb) {
+    this.mapResetListeners.add(cb);
+    return () => this.mapResetListeners.delete(cb);
+  }
+
   getAveragePing() {
     if (this.peers.size === 0) return 0;
     let sum = 0;
@@ -367,6 +576,7 @@ export class GameNetwork {
     lobbyService.stopMasterKeepAlive();
     if (this.pingInterval) clearInterval(this.pingInterval);
     if (this.stateBroadcastInterval) clearInterval(this.stateBroadcastInterval);
+    if (this.voteTimeoutTimer) clearTimeout(this.voteTimeoutTimer);
     if (this.room) {
       try {
         this.room.leave();
@@ -381,5 +591,8 @@ export class GameNetwork {
     this.laserListeners.clear();
     this.decoyListeners.clear();
     this.missileListeners.clear();
+    this.mapResetVoteListeners.clear();
+    this.mapResetListeners.clear();
+    this.currentMapResetVote = null;
   }
 }

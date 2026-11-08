@@ -14,7 +14,7 @@ export const POWERUP_TYPES = {
  * Power-ups remain in space for exactly 1 minute (60s) before despawning.
  */
 export class PowerUpSystem {
-  constructor(scene, blackHoleSystem) {
+  constructor(scene, blackHoleSystem = null) {
     this.scene = scene;
     this.blackHoleSystem = blackHoleSystem;
 
@@ -34,13 +34,12 @@ export class PowerUpSystem {
   spawnPowerUp() {
     if (this.powerups.length >= this.maxConcurrent) return;
 
-    // Determine spawn coordinate within current safe zone
-    const safeRadius = this.blackHoleSystem ? this.blackHoleSystem.getSafeRadius() * 0.75 : 600;
+    // Distribute powerups across the Keplerian orbital belt (R in [3300, 5200], Y in [-200, 200])
     const angle = Math.random() * Math.PI * 2;
-    const r = 80 + Math.random() * safeRadius;
+    const r = 3300 + Math.random() * 1900;
     const pos = new THREE.Vector3(
       Math.cos(angle) * r,
-      (Math.random() - 0.5) * 160.0,
+      (Math.random() - 0.5) * 400.0,
       Math.sin(angle) * r
     );
 

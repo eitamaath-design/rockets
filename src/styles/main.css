@@ -456,6 +456,23 @@ html, body {
   cursor: pointer;
 }
 
+.hud-btn-reset-map {
+  background: rgba(14, 165, 233, 0.2);
+  border: 1px solid #38bdf8;
+  color: #38bdf8;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hud-btn-reset-map:hover {
+  background: rgba(14, 165, 233, 0.4);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
+
 .hud-top-center {
   display: flex;
   flex-direction: column;
@@ -662,28 +679,98 @@ html, body {
   color: #d1fae5;
 }
 
-.hud-victory-banner {
+/* 10-Second Democratic Map Reset Vote Interactive Banner */
+.hud-vote-banner {
   position: absolute;
-  top: 35%;
+  top: 18%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(234, 179, 8, 0.4) 0%, rgba(15, 23, 42, 0.9) 100%);
-  border: 2px solid #eab308;
-  color: #fef08a;
-  font-size: 1.6rem;
-  font-weight: 900;
-  letter-spacing: 2px;
-  padding: 20px 40px;
-  border-radius: 12px;
-  box-shadow: 0 0 35px rgba(234, 179, 8, 0.7);
-  text-shadow: 0 0 10px rgba(234, 179, 8, 0.9);
-  pointer-events: none;
-  animation: victoryPulse 2.0s infinite alternate ease-in-out;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.92) 100%);
+  border: 2px solid #00d4ff;
+  border-radius: 16px;
+  padding: 14px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 0 25px rgba(0, 212, 255, 0.45);
+  pointer-events: auto;
+  z-index: 100;
+  min-width: 290px;
+  backdrop-filter: blur(12px);
+  animation: voteBannerFadeIn 0.25s ease-out;
 }
 
-@keyframes victoryPulse {
-  0% { transform: translate(-50%, -50%) scale(0.98); }
-  100% { transform: translate(-50%, -50%) scale(1.04); }
+@keyframes voteBannerFadeIn {
+  from { opacity: 0; transform: translate(-50%, -15px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.vote-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #fff;
+  letter-spacing: 0.05em;
+}
+
+.vote-countdown {
+  background: #0284c7;
+  color: #fff;
+  font-family: monospace;
+  font-size: 0.8rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.vote-info {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.vote-tally-bar {
+  font-size: 0.78rem;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.vote-buttons {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.vote-btn-accept, .vote-btn-decline {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.vote-btn-accept {
+  background: #10b981;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+
+.vote-btn-accept:hover {
+  background: #059669;
+}
+
+.vote-btn-decline {
+  background: #ef4444;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+.vote-btn-decline:hover {
+  background: #dc2626;
 }
 
 .bar-cannon {

@@ -6,12 +6,14 @@ export class GameHUD {
     this.container = container;
     this.engine = engine;
     this.hudElement = null;
+    this.isVoteActive = false;
 
     this.createDom();
     this.bindJoystick();
     this.bindTouchControls();
     this.bindFullscreen();
     this.bindDiagnostics();
+    this.bindMapResetVoting();
 
     // Initialize room title immediately
     const roomTitle = document.getElementById('hud-room-title');
@@ -36,14 +38,13 @@ export class GameHUD {
           <div class="hud-room-info">
             <span class="hud-room-title" id="hud-room-title">Orion Sector</span>
             <button class="hud-btn-copy" id="hud-btn-copy" title="Copy Shareable Link">📋 Invite</button>
+            <button class="hud-btn-reset-map" id="hud-btn-reset-map" title="Vote to Reset Sector Map">🔄 Reset Map</button>
           </div>
         </div>
 
         <div class="hud-top-center">
           <div class="hud-header-scoreboard" id="hud-header-scoreboard">
-            <span>⏳ <strong id="hud-timer-val">10:00</strong></span>
-            <span>🌀 SAFE: <strong id="hud-safe-val">1100u</strong></span>
-            <span>👥 <strong id="hud-alive-val">1</strong> Alive</span>
+            <span>👥 <strong id="hud-alive-val">1</strong> Pilot</span>
             <span>SPD: <strong id="hud-speed-val">0</strong></span>
           </div>
 
@@ -114,9 +115,24 @@ export class GameHUD {
       </div>
 
       <div class="hud-combat-feed" id="hud-combat-feed"></div>
-      <div class="hud-victory-banner" id="hud-victory-banner" style="display: none;">
-        🏆 VICTORY ROYALE: LAST PILOT ALIVE!
+
+      <!-- 10-Second Democratic Map Reset Vote Interactive Banner -->
+      <div class="hud-vote-banner" id="hud-vote-banner" style="display: none;">
+        <div class="vote-header">
+          <span class="vote-icon">🔄</span>
+          <span class="vote-title">SECTOR RE-SEED VOTE</span>
+          <span class="vote-countdown" id="hud-vote-countdown">10s</span>
+        </div>
+        <div class="vote-info" id="hud-vote-info">Initiated by Host</div>
+        <div class="vote-tally-bar">
+          <span class="vote-tally-label" id="hud-vote-tally">Votes: 1/1 agreed</span>
+        </div>
+        <div class="vote-buttons" id="hud-vote-buttons">
+          <button class="vote-btn-accept" id="btn-vote-accept">✓ Accept (Y)</button>
+          <button class="vote-btn-decline" id="btn-vote-decline">✕ Decline (N)</button>
+        </div>
       </div>
+
       <div class="hud-respawn-overlay" id="hud-respawn-overlay" style="display: none;">
         <div class="respawn-title" id="hud-respawn-title">SHIP DESTROYED</div>
         <div class="respawn-counter" id="hud-respawn-counter">Respawning in 3...</div>
@@ -485,6 +501,67 @@ export class GameHUD {
     document.addEventListener('webkitfullscreenchange', updateFsBtnText);
   }
 
+  bindMapResetVoting() {
+    const resetBtn = document.getElementById('hud-btn-reset-map');
+    const voteBanner = document.getElementById('hud-vote-banner');
+    const acceptBtn = document.getElementById('btn-vote-accept');
+    const declineBtn = document.getElementById('btn-vote-decline');
+    const countdownEl = document.getElementById('hud-vote-countdown');
+    const infoEl = document.getElementById('hud-vote-info');
+    const tallyEl = document.getElementById('hud-vote-tally');
+
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        if (this.engine) {
+          const res = this.engine.requestMapResetVote();
+          if (res && res.error) {
+            this.showCombatMessage(`⚠️ ${res.error}`);
+          }
+        }
+      });
+    }
+
+    if (acceptBtn) {
+      acceptBtn.addEventListener('click', () => {
+        if (this.engine) this.engine.castMapResetVote(true);
+      });
+    }
+
+    if (declineBtn) {
+      declineBtn.addEventListener('click', () => {
+        if (this.engine) this.engine.castMapResetVote(false);
+      });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (this.isVoteActive) {
+        if (e.code === 'KeyY') {
+          if (this.engine) this.engine.castMapResetVote(true);
+          e.preventDefault();
+        } else if (e.code === 'KeyN') {
+          if (this.engine) this.engine.castMapResetVote(false);
+          e.preventDefault();
+        }
+      }
+    });
+
+    if (this.engine && this.engine.network) {
+      this.engine.network.onMapResetVote((voteData) => {
+        if (!voteBanner) return;
+        if (voteData.active) {
+          this.isVoteActive = true;
+          voteBanner.style.display = 'flex';
+          if (countdownEl) countdownEl.textContent = `${voteData.remainingTime}s`;
+          if (infoEl) infoEl.textContent = `Initiated by ${voteData.initiatorName || 'Host'}`;
+          if (tallyEl) tallyEl.textContent = `Votes: ${voteData.yesCount}/${voteData.totalPeers} agreed (${voteData.remainingTime}s left)`;
+        } else {
+          this.isVoteActive = false;
+          voteBanner.style.display = 'none';
+        }
+      });
+    }
+  }
+
   showCombatMessage(text) {
     const feed = document.getElementById('hud-combat-feed');
     if (!feed) return;
@@ -576,19 +653,6 @@ export class GameHUD {
         boostBadge.className = 'hud-boost-badge cooling';
         if (thrustBtn) thrustBtn.classList.remove('boost-ready');
       }
-    }
-
-    // Battle Royale Match Timer & Safe Zone
-    const timerVal = document.getElementById('hud-timer-val');
-    if (timerVal && state.matchTimeRemaining !== undefined) {
-      const mins = Math.floor(state.matchTimeRemaining / 60);
-      const secs = state.matchTimeRemaining % 60;
-      timerVal.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    const safeVal = document.getElementById('hud-safe-val');
-    if (safeVal && state.safeRadius !== undefined) {
-      safeVal.textContent = `${state.safeRadius}u`;
     }
 
     const aliveVal = document.getElementById('hud-alive-val');
@@ -726,12 +790,6 @@ export class GameHUD {
       } else {
         powerupBadge.style.display = 'none';
       }
-    }
-
-    // Victory Royale Banner
-    const victoryBanner = document.getElementById('hud-victory-banner');
-    if (victoryBanner) {
-      victoryBanner.style.display = state.isVictoryRoyale ? 'block' : 'none';
     }
 
     // Respawn Overlay
