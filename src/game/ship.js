@@ -44,6 +44,7 @@ export class PlayerShip {
     this.isInvisible = false;
     this.invisibilityTimer = 0.0;
     this.hasHologramDecoy = false;
+    this.storedPowerUp = null; // { type, name, icon, color }
 
     this.isDead = false;
     this.respawnTimer = 0;
@@ -119,7 +120,7 @@ export class PlayerShip {
     if (weaponType === 'laser') {
       shieldDmg = amount * 2.4;
       hullDmg = amount * 0.35;
-    } else if (weaponType === 'cannon') {
+    } else if (weaponType === 'cannon' || weaponType === 'missile') {
       shieldDmg = amount * 0.35;
       hullDmg = amount * 2.2;
     }
@@ -175,6 +176,28 @@ export class PlayerShip {
       }
     }
     return false;
+  }
+
+  useSpecialPowerUp(engine) {
+    if (!this.storedPowerUp || this.isDead) return null;
+    const pu = this.storedPowerUp;
+    this.storedPowerUp = null;
+
+    if (pu.type === 'shield_repair') {
+      this.shield = this.maxShield;
+      this.isShieldBroken = false;
+      return { success: true, message: '🛡️ SHIELD REPAIRED: 100%' };
+    } else if (pu.type === 'invisibility') {
+      this.isInvisible = true;
+      this.invisibilityTimer = 60.0;
+      return { success: true, message: '👁️ CLOAK ACTIVATED (60s)' };
+    } else if (pu.type === 'hologram_clone') {
+      if (engine && engine.weaponsSystem) {
+        engine.weaponsSystem.deployDecoyClone(this);
+      }
+      return { success: true, message: '👥 HOLOGRAM CLONE LAUNCHED' };
+    }
+    return null;
   }
 
   breakInvisibility() {

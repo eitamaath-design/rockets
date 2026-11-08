@@ -628,6 +628,17 @@ html, body {
   box-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
 }
 
+.bar-missile {
+  background: linear-gradient(90deg, #f59e0b 0%, #ef4444 100%);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+.bar-missile.locked {
+  background: #ef4444;
+  box-shadow: 0 0 10px #ef4444;
+  animation: missileLockPulse 0.5s infinite alternate;
+}
+
 .hud-powerup-badge {
   font-size: 0.62rem;
   font-weight: 800;
@@ -1035,6 +1046,118 @@ html, body {
   background: #ea580c;
   color: #fff;
   box-shadow: 0 0 14px #ff5500;
+}
+
+.btn-missile {
+  width: 95px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.22);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-missile.missile-locked {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.8);
+  animation: missileLockPulse 0.45s infinite alternate ease-in-out;
+}
+
+@keyframes missileLockPulse {
+  0% { transform: scale(1); filter: brightness(1); }
+  100% { transform: scale(1.04); filter: brightness(1.3); }
+}
+
+.btn-special {
+  width: 95px;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  border-color: #64748b;
+  background: rgba(30, 41, 59, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease-out;
+}
+
+.btn-special.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.8);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.btn-special.ready {
+  opacity: 1.0;
+  cursor: pointer;
+  border-color: var(--powerup-glow, #00ffff);
+  background: rgba(15, 23, 42, 0.65);
+  box-shadow: 0 0 14px var(--powerup-glow, #00ffff);
+  animation: specialReadyPulse 1.4s infinite alternate ease-in-out;
+}
+
+@keyframes specialReadyPulse {
+  0% { transform: scale(1); box-shadow: 0 0 8px var(--powerup-glow, #00ffff); }
+  100% { transform: scale(1.05); box-shadow: 0 0 18px var(--powerup-glow, #00ffff); }
+}
+
+/* 3D Missile Targeting Lock Reticle */
+.hud-missile-lock-box {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 50;
+  transition: width 0.1s, height 0.1s;
+}
+
+.lock-bracket {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #ffaa00;
+  border-style: solid;
+}
+
+.hud-missile-lock-box.tracking .lock-bracket {
+  border-color: #ffaa00;
+  box-shadow: 0 0 8px #ffaa00;
+}
+
+.hud-missile-lock-box.locked .lock-bracket {
+  border-color: #ff2233;
+  box-shadow: 0 0 14px #ff2233;
+}
+
+.lock-bracket.tl { top: 0; left: 0; border-width: 2.5px 0 0 2.5px; }
+.lock-bracket.tr { top: 0; right: 0; border-width: 2.5px 2.5px 0 0; }
+.lock-bracket.bl { bottom: 0; left: 0; border-width: 0 0 2.5px 2.5px; }
+.lock-bracket.br { bottom: 0; right: 0; border-width: 0 2.5px 2.5px 0; }
+
+.lock-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.62rem;
+  font-weight: 800;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+  margin-top: 5px;
+  white-space: nowrap;
+  color: #ffaa00;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+.hud-missile-lock-box.locked .lock-label {
+  color: #ff2233;
+  animation: missileLockPulse 0.4s infinite alternate;
 }
 
 .weapon-subtext {

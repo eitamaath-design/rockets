@@ -167,30 +167,31 @@ export class PowerUpSystem {
   }
 
   applyPowerUp(type, ship, callback) {
+    let name = 'Special';
+    let icon = '✨';
+    let color = '#00ffff';
+
     switch (type) {
       case POWERUP_TYPES.SHIELD_REPAIR:
-        // Fully restore shield and reset broken state
-        ship.shield = ship.maxShield;
-        ship.isShieldBroken = false;
-        logger.log('POWERUP', 'Collected: Shield Replenish! Shield restored to 100%');
-        if (callback) callback('🛡️ SHIELD REPLENISHED: 100%');
+        name = 'REPAIR SHIELD';
+        icon = '🛡️';
+        color = '#00d4ff';
         break;
-
       case POWERUP_TYPES.INVISIBILITY:
-        // Cloaking: 60 seconds of complete invisibility (breaks on weapon fire)
-        ship.isInvisible = true;
-        ship.invisibilityTimer = 60.0;
-        logger.log('POWERUP', 'Collected: Invisibility! Ship cloaked for 60 seconds');
-        if (callback) callback('👁️ CLOAK ACTIVATED (1 MINUTE)');
+        name = 'CLOAK';
+        icon = '👁️';
+        color = '#c084fc';
         break;
-
       case POWERUP_TYPES.HOLOGRAM_CLONE:
-        // Grants decoy clone deployment
-        ship.hasHologramDecoy = true;
-        logger.log('POWERUP', 'Collected: Hologram Decoy Clone!');
-        if (callback) callback('👥 HOLOGRAM CLONE READY (FIRE TO DEPLOY)');
+        name = 'DECOY CLONE';
+        icon = '👥';
+        color = '#00ff88';
         break;
     }
+
+    ship.storedPowerUp = { type, name, icon, color };
+    logger.log('POWERUP', `Collected and stored [${name}] in Special slot`);
+    if (callback) callback(`✨ ${icon} ${name} ARMED! PRESS [R] OR SPECIAL BUTTON TO USE`);
   }
 
   cleanup() {

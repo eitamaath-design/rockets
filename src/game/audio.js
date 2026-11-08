@@ -253,6 +253,114 @@ export class AudioManager {
   /**
    * High-Energy Forward Laser Beam: high-frequency ionized burst with resonant zap
    */
+  /**
+   * Missile lock-on tracking tick: periodic beep that ascends in pitch as lock completes
+   */
+  playLockTick(progress = 0) {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    const freq = 750 + progress * 800; // 750Hz up to 1550Hz
+    osc.frequency.setValueAtTime(freq, now);
+
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+    osc.connect(gain);
+    gain.connect(this.compressor);
+
+    osc.start(now);
+    osc.stop(now + 0.07);
+  }
+
+  /**
+   * Missile solid lock confirmed chime
+   */
+  playLockChime() {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+
+    // Dual-tone high electronic lock chime
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(1760, now);
+    osc1.frequency.setValueAtTime(2200, now + 0.08);
+
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now);
+    osc2.frequency.setValueAtTime(1100, now + 0.08);
+
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.compressor);
+
+    osc1.start(now);
+    osc1.stop(now + 0.24);
+    osc2.start(now);
+    osc2.stop(now + 0.24);
+  }
+
+  /**
+   * Homing Missile rocket launch whoosh & ignition
+   */
+  playMissileLaunch(isLocal = true, pos = null) {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+
+    const now = this.ctx.currentTime;
+    const dest = this.createPanner(pos) || this.compressor;
+
+    // 1. Rocket ignition roar (noise)
+    if (this.noiseBuffer) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800, now);
+      filter.frequency.exponentialRampToValueAtTime(2400, now + 0.25);
+      filter.Q.setValueAtTime(2.0, now);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.45, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(dest);
+
+      noise.start(now);
+      noise.stop(now + 0.36);
+    }
+
+    // 2. Rising rocket engine whine
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(980, now + 0.28);
+
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  }
+
   playLaserShot(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();

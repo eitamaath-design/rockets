@@ -66,19 +66,19 @@ export class GameHUD {
             </div>
 
             <div class="hud-compact-meter meter-laser">
-              <span class="meter-label">LASER [SHIELD]</span>
+              <span class="meter-label">LASER [SHIELD/DIG]</span>
               <div class="meter-track">
                 <div class="gauge-bar-fill bar-laser" id="hud-laser-bar" style="width: 100%;"></div>
               </div>
               <span class="meter-val" id="hud-laser-pct">100%</span>
             </div>
 
-            <div class="hud-compact-meter meter-cannon">
-              <span class="meter-label">CANNON [HULL/DIG]</span>
+            <div class="hud-compact-meter meter-missile">
+              <span class="meter-label">MISSILE [LOCK]</span>
               <div class="meter-track">
-                <div class="gauge-bar-fill bar-cannon" id="hud-cannon-bar" style="width: 100%;"></div>
+                <div class="gauge-bar-fill bar-missile" id="hud-missile-bar" style="width: 0%;"></div>
               </div>
-              <span class="meter-val" id="hud-cannon-pct">100%</span>
+              <span class="meter-val" id="hud-missile-pct">READY</span>
             </div>
 
             <div class="hud-powerup-badge" id="hud-powerup-badge" style="display: none;"></div>
@@ -102,6 +102,15 @@ export class GameHUD {
       <div class="hud-center-crosshair">
         <div class="crosshair-ring"></div>
         <div class="crosshair-dot"></div>
+      </div>
+
+      <!-- 3D Target Lock Brackets -->
+      <div class="hud-missile-lock-box" id="hud-missile-lock-box" style="display: none;">
+        <div class="lock-bracket tl"></div>
+        <div class="lock-bracket tr"></div>
+        <div class="lock-bracket bl"></div>
+        <div class="lock-bracket br"></div>
+        <span class="lock-label" id="hud-lock-label">TRACKING 0%</span>
       </div>
 
       <div class="hud-combat-feed" id="hud-combat-feed"></div>
@@ -149,15 +158,19 @@ export class GameHUD {
             <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
 
-          <!-- Dual Forward Arsenals -->
+          <!-- Dual Forward Arsenals & Dedicated Special Powerup -->
           <div class="touch-weapon-cluster">
-            <button class="action-touch-btn btn-laser" id="btn-laser" title="Hold to Fire Laser Beam / Hologram Decoy (Space / LMB)">
+            <button class="action-touch-btn btn-laser" id="btn-laser" title="Hold to Fire Laser Beam & Dig Asteroids (Space / LMB)">
               ⚡ <strong>LASER</strong>
-              <small class="weapon-subtext">[SHIELD]</small>
+              <small class="weapon-subtext">[SHIELD/DIG]</small>
             </button>
-            <button class="action-touch-btn btn-cannon" id="btn-cannon" title="Hold to Fire Kinetic Cannon / Dig Asteroids (F / RMB)">
-              🔥 <strong>CANNON</strong>
-              <small class="weapon-subtext">[HULL/DIG]</small>
+            <button class="action-touch-btn btn-missile" id="btn-missile" title="Homing Missile (F / RMB) - Aim at target for 3s to lock">
+              <span id="btn-missile-icon">🚀</span> <strong id="btn-missile-text">MISSILE</strong>
+              <small class="weapon-subtext" id="btn-missile-status">[AIM TO LOCK]</small>
+            </button>
+            <button class="action-touch-btn btn-special disabled" id="btn-special" title="Activate Special Power-Up (Key R)">
+              <span id="btn-special-icon">✨</span> <strong id="btn-special-text">SPECIAL</strong>
+              <small class="weapon-subtext" id="btn-special-desc">[EMPTY]</small>
             </button>
           </div>
         </div>
@@ -345,9 +358,37 @@ export class GameHUD {
     }, () => shipInput.thrust = false);
     setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
 
-    // Dual Forward Weapons
+    // Dual Forward Weapons & Special Powerup
     setupHoldButton('btn-laser', () => this.engine.isFiringLaser = true, () => this.engine.isFiringLaser = false);
-    setupHoldButton('btn-cannon', () => this.engine.isFiringCannon = true, () => this.engine.isFiringCannon = false);
+
+    const missileBtn = document.getElementById('btn-missile');
+    if (missileBtn) {
+      const handleMissile = (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        this.engine.weaponsSystem.triggerSecondary(true, this.engine.playerShip, performance.now());
+      };
+      missileBtn.addEventListener('click', handleMissile);
+      missileBtn.addEventListener('touchstart', handleMissile, { passive: false });
+    }
+
+    const specialBtn = document.getElementById('btn-special');
+    if (specialBtn) {
+      const handleSpecial = (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        const res = this.engine.playerShip.useSpecialPowerUp(this.engine);
+        if (res) {
+          this.showCombatMessage(res.message);
+        }
+      };
+      specialBtn.addEventListener('click', handleSpecial);
+      specialBtn.addEventListener('touchstart', handleSpecial, { passive: false });
+    }
 
     // Copy invite link
     const copyBtn = document.getElementById('hud-btn-copy');
@@ -573,7 +614,98 @@ export class GameHUD {
     if (laserBar) laserBar.style.width = `${state.laserEnergy || 0}%`;
     if (laserPct) laserPct.textContent = `${state.laserEnergy || 0}%`;
 
-    // Cannon Bar
+    // Missile Lock Gauge & Status Bar
+    const missileBar = document.getElementById('hud-missile-bar');
+    const missilePct = document.getElementById('hud-missile-pct');
+    const missileBtn = document.getElementById('btn-missile');
+    const missileText = document.getElementById('btn-missile-text');
+    const missileStatus = document.getElementById('btn-missile-status');
+
+    const lockProgress = state.missileLockProgress || 0;
+    const isLocked = !!state.missileLocked;
+
+    if (missileBar) {
+      missileBar.style.width = `${Math.round(lockProgress * 100)}%`;
+      missileBar.className = isLocked ? 'gauge-bar-fill bar-missile locked' : 'gauge-bar-fill bar-missile';
+    }
+
+    if (missilePct) {
+      if (isLocked) {
+        missilePct.textContent = 'LOCKED';
+        missilePct.style.color = '#ff3344';
+      } else if (lockProgress > 0) {
+        missilePct.textContent = `${Math.round(lockProgress * 100)}%`;
+        missilePct.style.color = '#ffcc00';
+      } else {
+        missilePct.textContent = 'READY';
+        missilePct.style.color = '#00ffff';
+      }
+    }
+
+    if (missileBtn) {
+      if (isLocked) {
+        missileBtn.classList.add('missile-locked');
+        if (missileText) missileText.textContent = 'MISSILE [READY]';
+        if (missileStatus) missileStatus.textContent = '🔥 [LOCKED - FIRE!]';
+      } else if (lockProgress > 0) {
+        missileBtn.classList.remove('missile-locked');
+        if (missileText) missileText.textContent = 'LOCKING...';
+        const remSecs = (3.0 * (1.0 - lockProgress)).toFixed(1);
+        if (missileStatus) missileStatus.textContent = `${Math.round(lockProgress * 100)}% (${remSecs}s)`;
+      } else {
+        missileBtn.classList.remove('missile-locked');
+        if (missileText) missileText.textContent = 'MISSILE';
+        if (missileStatus) missileStatus.textContent = '[AIM TO LOCK (3s)]';
+      }
+    }
+
+    // Dedicated Special Power-Up Button
+    const specialBtn = document.getElementById('btn-special');
+    const specialIcon = document.getElementById('btn-special-icon');
+    const specialText = document.getElementById('btn-special-text');
+    const specialDesc = document.getElementById('btn-special-desc');
+
+    if (specialBtn) {
+      if (state.storedPowerUp) {
+        specialBtn.classList.remove('disabled');
+        specialBtn.classList.add('ready');
+        specialBtn.style.setProperty('--powerup-glow', state.storedPowerUp.color || '#00ffff');
+        if (specialIcon) specialIcon.textContent = state.storedPowerUp.icon || '✨';
+        if (specialText) specialText.textContent = state.storedPowerUp.name || 'SPECIAL';
+        if (specialDesc) specialDesc.textContent = '[USE (KEY R)]';
+      } else {
+        specialBtn.classList.add('disabled');
+        specialBtn.classList.remove('ready');
+        specialBtn.style.removeProperty('--powerup-glow');
+        if (specialIcon) specialIcon.textContent = '✨';
+        if (specialText) specialText.textContent = 'SPECIAL';
+        if (specialDesc) specialDesc.textContent = '[EMPTY]';
+      }
+    }
+
+    // 3D Target Lock-on Brackets Overlay
+    const lockBox = document.getElementById('hud-missile-lock-box');
+    const lockLabel = document.getElementById('hud-lock-label');
+    if (lockBox && lockLabel) {
+      const tgt = state.missileTarget;
+      if (tgt && tgt.inFront && lockProgress > 0) {
+        lockBox.style.display = 'block';
+        lockBox.style.left = `${tgt.x}%`;
+        lockBox.style.top = `${tgt.y}%`;
+
+        if (isLocked) {
+          lockBox.className = 'hud-missile-lock-box locked';
+          lockLabel.textContent = `🎯 LOCKED [${tgt.dist}u]`;
+        } else {
+          lockBox.className = 'hud-missile-lock-box tracking';
+          lockLabel.textContent = `TRACKING ${Math.round(lockProgress * 100)}% [${tgt.dist}u]`;
+        }
+      } else {
+        lockBox.style.display = 'none';
+      }
+    }
+
+    // Cannon Bar (Compatibility)
     const cannonBar = document.getElementById('hud-cannon-bar');
     const cannonPct = document.getElementById('hud-cannon-pct');
     if (cannonBar) cannonBar.style.width = `${state.cannonEnergy || 0}%`;

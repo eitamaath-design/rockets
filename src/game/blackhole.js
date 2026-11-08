@@ -286,6 +286,10 @@ export class BlackHoleSystem {
     return Math.max(0, this.matchDuration - this.matchTime);
   }
 
+  getMatchTimeRemaining() {
+    return this.getTimeRemaining();
+  }
+
   cleanup() {
     this.scene.remove(this.group);
     if (this.perimeterMesh) {

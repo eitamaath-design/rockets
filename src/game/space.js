@@ -205,7 +205,7 @@ export class SpaceEnvironment {
       bumpMap: rockBump || null,
       bumpScale: 1.2,
       depthWrite: true,
-      side: THREE.FrontSide
+      side: THREE.DoubleSide
     });
 
     const charcoalBasalt = new THREE.MeshStandardMaterial({
@@ -216,7 +216,7 @@ export class SpaceEnvironment {
       bumpMap: rockBump || null,
       bumpScale: 1.2,
       depthWrite: true,
-      side: THREE.FrontSide
+      side: THREE.DoubleSide
     });
 
     const slateRock = new THREE.MeshStandardMaterial({
@@ -227,7 +227,7 @@ export class SpaceEnvironment {
       bumpMap: rockBump || null,
       bumpScale: 1.2,
       depthWrite: true,
-      side: THREE.FrontSide
+      side: THREE.DoubleSide
     });
 
     const nickelGranite = new THREE.MeshStandardMaterial({
@@ -238,7 +238,7 @@ export class SpaceEnvironment {
       bumpMap: rockBump || null,
       bumpScale: 1.2,
       depthWrite: true,
-      side: THREE.FrontSide
+      side: THREE.DoubleSide
     });
 
     const materials = [rustChondrite, charcoalBasalt, slateRock, nickelGranite];
@@ -525,6 +525,64 @@ export class SpaceEnvironment {
   /**
    * Resolves physical collision between a ship and asteroids with Newtonian momentum bounce
    */
+  /**
+   * Check if line-of-sight between two points is obstructed by any asteroid
+   */
+  checkRayBlocked(startPos, endPos) {
+    const seg = endPos.clone().sub(startPos);
+    const segLen = seg.length();
+    if (segLen < 0.001) return false;
+    const segDir = seg.clone().divideScalar(segLen);
+
+    for (let i = 0; i < this.asteroids.length; i++) {
+      const a = this.asteroids[i];
+      const toCenter = a.position.clone().sub(startPos);
+      const proj = toCenter.dot(segDir);
+      if (proj > 0 && proj < segLen) {
+        const perpDistSq = toCenter.lengthSq() - (proj * proj);
+        const r = a.radius * 0.95;
+        if (perpDistSq < r * r) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Cast a ray forward and find closest asteroid hit within maxDist
+   */
+  checkRayCollision(origin, dir, maxDist = 750.0) {
+    let closestHit = null;
+    let closestDist = maxDist;
+
+    for (let i = 0; i < this.asteroids.length; i++) {
+      const a = this.asteroids[i];
+      const toCenter = a.position.clone().sub(origin);
+      const tca = toCenter.dot(dir);
+      if (tca < 0) continue;
+      const r = a.radius;
+      if (tca - r > closestDist) continue;
+
+      const d2 = toCenter.lengthSq() - (tca * tca);
+      if (d2 > r * r) continue;
+
+      const thc = Math.sqrt(Math.max(0, r * r - d2));
+      let t0 = tca - thc;
+      if (t0 < 0) t0 = tca + thc;
+
+      if (t0 > 0 && t0 < closestDist) {
+        closestDist = t0;
+        closestHit = {
+          asteroid: a,
+          distance: t0,
+          hitPoint: origin.clone().addScaledVector(dir, t0)
+        };
+      }
+    }
+    return closestHit;
+  }
+
   resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200) {
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
@@ -602,7 +660,7 @@ export class SpaceEnvironment {
     }
   }
 
-  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 14.0, carveDepth = 11.0) {
+  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 22.0, carveDepth = 16.0) {
     if (!asteroid || !asteroid.mesh) return;
     const geom = asteroid.mesh.geometry;
     const posAttr = geom.attributes.position;

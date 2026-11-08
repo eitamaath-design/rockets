@@ -58,8 +58,9 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
     // Verify Action & Weapon Buttons
     await expect(page.locator('#btn-thrust')).toBeVisible();
     await expect(page.locator('#btn-brake')).toBeVisible();
-    await expect(page.locator('#btn-cannon')).toBeVisible();
-    await expect(page.locator('#btn-mine')).toBeVisible();
+    await expect(page.locator('#btn-laser')).toBeVisible();
+    await expect(page.locator('#btn-missile')).toBeVisible();
+    await expect(page.locator('#btn-special')).toBeVisible();
     await expect(page.locator('#btn-strafe-left')).toBeVisible();
     await expect(page.locator('#btn-strafe-right')).toBeVisible();
     await expect(page.locator('#btn-roll-left')).toBeVisible();

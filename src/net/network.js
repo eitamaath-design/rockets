@@ -30,6 +30,7 @@ export class GameNetwork {
     this.sendPong = null;
     this.sendLaser = null;
     this.sendDecoy = null;
+    this.sendMissile = null;
 
     // Action listeners registered by game systems
     this.cannonListeners = new Set();
@@ -38,6 +39,7 @@ export class GameNetwork {
     this.killListeners = new Set();
     this.laserListeners = new Set();
     this.decoyListeners = new Set();
+    this.missileListeners = new Set();
 
     this.pingInterval = null;
     this.stateBroadcastInterval = null;
@@ -58,6 +60,7 @@ export class GameNetwork {
     const pingChannel = createActionChannel(this.room, 'ping');
     const pongChannel = createActionChannel(this.room, 'pong');
     const laserChannel = createActionChannel(this.room, 'laser');
+    const missileChannel = createActionChannel(this.room, 'missile');
     const decoyChannel = createActionChannel(this.room, 'decoy');
 
     this.sendState = stateChannel.send;
@@ -68,6 +71,7 @@ export class GameNetwork {
     this.sendPing = pingChannel.send;
     this.sendPong = pongChannel.send;
     this.sendLaser = laserChannel.send;
+    this.sendMissile = missileChannel.send;
     this.sendDecoy = decoyChannel.send;
 
     // Incoming state packets
@@ -96,6 +100,14 @@ export class GameNetwork {
     laserChannel.onReceive((data, peerId) => {
       if (!peerId || typeof peerId !== 'string') return;
       for (const cb of this.laserListeners) {
+        cb(data, peerId);
+      }
+    });
+
+    // Homing missile launch events
+    missileChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string') return;
+      for (const cb of this.missileListeners) {
         cb(data, peerId);
       }
     });
@@ -262,6 +274,12 @@ export class GameNetwork {
     }
   }
 
+  broadcastMissile(missileData) {
+    if (this.sendMissile) {
+      this.sendMissile(missileData);
+    }
+  }
+
   broadcastDecoy(decoyData) {
     if (this.sendDecoy) {
       this.sendDecoy(decoyData);
@@ -271,6 +289,11 @@ export class GameNetwork {
   onLaser(cb) {
     this.laserListeners.add(cb);
     return () => this.laserListeners.delete(cb);
+  }
+
+  onMissile(cb) {
+    this.missileListeners.add(cb);
+    return () => this.missileListeners.delete(cb);
   }
 
   onDecoy(cb) {
@@ -353,5 +376,6 @@ export class GameNetwork {
     this.killListeners.clear();
     this.laserListeners.clear();
     this.decoyListeners.clear();
+    this.missileListeners.clear();
   }
 }

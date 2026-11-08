@@ -230,12 +230,17 @@ export class GameEngine {
           this.playerShip.input.yawRight = true;
           break;
         case 'Space':
-          this.isFiringCannon = true;
+          this.isFiringLaser = true;
           e.preventDefault();
           break;
         case 'KeyF':
-          this.weaponsSystem.triggerRearMine(this.playerShip);
+          this.weaponsSystem.triggerSecondary(true, this.playerShip, performance.now());
           break;
+        case 'KeyR': {
+          const res = this.playerShip.useSpecialPowerUp(this);
+          if (res) this.onDeathNotice(res.message);
+          break;
+        }
       }
     });
 
@@ -272,7 +277,7 @@ export class GameEngine {
           this.playerShip.input.yawRight = false;
           break;
         case 'Space':
-          this.isFiringCannon = false;
+          this.isFiringLaser = false;
           break;
       }
     });
@@ -280,17 +285,17 @@ export class GameEngine {
     // Mouse flight & weapons
     this.renderer.domElement.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
-        // Left click: Cannon fire
-        this.isFiringCannon = true;
+        // Left click: Laser fire
+        this.isFiringLaser = true;
       } else if (e.button === 2) {
-        // Right click: Rear mine
-        this.weaponsSystem.triggerRearMine(this.playerShip);
+        // Right click: Homing Missile (locked)
+        this.weaponsSystem.triggerSecondary(true, this.playerShip, performance.now());
       }
     });
 
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
-        this.isFiringCannon = false;
+        this.isFiringLaser = false;
       }
     });
 
@@ -380,7 +385,11 @@ export class GameEngine {
         this.timeSinceLastCombat = 0;
       }
       this.weaponsSystem.triggerPrimary(this.isFiringLaser, this.playerShip, now);
-      this.weaponsSystem.triggerSecondary(this.isFiringCannon, this.playerShip, now);
+
+      // Update Missile Lock System
+      if (this.weaponsSystem && this.weaponsSystem.lockSystem) {
+        this.weaponsSystem.lockSystem.update(dt, this.playerShip, this.remoteShips, this.spaceEnv, this.camera);
+      }
 
       // 3. Update Weapons & Explosions
       this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
@@ -539,6 +548,10 @@ export class GameEngine {
         laserEnergy: Math.round(this.weaponsSystem.laserEnergy),
         laserMaxEnergy: this.weaponsSystem.laserMaxEnergy,
         laserRecharging: (this.weaponsSystem.laserCooldownTimer <= 0 && this.weaponsSystem.laserEnergy < this.weaponsSystem.laserMaxEnergy),
+        missileLocked: this.weaponsSystem.lockSystem.isLocked,
+        missileLockProgress: this.weaponsSystem.lockSystem.getProgress(),
+        missileTarget: this.weaponsSystem.lockSystem.targetScreenPos,
+        storedPowerUp: this.playerShip.storedPowerUp,
         cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
         cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,
         cannonRecharging: (this.weaponsSystem.cannonCooldownTimer <= 0 && this.weaponsSystem.cannonEnergy < this.weaponsSystem.cannonMaxEnergy),

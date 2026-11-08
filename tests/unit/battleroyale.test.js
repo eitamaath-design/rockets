@@ -98,28 +98,46 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
       expect(powerups.powerups.some(item => item === p)).toBe(false);
     });
 
-    it('should collect Shield Replenish and fully restore broken shields', () => {
+    it('should collect Shield Replenish and store it, then activate upon use', () => {
       ship.shield = 0;
       ship.isShieldBroken = true;
 
       powerups.applyPowerUp(POWERUP_TYPES.SHIELD_REPAIR, ship, () => {});
+      expect(ship.storedPowerUp).toBeDefined();
+      expect(ship.storedPowerUp.type).toBe(POWERUP_TYPES.SHIELD_REPAIR);
+
+      ship.useSpecialPowerUp();
       expect(ship.shield).toBe(100);
       expect(ship.isShieldBroken).toBe(false);
+      expect(ship.storedPowerUp).toBeNull();
     });
 
-    it('should collect Cloaking Invisibility and grant 60s stealth', () => {
+    it('should collect Cloaking Invisibility and store it, then grant 60s stealth upon use', () => {
       expect(ship.isInvisible).toBe(false);
 
       powerups.applyPowerUp(POWERUP_TYPES.INVISIBILITY, ship, () => {});
+      expect(ship.storedPowerUp.type).toBe(POWERUP_TYPES.INVISIBILITY);
+
+      ship.useSpecialPowerUp();
       expect(ship.isInvisible).toBe(true);
       expect(ship.invisibilityTimer).toBe(60.0);
+      expect(ship.storedPowerUp).toBeNull();
     });
 
-    it('should collect Hologram Decoy Clone powerup and arm decoy', () => {
-      expect(ship.hasHologramDecoy).toBe(false);
+    it('should collect Hologram Decoy Clone powerup and store it, then deploy upon use', () => {
+      let deployed = false;
+      const fakeEngine = {
+        weaponsSystem: {
+          deployDecoyClone: () => { deployed = true; }
+        }
+      };
 
       powerups.applyPowerUp(POWERUP_TYPES.HOLOGRAM_CLONE, ship, () => {});
-      expect(ship.hasHologramDecoy).toBe(true);
+      expect(ship.storedPowerUp.type).toBe(POWERUP_TYPES.HOLOGRAM_CLONE);
+
+      ship.useSpecialPowerUp(fakeEngine);
+      expect(deployed).toBe(true);
+      expect(ship.storedPowerUp).toBeNull();
     });
   });
 
