@@ -74,11 +74,11 @@ export class GameHUD {
             </div>
 
             <div class="hud-compact-meter meter-missile">
-              <span class="meter-label">MISSILE [LOCK]</span>
+              <span class="meter-label">MISSILE</span>
               <div class="meter-track">
                 <div class="gauge-bar-fill bar-missile" id="hud-missile-bar" style="width: 0%;"></div>
               </div>
-              <span class="meter-val" id="hud-missile-pct">READY</span>
+              <span class="meter-val" id="hud-missile-pct">DUMB-FIRE</span>
             </div>
 
             <div class="hud-powerup-badge" id="hud-powerup-badge" style="display: none;"></div>
@@ -608,11 +608,12 @@ export class GameHUD {
       }
     }
 
-    // Laser Bar
+    // Laser Energy Bar (Smooth rendering)
     const laserBar = document.getElementById('hud-laser-bar');
     const laserPct = document.getElementById('hud-laser-pct');
-    if (laserBar) laserBar.style.width = `${state.laserEnergy || 0}%`;
-    if (laserPct) laserPct.textContent = `${state.laserEnergy || 0}%`;
+    const laserEnergyPct = Math.max(0, Math.min(100, Math.round(state.laserEnergy !== undefined ? state.laserEnergy : 100)));
+    if (laserBar) laserBar.style.width = `${laserEnergyPct}%`;
+    if (laserPct) laserPct.textContent = `${laserEnergyPct}%`;
 
     // Missile Lock Gauge & Status Bar
     const missileBar = document.getElementById('hud-missile-bar');
@@ -637,7 +638,7 @@ export class GameHUD {
         missilePct.textContent = `${Math.round(lockProgress * 100)}%`;
         missilePct.style.color = '#ffcc00';
       } else {
-        missilePct.textContent = 'READY';
+        missilePct.textContent = 'DUMB-FIRE';
         missilePct.style.color = '#00ffff';
       }
     }
@@ -645,8 +646,8 @@ export class GameHUD {
     if (missileBtn) {
       if (isLocked) {
         missileBtn.classList.add('missile-locked');
-        if (missileText) missileText.textContent = 'MISSILE [READY]';
-        if (missileStatus) missileStatus.textContent = '🔥 [LOCKED - FIRE!]';
+        if (missileText) missileText.textContent = 'MISSILE [LOCKED]';
+        if (missileStatus) missileStatus.textContent = '🎯 [LOCKED - GUIDED]';
       } else if (lockProgress > 0) {
         missileBtn.classList.remove('missile-locked');
         if (missileText) missileText.textContent = 'LOCKING...';
@@ -654,8 +655,8 @@ export class GameHUD {
         if (missileStatus) missileStatus.textContent = `${Math.round(lockProgress * 100)}% (${remSecs}s)`;
       } else {
         missileBtn.classList.remove('missile-locked');
-        if (missileText) missileText.textContent = 'MISSILE';
-        if (missileStatus) missileStatus.textContent = '[AIM TO LOCK (3s)]';
+        if (missileText) missileText.textContent = 'MISSILE [DUMB-FIRE]';
+        if (missileStatus) missileStatus.textContent = '[DUMB-FIRE / AIM 3s]';
       }
     }
 

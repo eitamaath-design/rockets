@@ -214,10 +214,16 @@ export class MeteorSystem {
         const minDist = a.radius + m.radius;
 
         if (distSq < minDist * minDist) {
-          // Deliver massive kinetic momentum impulse to the asteroid!
+          // Deliver clamped kinetic momentum impulse to the asteroid
           const normal = a.position.clone().sub(m.position).normalize();
-          const impactImpulse = (m.mass / a.mass) * m.speed * 1.8;
+          const rawImpulse = (m.mass / Math.max(1, a.mass)) * m.speed * 1.8;
+          const impactImpulse = Math.min(30.0, rawImpulse);
           a.velocity.addScaledVector(normal, impactImpulse);
+
+          // Cap asteroid velocity to physically plausible limit
+          if (a.velocity.length() > 40.0) {
+            a.velocity.setLength(40.0);
+          }
 
           // Give the asteroid a violent rotational kick
           a.rotationSpeed.add(new THREE.Vector3(

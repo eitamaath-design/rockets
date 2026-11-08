@@ -49,6 +49,7 @@ export class PlayerShip {
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5; // seconds of shield protection on spawn
+    this.asteroidImpactDebounceTimer = 0.0; // Debounce cooldown preventing multi-frame collision grinds
     this.score = 0;
     this.kills = 0;
     this.deaths = 0;
@@ -94,6 +95,7 @@ export class PlayerShip {
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
+    this.asteroidImpactDebounceTimer = 0.0;
 
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.quaternion);
@@ -228,6 +230,9 @@ export class PlayerShip {
   update(dt) {
     if (this.invulnerableTimer > 0) {
       this.invulnerableTimer = Math.max(0, this.invulnerableTimer - dt);
+    }
+    if (this.asteroidImpactDebounceTimer > 0) {
+      this.asteroidImpactDebounceTimer = Math.max(0, this.asteroidImpactDebounceTimer - dt);
     }
 
     if (this.boostCooldownTimer > 0) {
@@ -392,7 +397,10 @@ export class PlayerShip {
     if (this.spaceEnv && typeof this.spaceEnv.resolveShipCollision === 'function') {
       const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass);
       if (collisionResult) {
-        this.takeDamage(collisionResult.impactDamage);
+        if (this.asteroidImpactDebounceTimer <= 0) {
+          this.takeDamage(collisionResult.impactDamage);
+          this.asteroidImpactDebounceTimer = 0.25; // 0.25s impact debounce prevents multi-frame lethal grinds
+        }
         return collisionResult;
       }
     } else if (this.spaceEnv && typeof this.spaceEnv.checkCollision === 'function') {
@@ -407,7 +415,10 @@ export class PlayerShip {
         if (dot < 0) {
           this.velocity.subScaledVector(normal, 1.8 * dot);
         }
-        this.takeDamage(15);
+        if (this.asteroidImpactDebounceTimer <= 0) {
+          this.takeDamage(15);
+          this.asteroidImpactDebounceTimer = 0.25;
+        }
       }
     }
   }

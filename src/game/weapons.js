@@ -290,23 +290,23 @@ export class WeaponsSystem {
     this.spaceEnv = spaceEnv;
     this.network = network;
 
-    // 1. Primary Weapon: Directed Energy Laser Beam
+    // 1. Primary Weapon: Directed Energy Laser Beam (Continuous Sustained Beam ~5s)
     this.laserMaxEnergy = 100.0;
     this.laserEnergy = 100.0;
-    this.laserShotCost = 25.0; // 4 shots per full charge
-    this.laserCooldownDelay = 0.70;
+    this.laserFireInterval = 0.08; // 12.5 ticks per second for seamless continuous beam
+    this.laserShotCost = 1.6; // 1.6 * 12.5 = 20.0 energy/s -> exactly 5.0 seconds continuous sustained fire!
+    this.laserCooldownDelay = 0.50;
     this.laserCooldownTimer = 0;
-    this.laserRechargeRate = 32.0;
-    this.laserFireInterval = 0.25; // max 4 pulses/sec
+    this.laserRechargeRate = 25.0; // Smooth 4-second recharge
     this.laserLastFireTime = 0;
-    this.laserDamage = 22.0; // 2.4x vs shield = 52.8, 0.35x vs hull = 7.7
+    this.laserDamage = 2.4; // 2.4 per tick (30 dps; 72 shield dps)
     this.laserMaxRange = 750.0;
     this.laserSpeed = 480.0;
 
-    // 2. Secondary Weapon: Homing Missile System
+    // 2. Secondary Weapon: Dual-Mode Missile System (Guided 3s Lock + Unguided Dumb-Fire)
     this.lockSystem = new MissileLockSystem();
     this.missileDamage = 55.0; // 2.2x vs hull = 121.0 (deadly finish)
-    this.missileFireCooldown = 1.0;
+    this.missileFireCooldown = 0.8;
     this.missileLastFireTime = 0;
     this.cannonDamage = 6.0;
     this.cannonSpeed = 185.0;
@@ -461,7 +461,7 @@ export class WeaponsSystem {
     }
 
     const nowSec = now > 1000 ? now * 0.001 : now;
-    if (this.laserEnergy >= this.laserShotCost && (nowSec - this.laserLastFireTime) >= this.laserFireInterval) {
+    if (this.laserEnergy >= this.laserShotCost && (nowSec - this.laserLastFireTime) >= (this.laserFireInterval - 0.001)) {
       this.laserLastFireTime = nowSec;
       this.laserCooldownTimer = this.laserCooldownDelay;
       this.laserEnergy = Math.max(0, this.laserEnergy - this.laserShotCost);
@@ -536,8 +536,8 @@ export class WeaponsSystem {
       if (hitTargetType === 'asteroid' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 6, 0x00d4ff);
         if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          // Primary laser carves and melts through asteroid!
-          this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 20.0, 14.0);
+          // Primary laser continuously carves and melts deep tunnels through asteroid!
+          this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 30.0, 20.0);
         }
       } else if (hitTargetType === 'ship' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 8, 0x00ffff);
@@ -627,16 +627,12 @@ export class WeaponsSystem {
   }
 
   /**
-   * Secondary Weapon: Homing Missile (Requires 3.0s Continuous Target Lock)
-   * Tracks locked target. Carves deep craters if hitting asteroids!
+   * Secondary Weapon: Dual-Mode Missile (Guided with 3s Lock + Unguided Dumb-Fire)
+   * Tracks locked target when lock-on achieved; otherwise fires straight ahead as dumb-fire.
+   * Blasts massive crater chunks when impacting asteroids!
    */
   triggerSecondary(isHolding, ship, now) {
     if (!isHolding || ship.isDead) return false;
-
-    // Check if target is locked!
-    if (!this.lockSystem.isLocked || !this.lockSystem.currentTargetId) {
-      return false; // Cannot fire without 3s lock-on!
-    }
 
     const nowSec = now > 1000 ? now * 0.001 : now;
     if ((nowSec - this.missileLastFireTime) < this.missileFireCooldown) return false;
@@ -646,7 +642,13 @@ export class WeaponsSystem {
       ship.breakInvisibility();
     }
 
-    const targetId = this.lockSystem.consumeLock();
+    let targetId = null;
+    let isLocked = false;
+    if (this.lockSystem.isLocked && this.lockSystem.currentTargetId) {
+      targetId = this.lockSystem.consumeLock();
+      isLocked = true;
+    }
+
     const fwd = ship.getForwardVector();
     const origin = ship.position.clone()
       .addScaledVector(fwd, 3.5)
@@ -655,7 +657,12 @@ export class WeaponsSystem {
     const missileId = `missile-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
     this.spawnMissile(origin, fwd, targetId, true, missileId);
     audio.playMissileLaunch(true);
-    logger.log('WEAPON', `🚀 Homing Missile LAUNCHED tracking target [${targetId.slice(0, 5)}]`);
+
+    if (isLocked) {
+      logger.log('WEAPON', `🚀 Guided Homing Missile LAUNCHED tracking target [${targetId.slice(0, 5)}]`);
+    } else {
+      logger.log('WEAPON', `🚀 Unguided Dumb-Fire Missile LAUNCHED straight ahead`);
+    }
 
     if (this.network && typeof this.network.broadcastMissile === 'function') {
       this.network.broadcastMissile({
@@ -945,12 +952,12 @@ export class WeaponsSystem {
 
       let detonated = false;
 
-      // Asteroid collision: MISSILE BLASTS DEEP CRATER!
+      // Asteroid collision: MISSILE BLASTS MASSIVE CRATER CHUNK!
       const hitAsteroid = this.spaceEnv.checkCollision(m.group.position, 1.8);
       if (hitAsteroid) {
-        this.spawnExplosion(m.group.position, 16, 0xff5500);
+        this.spawnExplosion(m.group.position, 22, 0xff5500);
         if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 28.0, 18.0);
+          this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 45.0, 35.0);
         }
         detonated = true;
       }
@@ -965,15 +972,28 @@ export class WeaponsSystem {
         }
       }
 
-      // Hit Remote Target
-      if (!detonated && m.isLocal && m.targetId && remoteShipsMap.has(m.targetId)) {
-        const remote = remoteShipsMap.get(m.targetId);
-        if (!remote.isDead && m.group.position.distanceToSquared(remote.position) < 24.0) {
-          this.spawnExplosion(m.group.position, 20, 0xff2200);
-          if (this.network && typeof this.network.sendHitTarget === 'function') {
-            this.network.sendHitTarget(m.targetId, this.missileDamage, 'missile');
+      // Hit Remote Target (Guided locked target or unguided dumb-fire proximity hit)
+      if (!detonated && m.isLocal) {
+        if (m.targetId && remoteShipsMap.has(m.targetId)) {
+          const remote = remoteShipsMap.get(m.targetId);
+          if (!remote.isDead && m.group.position.distanceToSquared(remote.position) < 24.0) {
+            this.spawnExplosion(m.group.position, 20, 0xff2200);
+            if (this.network && typeof this.network.sendHitTarget === 'function') {
+              this.network.sendHitTarget(m.targetId, this.missileDamage, 'missile');
+            }
+            detonated = true;
           }
-          detonated = true;
+        } else if (!m.targetId && remoteShipsMap) {
+          for (const [peerId, remote] of remoteShipsMap.entries()) {
+            if (!remote.isDead && m.group.position.distanceToSquared(remote.position) < 24.0) {
+              this.spawnExplosion(m.group.position, 20, 0xff2200);
+              if (this.network && typeof this.network.sendHitTarget === 'function') {
+                this.network.sendHitTarget(peerId, this.missileDamage, 'missile');
+              }
+              detonated = true;
+              break;
+            }
+          }
         }
       }
 

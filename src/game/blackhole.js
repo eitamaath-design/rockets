@@ -155,7 +155,44 @@ export class BlackHoleSystem {
     this.scene.add(this.perimeterMesh);
   }
 
-  update(dt, playerShip, remoteShipsMap, meteorSystem, onPlayerDevoured) {
+  update(dt, playerShip, remoteShipsMap, arg4, arg5, arg6) {
+    // Robust dual-signature support:
+    // (dt, playerShip, remoteShipsMap, meteorSystem, onPlayerDevoured) OR
+    // (dt, playerShip, remoteShipsMap, spaceEnv, meteorSystem, onPlayerDevoured)
+    let spaceEnv = this.spaceEnv;
+    let meteorSystem = null;
+    let onPlayerDevoured = null;
+
+    if (typeof arg4 === 'function') {
+      onPlayerDevoured = arg4;
+    } else if (typeof arg5 === 'function') {
+      if (arg4 && typeof arg4.destroyMeteor === 'function') {
+        meteorSystem = arg4;
+      } else if (arg4 && (arg4.asteroids || arg4.scene)) {
+        spaceEnv = arg4;
+      } else {
+        meteorSystem = arg4;
+      }
+      onPlayerDevoured = arg5;
+    } else if (typeof arg6 === 'function') {
+      if (arg4) spaceEnv = arg4;
+      if (arg5) meteorSystem = arg5;
+      onPlayerDevoured = arg6;
+    } else {
+      if (arg4 && typeof arg4.destroyMeteor === 'function') {
+        meteorSystem = arg4;
+      } else if (arg4 && (arg4.asteroids || arg4.scene)) {
+        spaceEnv = arg4;
+      }
+      if (arg5 && typeof arg5.destroyMeteor === 'function') {
+        meteorSystem = arg5;
+      }
+    }
+
+    if (spaceEnv) {
+      this.spaceEnv = spaceEnv;
+    }
+
     this.matchTime += dt;
     const matchProgress = Math.min(1.0, this.matchTime / this.matchDuration);
 
@@ -219,7 +256,7 @@ export class BlackHoleSystem {
       if (dist <= this.eventHorizonRadius) {
         logger.log('BLACK_HOLE', 'Player ship devoured by the Black Hole event horizon!');
         playerShip.takeDamage(9999, true);
-        if (onPlayerDevoured) {
+        if (typeof onPlayerDevoured === 'function') {
           onPlayerDevoured('🕳️ Devoured by the encroaching Cosmic Black Hole!');
         }
       }

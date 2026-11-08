@@ -276,7 +276,11 @@ export class GameNetwork {
 
   broadcastMissile(missileData) {
     if (this.sendMissile) {
-      this.sendMissile(missileData);
+      const payload = {
+        ...missileData,
+        targetPeerId: missileData.targetPeerId !== undefined ? missileData.targetPeerId : null
+      };
+      this.sendMissile(payload);
     }
   }
 

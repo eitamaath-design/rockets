@@ -56,9 +56,31 @@ describe('Sector Hazards: Periodic Flaming Meteors & Lighting Stability', () => 
       // Update frame to resolve collision
       meteorSystem.update(0.016, playerShip, new Map(), () => {});
 
-      // Asteroid must have gained significant momentum impulse
+      // Asteroid must have gained significant momentum impulse, but strictly capped to <= 40 u/s
       expect(testAsteroid.velocity.length()).toBeGreaterThan(0);
+      expect(testAsteroid.velocity.length()).toBeLessThanOrEqual(40.0);
       expect(meteorSystem.activeMeteor).toBeNull(); // Meteor destroyed on impact
+    });
+
+    it('should clamp meteor impact impulse to <= 30 u/s and cap asteroid speed <= 40 u/s on tiny asteroids', () => {
+      // Tiny asteroid with very small mass that would otherwise produce 500,000 u/s impulse
+      const tinyAsteroid = {
+        position: new THREE.Vector3(0, 0, 0),
+        velocity: new THREE.Vector3(0, 0, 0),
+        radius: 10,
+        mass: 100, // Very small mass
+        rotationSpeed: new THREE.Vector3(0, 0, 0)
+      };
+      mockSpaceEnv.asteroids.push(tinyAsteroid);
+
+      meteorSystem.spawnMeteor();
+      const meteor = meteorSystem.activeMeteor;
+      meteor.position.set(0, 0, 15);
+      meteor.velocity.set(0, 0, -250);
+
+      meteorSystem.update(0.016, playerShip, new Map(), () => {});
+      expect(tinyAsteroid.velocity.length()).toBeLessThanOrEqual(40.0);
+      expect(tinyAsteroid.velocity.length()).toBeGreaterThan(0);
     });
 
     it('should completely incinerate and destroy a player ship on collision', () => {

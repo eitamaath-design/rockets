@@ -69,6 +69,28 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
       expect(ship.hp).toBe(0);
       expect(deathNotice).toContain('Black Hole');
     });
+
+    it('should support 6-argument signature with spaceEnv and meteorSystem without TypeError', () => {
+      let deathNotice = null;
+      blackHole.update(0.016, ship, new Map(), mockSpaceEnv, null, () => {});
+
+      // Position ship inside singularity event horizon
+      ship.isDead = false;
+      ship.hp = 100;
+      ship.position.copy(blackHole.position);
+
+      const fakeMeteorSystem = { destroyMeteor: () => {} };
+
+      // 6-argument update call
+      expect(() => {
+        blackHole.update(0.016, ship, new Map(), mockSpaceEnv, fakeMeteorSystem, (notice) => {
+          deathNotice = notice;
+        });
+      }).not.toThrow();
+
+      expect(ship.isDead).toBe(true);
+      expect(deathNotice).toContain('Black Hole');
+    });
   });
 
   describe('Tactical Power-Ups (10s Spawns, 60s Lifetime)', () => {
@@ -169,6 +191,57 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
         }
       }
       expect(vertexMoved).toBe(true);
+
+      // Verify carving metadata is tracked
+      expect(asteroid.carvings).toBeDefined();
+      expect(asteroid.carvings.length).toBeGreaterThan(0);
+      expect(asteroid.carvings[0].carveRadius).toBe(asteroid.radius * 0.8);
+    });
+
+    it('should grant flight collision clearance when ship is inside a carved crater cavity', () => {
+      const space = new SpaceEnvironment(scene, 999);
+      const asteroid = space.asteroids[0];
+      asteroid.mesh.updateMatrixWorld(true);
+
+      // Carve deep tunnel into the asteroid
+      const hitPoint = asteroid.position.clone().add(new THREE.Vector3(asteroid.radius, 0, 0));
+      const hitDir = new THREE.Vector3(-1, 0, 0); // Carve inward
+      space.carveAsteroid(asteroid, hitPoint, hitDir, 35.0, 25.0);
+
+      expect(asteroid.carvings.length).toBe(1);
+
+      // Place ship directly inside the carved cavern cavity
+      const shipInCavityPos = hitPoint.clone().addScaledVector(hitDir, 10.0);
+      const shipVelocity = new THREE.Vector3(0, 0, 0);
+
+      // resolveShipCollision should detect the ship is inside carved cavity and allow flight (no collision bounce)
+      const collision = space.resolveShipCollision(shipInCavityPos, shipVelocity, 2.8, 1200);
+      expect(collision).toBeNull();
+    });
+
+    it('should debounce collision damage on ship so consecutive frames do not inflict multi-frame lethal grinds', () => {
+      const space = new SpaceEnvironment(scene, 888);
+      ship.spaceEnv = space;
+      ship.invulnerableTimer = 0;
+      ship.hp = 100;
+      ship.shield = 100;
+
+      const asteroid = space.asteroids[0];
+      // Position ship right on the uncarved asteroid perimeter
+      ship.position.copy(asteroid.position).add(new THREE.Vector3(asteroid.radius + 1.0, 0, 0));
+      ship.velocity.set(-15, 0, 0); // Moving into asteroid
+
+      // Frame 1: collision occurs and inflicts damage
+      ship.handleAsteroidCollisions();
+      const hpAfterFirst = ship.hp + ship.shield;
+      expect(hpAfterFirst).toBeLessThan(200);
+      expect(ship.asteroidImpactDebounceTimer).toBeGreaterThan(0);
+
+      // Frame 2 (immediate consecutive frame, dt=0.016s): debounce prevents damage
+      ship.velocity.set(-15, 0, 0);
+      ship.handleAsteroidCollisions();
+      const hpAfterSecond = ship.hp + ship.shield;
+      expect(hpAfterSecond).toBe(hpAfterFirst); // No duplicate damage!
     });
   });
 });

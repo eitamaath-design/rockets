@@ -366,32 +366,40 @@ export class AudioManager {
     this.resume();
 
     const now = this.ctx.currentTime;
+    // Throttle laser cadence to avoid overlapping node overload and audio cracking
+    if (this._lastLaserAudioTime && (now - this._lastLaserAudioTime) < 0.07) {
+      return;
+    }
+    this._lastLaserAudioTime = now;
+
     const dest = this.createPanner(pos) || this.compressor;
 
-    // High harmonic sweep
+    // Smooth continuous laser pulse / beam cadence with soft attack & decay
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
 
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(isLocal ? 1650 : 1200, now);
-    osc.frequency.exponentialRampToValueAtTime(140, now + 0.18);
+    osc.frequency.setValueAtTime(isLocal ? 1480 : 1150, now);
+    osc.frequency.exponentialRampToValueAtTime(320, now + 0.09);
 
     filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(3200, now);
-    filter.frequency.exponentialRampToValueAtTime(450, now + 0.18);
-    filter.Q.setValueAtTime(4.0, now);
+    filter.frequency.setValueAtTime(2900, now);
+    filter.frequency.exponentialRampToValueAtTime(550, now + 0.09);
+    filter.Q.setValueAtTime(3.2, now);
 
-    const vol = isLocal ? 0.42 : 0.26;
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+    const vol = isLocal ? 0.32 : 0.20;
+    // Soft attack (prevents clicks) and exponential decay
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(vol, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
 
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
 
     osc.start(now);
-    osc.stop(now + 0.20);
+    osc.stop(now + 0.10);
   }
 
   /**

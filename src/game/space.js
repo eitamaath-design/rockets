@@ -337,26 +337,41 @@ export class SpaceEnvironment {
       const mesh = new THREE.Mesh(geom, mat);
 
       let posX = 0, posY = 0, posZ = 0;
+      const margin = 15.0; // Minimum clearance between asteroid bounding spheres
+      let posFound = false;
+      let attempts = 0;
+      const maxAttempts = i < 12 ? 80 : 120;
 
-      // The first 12 asteroids are placed directly in the player's forward view down -Z
-      // (Spawns at z = 180 looking down -Z, so z from 60 down to -260 are 120 to 440 units ahead)
-      if (i < 12) {
-        posX = (prng() - 0.5) * 180;
-        posY = (prng() - 0.5) * 90;
-        posZ = 60 - prng() * 320;
-      } else {
-        let posFound = false;
-        let attempts = 0;
-        while (!posFound && attempts < 50) {
-          attempts++;
+      while (!posFound && attempts < maxAttempts) {
+        attempts++;
+        if (i < 12) {
+          // The first 12 asteroids are placed in the forward view down -Z
+          posX = (prng() - 0.5) * 220;
+          posY = (prng() - 0.5) * 110;
+          posZ = 60 - prng() * 320;
+        } else {
           posX = (prng() - 0.5) * playAreaRadius * 2;
           posY = (prng() - 0.5) * (playAreaRadius * 0.7);
           posZ = (prng() - 0.5) * playAreaRadius * 2;
-          const distToSpawn = Math.hypot(posX - 0, posY - 0, posZ - 180);
-          const distToCenter = Math.hypot(posX, posY, posZ);
-          if (distToSpawn > radius + 50 && distToCenter < playAreaRadius) {
-            posFound = true;
+        }
+
+        const distToSpawn = Math.hypot(posX - 0, posY - 0, posZ - 180);
+        const distToCenter = Math.hypot(posX, posY, posZ);
+
+        if (distToSpawn <= (radius + 45)) continue;
+        if (i >= 12 && distToCenter >= playAreaRadius) continue;
+
+        let overlaps = false;
+        for (let k = 0; k < this.asteroids.length; k++) {
+          const other = this.asteroids[k];
+          const dist = Math.hypot(posX - other.position.x, posY - other.position.y, posZ - other.position.z);
+          if (dist < (radius + other.radius + margin)) {
+            overlaps = true;
+            break;
           }
+        }
+        if (!overlaps) {
+          posFound = true;
         }
       }
 
@@ -471,17 +486,19 @@ export class SpaceEnvironment {
 
           // Mass-weighted positional separation (heavier asteroid budges less)
           const overlap = minDist - dist;
+          // Clamp maximum separation push per frame to prevent impulse explosion
+          const clampedOverlap = Math.min(overlap, 8.0);
           const totalMass = a1.mass + a2.mass;
           const ratio1 = a2.mass / totalMass;
           const ratio2 = a1.mass / totalMass;
 
-          p1.x += nx * overlap * ratio1;
-          p1.y += ny * overlap * ratio1;
-          p1.z += nz * overlap * ratio1;
+          p1.x += nx * clampedOverlap * ratio1;
+          p1.y += ny * clampedOverlap * ratio1;
+          p1.z += nz * clampedOverlap * ratio1;
 
-          p2.x -= nx * overlap * ratio2;
-          p2.y -= ny * overlap * ratio2;
-          p2.z -= nz * overlap * ratio2;
+          p2.x -= nx * clampedOverlap * ratio2;
+          p2.y -= ny * clampedOverlap * ratio2;
+          p2.z -= nz * clampedOverlap * ratio2;
 
           // Relative velocity along collision normal
           const rvx = a1.velocity.x - a2.velocity.x;
@@ -491,17 +508,24 @@ export class SpaceEnvironment {
 
           // Only transfer momentum if asteroids are moving toward each other
           if (velAlongNormal < 0) {
-            const restitution = 0.65; // Inelastic planetary rock impact
+            const restitution = 0.55; // Inelastic planetary rock impact
             const impulse = -(1 + restitution) * velAlongNormal / (1 / a1.mass + 1 / a2.mass);
 
-            a1.velocity.x += (impulse / a1.mass) * nx;
-            a1.velocity.y += (impulse / a1.mass) * ny;
-            a1.velocity.z += (impulse / a1.mass) * nz;
+            const dv1 = Math.min(25.0, impulse / a1.mass);
+            const dv2 = Math.min(25.0, impulse / a2.mass);
 
-            a2.velocity.x -= (impulse / a2.mass) * nx;
-            a2.velocity.y -= (impulse / a2.mass) * ny;
-            a2.velocity.z -= (impulse / a2.mass) * nz;
+            a1.velocity.x += dv1 * nx;
+            a1.velocity.y += dv1 * ny;
+            a1.velocity.z += dv1 * nz;
+
+            a2.velocity.x -= dv2 * nx;
+            a2.velocity.y -= dv2 * ny;
+            a2.velocity.z -= dv2 * nz;
           }
+
+          // Cap maximum asteroid velocities to prevent warping
+          if (a1.velocity.length() > 40.0) a1.velocity.setLength(40.0);
+          if (a2.velocity.length() > 40.0) a2.velocity.setLength(40.0);
         }
       }
     }
@@ -590,6 +614,28 @@ export class SpaceEnvironment {
       const minDist = a.radius + shipRadius;
 
       if (dist < minDist) {
+        // Clearance check: if ship is within any carved crater or cavern cavity, exempt from spherical collision
+        if (a.carvings && a.carvings.length > 0 && a.mesh) {
+          if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
+          const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
+          const localShip = position.clone().applyMatrix4(invMatrix);
+
+          let insideCarvedCavity = false;
+          for (let c = 0; c < a.carvings.length; c++) {
+            const carving = a.carvings[c];
+            const distToCavity = localShip.distanceTo(carving.cavityCenter || carving.localHit);
+            // Allow flight through and inside the carved cavity without phantom collision
+            if (distToCavity < (carving.carveRadius * 0.95)) {
+              insideCarvedCavity = true;
+              break;
+            }
+          }
+
+          if (insideCarvedCavity) {
+            continue;
+          }
+        }
+
         const normal = position.clone().sub(a.position);
         if (normal.lengthSq() < 0.0001) {
           normal.set(0, 1, 0);
@@ -692,8 +738,20 @@ export class SpaceEnvironment {
       if (geom.boundingSphere) {
         asteroid.boundingSphere.radius = Math.max(10, geom.boundingSphere.radius);
       }
+
+      // Record carved cavity for ship flight clearance inside caverns
+      asteroid.carvings = asteroid.carvings || [];
+      asteroid.carvings.push({
+        localHit: localHit.clone(),
+        localDir: localDir.clone(),
+        cavityCenter: localHit.clone().addScaledVector(localDir, carveDepth * 0.45),
+        carveRadius,
+        carveDepth,
+        timestamp: Date.now()
+      });
     }
 
-    this.spawnRockDebris(hitPoint, hitDir);
+    const debrisCount = carveRadius > 35 ? 16 : 8;
+    this.spawnRockDebris(hitPoint, hitDir, debrisCount);
   }
 }
