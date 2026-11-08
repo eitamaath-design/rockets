@@ -939,6 +939,139 @@ html, body {
   box-shadow: 0 0 4px #00ffff;
 }
 
+/* Dynamic Ship Bore-Sight Reticle (Actual Hull Direction vs Pilot POV) */
+.hud-ship-boresight {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 15;
+  transition: opacity 0.15s ease;
+}
+
+.boresight-reticle {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.boresight-ring {
+  width: 100%;
+  height: 100%;
+  border: 1.5px dashed rgba(255, 170, 0, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255, 170, 0, 0.4);
+  transition: all 0.2s ease;
+}
+
+.boresight-cross-h {
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  right: -4px;
+  height: 1px;
+  background: rgba(255, 170, 0, 0.7);
+  transform: translateY(-50%);
+}
+
+.boresight-cross-v {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  bottom: -4px;
+  width: 1px;
+  background: rgba(255, 170, 0, 0.7);
+  transform: translateX(-50%);
+}
+
+.boresight-pointer {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-right: 2px solid #ff3355;
+  border-top: 2px solid #ff3355;
+  transform-origin: center center;
+  transform: translate(-50%, -50%) rotate(var(--edge-angle, 0deg)) translate(22px, 0) rotate(45deg);
+  box-shadow: 2px -2px 6px rgba(255, 51, 85, 0.6);
+}
+
+.boresight-label {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ffaa00;
+  text-shadow: 0 0 5px rgba(255, 170, 0, 0.8);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* Aligned state: locked with center pilot POV crosshair */
+.hud-ship-boresight.aligned .boresight-ring {
+  border: 1.5px solid #00ffff;
+  box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+}
+
+.hud-ship-boresight.aligned .boresight-cross-h,
+.hud-ship-boresight.aligned .boresight-cross-v {
+  background: rgba(0, 255, 255, 0.6);
+}
+
+.hud-ship-boresight.aligned .boresight-label {
+  color: #00ffff;
+  text-shadow: 0 0 5px rgba(0, 255, 255, 0.8);
+}
+
+/* Tracking state: lagging behind pilot POV */
+.hud-ship-boresight.tracking .boresight-ring {
+  border: 1.5px dashed #ffaa00;
+  box-shadow: 0 0 8px rgba(255, 170, 0, 0.6);
+  animation: boresightPulse 1.2s infinite ease-in-out;
+}
+
+.hud-ship-boresight.tracking .boresight-label {
+  color: #ffaa00;
+  text-shadow: 0 0 5px rgba(255, 170, 0, 0.8);
+}
+
+/* Offscreen state: clamped to viewport perimeter */
+.hud-ship-boresight.offscreen .boresight-ring {
+  border: 1.5px solid #ff3355;
+  box-shadow: 0 0 10px rgba(255, 51, 85, 0.8);
+}
+
+.hud-ship-boresight.offscreen .boresight-cross-h,
+.hud-ship-boresight.offscreen .boresight-cross-v {
+  background: rgba(255, 51, 85, 0.8);
+}
+
+.hud-ship-boresight.offscreen .boresight-pointer {
+  display: block;
+}
+
+.hud-ship-boresight.offscreen .boresight-label {
+  color: #ff3355;
+  text-shadow: 0 0 6px rgba(255, 51, 85, 0.9);
+}
+
+@keyframes boresightPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1.0); }
+  50% { opacity: 1.0; transform: scale(1.08); }
+}
+
 /* Combat Feed */
 .hud-combat-feed {
   position: absolute;

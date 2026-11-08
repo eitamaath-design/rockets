@@ -1,7 +1,12 @@
+import * as THREE from 'three';
 import { lobbyService } from './net/lobby.js';
 import { GameNetwork } from './net/network.js';
 import { GameEngine } from './game/engine.js';
 import { GameHUD } from './game/hud.js';
+import { logger } from './utils/logger.js';
+
+window.THREE = THREE;
+window.logger = logger;
 
 const app = document.getElementById('app');
 
@@ -40,7 +45,7 @@ class AppRouter {
     const roomParam = params.get('room');
 
     const config = {
-      voxelQuality: params.get('quality') || 'low',
+      voxelQuality: params.get('quality') || 'high',
       asteroidCount: params.get('density') ? parseInt(params.get('density'), 10) : 100,
       megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
       meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10
@@ -105,9 +110,9 @@ class AppRouter {
                 <div class="config-field">
                   <label for="voxel-quality-select">Voxel Quality</label>
                   <select id="voxel-quality-select" class="lobby-select">
-                    <option value="low" selected>Low (32³)</option>
+                    <option value="low">Low (32³)</option>
                     <option value="medium">Medium (48³)</option>
-                    <option value="high">High (64³)</option>
+                    <option value="high" selected>High (64³)</option>
                   </select>
                 </div>
                 <div class="config-field">
@@ -237,7 +242,7 @@ class AppRouter {
         const roomName = (sectorInput.value.trim()) || getRandomSectorName();
         const roomId = roomName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
         const config = {
-          voxelQuality: document.getElementById('voxel-quality-select')?.value || 'low',
+          voxelQuality: document.getElementById('voxel-quality-select')?.value || 'high',
           asteroidCount: parseInt(document.getElementById('asteroid-count-select')?.value, 10) || 100,
           megaRadius: parseInt(document.getElementById('mega-radius-select')?.value, 10) || 2800,
           meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10
@@ -304,7 +309,7 @@ class AppRouter {
             <span class="room-ttl-badge">⏳ TTL: ${room.ttlSecondsRemaining}s</span>
           </div>
           <div class="room-config-badges">
-            <span class="room-badge badge-vox">VOX: ${(room.config?.voxelQuality || 'low').toUpperCase()}</span>
+            <span class="room-badge badge-vox">VOX: ${(room.config?.voxelQuality || 'high').toUpperCase()}</span>
             <span class="room-badge badge-belt">BELT: ${room.config?.asteroidCount ?? 100}</span>
             <span class="room-badge badge-mega">MEGA: ${room.config?.megaRadius ?? 2800}u</span>
             <span class="room-badge badge-meteor">METEOR: ${room.config?.meteorFrequency ? room.config.meteorFrequency + 's' : 'OFF'}</span>
@@ -336,7 +341,7 @@ class AppRouter {
     this.currentMode = 'game';
 
     const activeConfig = config || {
-      voxelQuality: 'low',
+      voxelQuality: 'high',
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10
@@ -392,6 +397,9 @@ class AppRouter {
       console.error('[Network] joinRoom exception:', netErr?.message || netErr);
     }
     this.engine.start();
+    window.__engine = this.engine;
+    window.gameEngine = this.engine;
+    window.logger = logger;
   }
 }
 

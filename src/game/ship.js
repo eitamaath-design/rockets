@@ -11,7 +11,10 @@ export class PlayerShip {
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.quaternion = new THREE.Quaternion();
     this.desiredQuaternion = new THREE.Quaternion();
-    this.maxTurnRate = 2.2; // Base constrained maneuverability turn rate in rad/s
+    // Upgradeable ship capability ceiling (rotational rate limit in rad/s)
+    this.capabilities = {
+      maxTurnRate: 1.5
+    };
 
     // Flight parameters
     this.maxSpeed = 90.0; // units per second
@@ -27,8 +30,8 @@ export class PlayerShip {
     this.boostImpulse = 180.0; // 300% stronger forward surge impulse
 
     // Rotation speeds (radians per second)
-    this.pitchSpeed = 1.6;
-    this.yawSpeed = 1.6;
+    this.pitchSpeed = 3.2;
+    this.yawSpeed = 3.2;
     this.rollSpeed = 2.0;
 
     // Health, Shield & Tactical Powerups
@@ -77,7 +80,38 @@ export class PlayerShip {
 
     // Camera initial orientation
     this.camera.position.copy(this.position);
-    this.camera.quaternion.copy(this.quaternion);
+    this.camera.quaternion.copy(this.desiredQuaternion);
+  }
+
+  get maxTurnRate() {
+    return this.capabilities.maxTurnRate;
+  }
+
+  set maxTurnRate(val) {
+    this.capabilities.maxTurnRate = val;
+  }
+
+  /**
+   * Instantaneously rotates the Pilot POV (desiredQuaternion & camera) without any
+   * ship rotational rate limit, while the physical ship hull (this.quaternion)
+   * turns to catch up based on this.capabilities.maxTurnRate.
+   */
+  applyMouseLook(deltaYaw, deltaPitch) {
+    if (this.isDead) return;
+    const pitchAxis = new THREE.Vector3(1, 0, 0);
+    const yawAxis = new THREE.Vector3(0, 1, 0);
+    if (deltaPitch !== 0) {
+      const qPitch = new THREE.Quaternion().setFromAxisAngle(pitchAxis, deltaPitch);
+      this.desiredQuaternion.multiply(qPitch);
+    }
+    if (deltaYaw !== 0) {
+      const qYaw = new THREE.Quaternion().setFromAxisAngle(yawAxis, deltaYaw);
+      this.desiredQuaternion.multiply(qYaw);
+    }
+    this.desiredQuaternion.normalize();
+    if (this.camera) {
+      this.camera.quaternion.copy(this.desiredQuaternion);
+    }
   }
 
   resetSpawn() {
@@ -103,7 +137,7 @@ export class PlayerShip {
     this.shipCollisionDebounceTimer = 0.0;
 
     this.camera.position.copy(this.position);
-    this.camera.quaternion.copy(this.quaternion);
+    this.camera.quaternion.copy(this.desiredQuaternion);
   }
 
   takeDamage(amount, weaponType = 'generic', bypassInvuln = false) {
@@ -291,9 +325,9 @@ export class PlayerShip {
     this.handleThrustAndMovement(dt);
     this.handleAsteroidCollisions();
 
-    // Sync camera
+    // Sync camera to Pilot POV (desiredQuaternion)
     this.camera.position.copy(this.position);
-    this.camera.quaternion.copy(this.quaternion);
+    this.camera.quaternion.copy(this.desiredQuaternion);
   }
 
   handleRotation(dt) {
@@ -301,29 +335,26 @@ export class PlayerShip {
     let pitchInput = 0;
     if (this.input.pitchUp) pitchInput += 1;
     if (this.input.pitchDown) pitchInput -= 1;
-    pitchInput += this.input.analogPitch;
-    pitchInput = clamp(pitchInput, -1, 1);
+    pitchInput = clamp(pitchInput, -1, 1) + (this.input.analogPitch || 0);
 
     // 2. Calculate yaw rate (local Y axis)
     let yawInput = 0;
     if (this.input.yawLeft) yawInput += 1;
     if (this.input.yawRight) yawInput -= 1;
-    yawInput += this.input.analogYaw;
-    yawInput = clamp(yawInput, -1, 1);
+    yawInput = clamp(yawInput, -1, 1) + (this.input.analogYaw || 0);
 
     // 3. Calculate roll rate (local Z axis)
     let rollInput = 0;
     if (this.input.rollLeft) rollInput += 1;
     if (this.input.rollRight) rollInput -= 1;
-    rollInput += this.input.analogRoll;
-    rollInput = clamp(rollInput, -1.0, 1.0);
+    rollInput = clamp(rollInput, -1.0, 1.0) + (this.input.analogRoll || 0);
 
     // Local rotation axes
     const pitchAxis = new THREE.Vector3(1, 0, 0);
     const yawAxis = new THREE.Vector3(0, 1, 0);
     const rollAxis = new THREE.Vector3(0, 0, 1);
 
-    // Pitch & Yaw steer desiredQuaternion (virtual steering target)
+    // Pitch & Yaw steer desiredQuaternion (unthrottled Pilot POV)
     if (pitchInput !== 0) {
       const qPitch = new THREE.Quaternion().setFromAxisAngle(pitchAxis, pitchInput * this.pitchSpeed * dt);
       this.desiredQuaternion.multiply(qPitch);
@@ -334,13 +365,6 @@ export class PlayerShip {
       this.desiredQuaternion.multiply(qYaw);
     }
 
-    // Clamp maximum lead angle between desiredQuaternion and quaternion (1.2 rad / ~70°) to prevent disorientation
-    const maxLead = 1.2;
-    const leadAngle = this.quaternion.angleTo(this.desiredQuaternion);
-    if (leadAngle > maxLead) {
-      this.desiredQuaternion.copy(this.quaternion).rotateTowards(this.desiredQuaternion, maxLead);
-    }
-
     // Manual roll inputs directly rotate both quaternion and desiredQuaternion
     // so automated alignment controller does not fight or unwind manual banking
     if (rollInput !== 0) {
@@ -349,10 +373,10 @@ export class PlayerShip {
       this.desiredQuaternion.multiply(qRoll);
     }
 
-    // Constrained alignment towards desired target orientation
+    // Physical ship hull alignment towards desired target orientation bounded strictly by capability ceiling
     const angle = this.quaternion.angleTo(this.desiredQuaternion);
     if (angle > 0.0001) {
-      const step = Math.min(angle, this.maxTurnRate * dt);
+      const step = Math.min(angle, this.capabilities.maxTurnRate * dt);
       this.quaternion.rotateTowards(this.desiredQuaternion, step);
     }
 

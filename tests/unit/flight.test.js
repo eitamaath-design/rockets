@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { PlayerShip } from '../../src/game/ship.js';
 import { SpaceEnvironment } from '../../src/game/space.js';
+import { Cockpit } from '../../src/game/cockpit.js';
+import { WeaponsSystem } from '../../src/game/weapons.js';
 
 describe('Player Flight Physics & Momentum', () => {
   let camera;
@@ -174,6 +176,10 @@ describe('Player Flight Physics & Momentum', () => {
     ship.update(1.0);
     ship.input.yawLeft = false;
 
+    // Allow physical hull to complete rate-limited catch-up with POV yaw
+    ship.update(1.5);
+    expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBeCloseTo(0, 3);
+
     // 3. Resting in space for 2 seconds with zero input
     const restingQuat = ship.quaternion.clone();
     ship.update(2.0);
@@ -269,10 +275,18 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.shield).toBe(88);
   });
 
-  describe('Constrained Desired-Orientation Ship Controller', () => {
-    it('should initialize desiredQuaternion and maxTurnRate, and restore on resetSpawn', () => {
+  describe('Decoupled Unthrottled Pilot POV & Capability-Limited Hull Controller', () => {
+    it('should initialize capabilities.maxTurnRate = 1.5, support getter/setter, and restore on resetSpawn', () => {
       expect(ship.desiredQuaternion).toBeInstanceOf(THREE.Quaternion);
-      expect(ship.maxTurnRate).toBeCloseTo(2.2, 2);
+      expect(ship.capabilities).toBeDefined();
+      expect(ship.capabilities.maxTurnRate).toBeCloseTo(1.5, 2);
+      expect(ship.maxTurnRate).toBeCloseTo(1.5, 2);
+
+      // Upgrade ship capability dynamically
+      ship.capabilities.maxTurnRate = 2.5;
+      expect(ship.maxTurnRate).toBeCloseTo(2.5, 2);
+      ship.maxTurnRate = 3.0;
+      expect(ship.capabilities.maxTurnRate).toBeCloseTo(3.0, 2);
 
       // Mutate quaternions
       ship.quaternion.set(0.5, 0.5, 0.5, 0.5).normalize();
@@ -289,36 +303,135 @@ describe('Player Flight Physics & Momentum', () => {
       expect(ship.desiredQuaternion.y).toBe(0);
       expect(ship.desiredQuaternion.z).toBe(0);
       expect(ship.desiredQuaternion.w).toBe(1);
+
+      // Camera quaternion is synchronized with desiredQuaternion
+      expect(ship.camera.quaternion.x).toBe(0);
+      expect(ship.camera.quaternion.y).toBe(0);
+      expect(ship.camera.quaternion.z).toBe(0);
+      expect(ship.camera.quaternion.w).toBe(1);
     });
 
-    it('should steer desiredQuaternion and clamp ship alignment step to maxTurnRate * dt', () => {
-      // Set yaw input to turn right
-      ship.input.yawRight = true;
-      const dt = 0.05; // 50ms frame
-      const initialQuat = ship.quaternion.clone();
+    it('should rotate Pilot POV instantaneously via applyMouseLook without rate limits or lead clamps', () => {
+      expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBe(0);
 
-      ship.update(dt);
+      // Apply a large instantaneous mouse sweep (e.g., ~1.8 rad / >100° yaw)
+      ship.applyMouseLook(1.8, 0);
 
-      // Desired quaternion steered away from identity
-      const desiredAngle = initialQuat.angleTo(ship.desiredQuaternion);
-      expect(desiredAngle).toBeGreaterThan(0);
+      // desiredQuaternion and camera.quaternion must rotate immediately
+      const povLeadAngle = ship.quaternion.angleTo(ship.desiredQuaternion);
+      expect(povLeadAngle).toBeGreaterThan(1.5); // Freely exceeds old 1.2 rad clamp
+      expect(ship.camera.quaternion.equals(ship.desiredQuaternion)).toBe(true);
 
-      // Ship quaternion rotated towards desiredQuaternion
-      const rotatedAngle = initialQuat.angleTo(ship.quaternion);
-      expect(rotatedAngle).toBeGreaterThan(0);
-
-      // Alignment rate must not exceed maxTurnRate * dt (+ small epsilon)
-      const maxAllowedStep = ship.maxTurnRate * dt + 0.001;
-      expect(rotatedAngle).toBeLessThanOrEqual(maxAllowedStep);
+      // Physical ship hull remains at its initial resting orientation prior to physics tick
+      expect(ship.quaternion.x).toBe(0);
+      expect(ship.quaternion.y).toBe(0);
+      expect(ship.quaternion.z).toBe(0);
+      expect(ship.quaternion.w).toBe(1);
     });
 
-    it('should clamp lead angle between desiredQuaternion and quaternion to 1.2 radians', () => {
-      // Simulate extreme instantaneous steer (e.g. large mouse movement)
-      ship.input.analogYaw = 100.0;
-      ship.update(1.0);
+    it('should allow analogYaw and analogPitch to exceed 1.2 rad without artificial lead angle clamping', () => {
+      // Large analog yaw impulse
+      ship.input.analogYaw = 50.0;
+      ship.update(0.1);
 
       const leadAngle = ship.quaternion.angleTo(ship.desiredQuaternion);
-      expect(leadAngle).toBeLessThanOrEqual(1.2001);
+      // Lead angle should not be artificially clamped to 1.2 rad
+      expect(leadAngle).toBeGreaterThan(1.25);
+    });
+
+    it('should bound physical hull rotation strictly by capabilities.maxTurnRate * dt', () => {
+      ship.capabilities.maxTurnRate = 1.5;
+      ship.applyMouseLook(1.5, 0);
+
+      const initialHull = ship.quaternion.clone();
+      const dt = 0.05; // 50ms
+      ship.update(dt);
+
+      const hullStep = initialHull.angleTo(ship.quaternion);
+      const maxAllowed = ship.capabilities.maxTurnRate * dt + 0.0001;
+      expect(hullStep).toBeLessThanOrEqual(maxAllowed);
+      expect(hullStep).toBeCloseTo(1.5 * dt, 3);
+    });
+
+    it('should proportionally increase hull catch-up rate when upgrading capabilities.maxTurnRate', () => {
+      // Test baseline 1.5 rad/s
+      ship.resetSpawn();
+      ship.capabilities.maxTurnRate = 1.5;
+      ship.applyMouseLook(1.5, 0);
+      const dt = 0.1;
+      ship.update(dt);
+      const step1 = new THREE.Quaternion(0, 0, 0, 1).angleTo(ship.quaternion);
+
+      // Test upgraded 3.0 rad/s
+      ship.resetSpawn();
+      ship.capabilities.maxTurnRate = 3.0;
+      ship.applyMouseLook(1.5, 0);
+      ship.update(dt);
+      const step2 = new THREE.Quaternion(0, 0, 0, 1).angleTo(ship.quaternion);
+
+      // 3.0 rad/s should catch up twice as fast as 1.5 rad/s
+      expect(step2).toBeCloseTo(step1 * 2.0, 3);
+    });
+
+    it('should govern thrust and weapons strictly along physical hull quaternion, NOT pilot POV', () => {
+      const scene = new THREE.Scene();
+      const mockNetwork = {
+        broadcastLaser: () => {},
+        broadcastMissile: () => {},
+        peers: new Map()
+      };
+      const weapons = new WeaponsSystem(scene, mockSpaceEnv, mockNetwork);
+
+      // Turn Pilot POV 90 degrees to the right (PI/2 rad)
+      ship.applyMouseLook(Math.PI / 2, 0);
+
+      // Physical hull is still facing down -Z (0, 0, -1)
+      const hullFwd = ship.getForwardVector();
+      expect(hullFwd.x).toBeCloseTo(0, 2);
+      expect(hullFwd.y).toBeCloseTo(0, 2);
+      expect(hullFwd.z).toBeCloseTo(-1, 2);
+
+      // 1. Forward thrust accelerates ship along physical hull heading (-Z), not POV (+X)
+      ship.input.thrust = true;
+      ship.handleThrustAndMovement(0.1);
+      expect(ship.velocity.z).toBeLessThan(0);
+      expect(Math.abs(ship.velocity.x)).toBeCloseTo(0, 2);
+
+      // 2. Primary laser fires along physical hull direction
+      weapons.triggerPrimary(true, ship, performance.now());
+      expect(weapons.laserBeams.length).toBeGreaterThan(0);
+      expect(weapons.laserCooldownTimer).toBeGreaterThan(0);
+
+      // 3. Secondary dumb-fire missile launches along physical hull direction
+      weapons.triggerSecondary(true, ship, performance.now());
+      expect(weapons.missiles.length).toBeGreaterThan(0);
+      const launchedMissile = weapons.missiles[weapons.missiles.length - 1];
+      expect(launchedMissile.velocity.z).toBeLessThan(-50);
+      expect(Math.abs(launchedMissile.velocity.x)).toBeLessThan(1.0);
+    });
+
+    it('should cause 3D Cockpit to visibly lag behind Pilot POV during rapid turns and return when aligned', () => {
+      const cockpit = new Cockpit(ship.camera);
+      const flightInput = { thrust: false, brake: false, strafe: 0, pitch: 0, roll: 0 };
+
+      // 1. Aligned state: cockpit lag rotation is at identity
+      cockpit.update(0.016, flightInput, ship.velocity, ship.quaternion, ship.desiredQuaternion);
+      const identity = new THREE.Quaternion();
+      expect(cockpit.group.quaternion.angleTo(identity)).toBeCloseTo(0, 3);
+
+      // 2. Turn POV sharply (desiredQuat leads shipQuat by 0.5 rad)
+      ship.applyMouseLook(0.5, 0);
+      cockpit.update(0.016, flightInput, ship.velocity, ship.quaternion, ship.desiredQuaternion);
+
+      // Cockpit group quaternion should lag behind POV
+      const lagDeflection = cockpit.group.quaternion.angleTo(identity);
+      expect(lagDeflection).toBeGreaterThan(0.05);
+      expect(lagDeflection).toBeLessThanOrEqual(0.45); // Clamped to 0.45 rad comfortable deflection limit
+
+      // 3. Align hull with POV
+      ship.quaternion.copy(ship.desiredQuaternion);
+      cockpit.update(0.016, flightInput, ship.velocity, ship.quaternion, ship.desiredQuaternion);
+      expect(cockpit.group.quaternion.angleTo(identity)).toBeCloseTo(0, 3);
     });
 
     it('should synchronize manual roll to both quaternion and desiredQuaternion without fighting', () => {
@@ -341,6 +454,27 @@ describe('Player Flight Physics & Momentum', () => {
 
       // The relative pitch angle should be preserved rather than cancelled
       expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBeLessThanOrEqual(preAngle + 0.1);
+    });
+
+    it('should seamlessly process mouse move input with pointer lock, client coordinate fallback, and UI occlusion protection', () => {
+      const initialQuat = ship.desiredQuaternion.clone();
+      const mouseSensitivity = 0.0022;
+
+      // 1. Direct applyMouseLook simulates locked or unlocked mouse motion
+      const deltaX = 50;
+      const deltaY = 30;
+      const expectedDeltaYaw = -deltaX * mouseSensitivity;
+      const expectedDeltaPitch = -deltaY * mouseSensitivity;
+
+      ship.applyMouseLook(expectedDeltaYaw, expectedDeltaPitch);
+
+      expect(ship.desiredQuaternion.equals(initialQuat)).toBe(false);
+      expect(camera.quaternion.equals(ship.desiredQuaternion)).toBe(true);
+
+      // Verify Euler angle displacement
+      const euler = new THREE.Euler().setFromQuaternion(ship.desiredQuaternion, 'YXZ');
+      expect(euler.y).toBeCloseTo(expectedDeltaYaw, 3);
+      expect(euler.x).toBeCloseTo(expectedDeltaPitch, 3);
     });
   });
 });

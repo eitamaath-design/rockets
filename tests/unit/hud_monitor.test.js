@@ -180,3 +180,131 @@ describe('Room Master Debug Monitor UX', () => {
     expect(updateSpy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('Dual-Reticle HUD Bore-Sight Reticle', () => {
+  let container;
+  let hud;
+  let mockEngine;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+
+    mockEngine = {
+      network: {
+        roomName: 'Test Sector',
+        roomId: 'test-room',
+        isMaster: false,
+        getAveragePing: () => 35,
+        onMapResetVote: vi.fn()
+      },
+      config: {
+        voxelQuality: 'medium',
+        asteroidCount: 100,
+        megaRadius: 2800,
+        meteorFrequency: 10
+      },
+      playerShip: {
+        input: {
+          analogPitch: 0,
+          analogYaw: 0
+        }
+      }
+    };
+
+    hud = new GameHUD(container, mockEngine);
+  });
+
+  afterEach(() => {
+    if (hud) hud.destroy();
+    if (container && container.parentNode) {
+      container.parentNode.removeChild(container);
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('should initialize #hud-ship-boresight in the DOM with default aligned state', () => {
+    const boreEl = document.getElementById('hud-ship-boresight');
+    expect(boreEl).not.toBeNull();
+    expect(boreEl.classList.contains('aligned')).toBe(true);
+
+    const label = document.getElementById('hud-boresight-label');
+    expect(label).not.toBeNull();
+    expect(label.textContent).toBe('LOCKED');
+  });
+
+  it('should render aligned state when ship hull is boresighted with pilot POV', () => {
+    const boreEl = document.getElementById('hud-ship-boresight');
+    const label = document.getElementById('hud-boresight-label');
+
+    hud.update({
+      shipBore: {
+        x: 50.0,
+        y: 50.0,
+        inFront: true,
+        isOffscreen: false,
+        edgeAngle: 0,
+        angleError: 0.015,
+        isAligned: true
+      }
+    });
+
+    expect(boreEl.classList.contains('aligned')).toBe(true);
+    expect(boreEl.classList.contains('tracking')).toBe(false);
+    expect(boreEl.classList.contains('offscreen')).toBe(false);
+    expect(boreEl.style.left).toBe('50%');
+    expect(boreEl.style.top).toBe('50%');
+    expect(label.textContent).toBe('LOCKED');
+  });
+
+  it('should render tracking state with angular offset when ship hull lags behind pilot POV', () => {
+    const boreEl = document.getElementById('hud-ship-boresight');
+    const label = document.getElementById('hud-boresight-label');
+
+    const errorRad = 0.2618; // ~15 degrees
+    hud.update({
+      shipBore: {
+        x: 62.5,
+        y: 45.0,
+        inFront: true,
+        isOffscreen: false,
+        edgeAngle: 0,
+        angleError: errorRad,
+        isAligned: false
+      }
+    });
+
+    expect(boreEl.classList.contains('tracking')).toBe(true);
+    expect(boreEl.classList.contains('aligned')).toBe(false);
+    expect(boreEl.classList.contains('offscreen')).toBe(false);
+    expect(boreEl.style.left).toBe('62.5%');
+    expect(boreEl.style.top).toBe('45%');
+    expect(label.textContent).toBe('15°');
+  });
+
+  it('should render offscreen state clamped to edge with directional angle pointer', () => {
+    const boreEl = document.getElementById('hud-ship-boresight');
+    const label = document.getElementById('hud-boresight-label');
+
+    const errorRad = 1.658; // ~95 degrees
+    hud.update({
+      shipBore: {
+        x: 92.0,
+        y: 50.0,
+        inFront: false,
+        isOffscreen: true,
+        edgeAngle: 0,
+        angleError: errorRad,
+        isAligned: false
+      }
+    });
+
+    expect(boreEl.classList.contains('offscreen')).toBe(true);
+    expect(boreEl.classList.contains('aligned')).toBe(false);
+    expect(boreEl.classList.contains('tracking')).toBe(false);
+    expect(boreEl.style.left).toBe('92%');
+    expect(boreEl.style.top).toBe('50%');
+    expect(boreEl.style.getPropertyValue('--edge-angle')).toBe('0deg');
+    expect(label.textContent).toBe('95°');
+  });
+});

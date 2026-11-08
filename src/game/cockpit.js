@@ -176,7 +176,7 @@ export class Cockpit {
     }
   }
 
-  update(dt, flightInput, velocity) {
+  update(dt, flightInput, velocity, shipQuat = null, desiredQuat = null) {
     if (!this.boostKickZ) this.boostKickZ = 0;
     this.boostKickZ += (0 - this.boostKickZ) * dt * 9.0;
 
@@ -195,7 +195,23 @@ export class Cockpit {
     this.currentRotation.z += (this.targetRotation.z - this.currentRotation.z) * dt * 10;
 
     this.group.position.copy(this.currentOffset);
-    this.group.rotation.copy(this.currentRotation);
+
+    // Dynamic Cockpit Lag relative to Pilot POV
+    const qInertia = new THREE.Quaternion().setFromEuler(this.currentRotation);
+    if (shipQuat && desiredQuat) {
+      const qRel = new THREE.Quaternion().copy(desiredQuat).invert().multiply(shipQuat);
+      const identity = new THREE.Quaternion();
+      const lagAngle = identity.angleTo(qRel);
+      const qLag = new THREE.Quaternion();
+      if (lagAngle > 0.0001) {
+        const maxDeflection = 0.45; // ~26 degrees maximum comfortable visual displacement
+        const t = Math.min(lagAngle * 0.75, maxDeflection) / lagAngle;
+        qLag.slerpQuaternions(identity, qRel, t);
+      }
+      this.group.quaternion.copy(qLag).multiply(qInertia);
+    } else {
+      this.group.quaternion.copy(qInertia);
+    }
 
     // Shield glass damage flash
     if (this.damageFlashTimer > 0) {

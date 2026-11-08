@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
+import { createRadialGlowTexture } from './trail.js';
+
+// Module-level scratch objects for GPU InstancedMesh particles
+const _meteorDummy = new THREE.Object3D();
+const _meteorColor = new THREE.Color();
+const _meteorCamQuat = new THREE.Quaternion();
+const _meteorHideMat = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /**
  * Fiery Meteor Hazard System
@@ -22,28 +29,59 @@ export class MeteorSystem {
 
     this.activeMeteor = null;
 
-    // Pre-allocated particle buffer for the meteor's roaring fire & smoke trail
+    // Pre-allocated GPU InstancedMesh for the meteor's roaring fire & smoke trail
     this.maxParticles = 250;
     this.particles = [];
-    this.trailGeom = new THREE.BufferGeometry();
-    this.trailPositions = new Float32Array(this.maxParticles * 3);
-    this.trailColors = new Float32Array(this.maxParticles * 3);
+    this.trailPlaneGeo = new THREE.PlaneGeometry(1, 1);
+    this.glowTexture = createRadialGlowTexture(64);
 
-    this.trailGeom.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
-    this.trailGeom.setAttribute('color', new THREE.BufferAttribute(this.trailColors, 3));
-
-    this.trailMat = new THREE.PointsMaterial({
-      size: 48.0,
-      vertexColors: true,
+    this.trailMat = new THREE.MeshBasicMaterial({
+      map: this.glowTexture,
       transparent: true,
       opacity: 0.95,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      sizeAttenuation: true
+      side: THREE.DoubleSide
     });
 
-    this.trailPoints = new THREE.Points(this.trailGeom, this.trailMat);
-    this.scene.add(this.trailPoints);
+    this.trailMesh = new THREE.InstancedMesh(this.trailPlaneGeo, this.trailMat, this.maxParticles);
+    this.trailMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.trailMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxParticles * 3), 3);
+    this.trailMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.trailMesh.frustumCulled = false;
+
+    // Backwards compatibility
+    this.trailPoints = this.trailMesh;
+    this.trailPositions = new Float32Array(this.maxParticles * 3);
+    this.trailColors = new Float32Array(this.maxParticles * 3);
+
+    for (let i = 0; i < this.maxParticles; i++) {
+      this.trailMesh.setMatrixAt(i, _meteorHideMat);
+    }
+    this.trailMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.trailMesh);
+
+    // Pre-allocated GPU InstancedMesh for meteor impact explosions
+    this.maxExplosionQuads = 200;
+    this.explosionQuads = [];
+    this.explosionMat = new THREE.MeshBasicMaterial({
+      map: this.glowTexture,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.explosionMesh = new THREE.InstancedMesh(this.trailPlaneGeo, this.explosionMat, this.maxExplosionQuads);
+    this.explosionMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.explosionMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxExplosionQuads * 3), 3);
+    this.explosionMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.explosionMesh.frustumCulled = false;
+    for (let i = 0; i < this.maxExplosionQuads; i++) {
+      this.explosionMesh.setMatrixAt(i, _meteorHideMat);
+    }
+    this.explosionMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.explosionMesh);
   }
 
   spawnMeteor() {
@@ -157,7 +195,7 @@ export class MeteorSystem {
     logger.log('METEOR', `Flaming meteor entered sector at (${Math.round(spawnPos.x)}, ${Math.round(spawnPos.y)}, ${Math.round(spawnPos.z)}) heading speed ${speed} u/s`);
   }
 
-  update(dt, playerShip, remoteShipsMap, onPlayerKilled) {
+  update(dt, playerShip, remoteShipsMap, onPlayerKilled, camera = null) {
     // 1. Periodic spawn timer
     if (this.enabled && this.spawnInterval > 0) {
       this.spawnTimer += dt;
@@ -298,7 +336,61 @@ export class MeteorSystem {
     }
 
     // 3. Update trailing particle plume
-    this.updateTrailParticles(dt);
+    this.updateTrailParticles(dt, camera);
+
+    // 4. Update GPU Instanced Meteor Impact Explosions
+    if (this.explosionQuads && this.explosionQuads.length > 0) {
+      if (camera && camera.quaternion) {
+        _meteorCamQuat.copy(camera.quaternion);
+      } else {
+        _meteorCamQuat.identity();
+      }
+      for (let i = this.explosionQuads.length - 1; i >= 0; i--) {
+        const q = this.explosionQuads[i];
+        q.life -= dt;
+        if (q.life <= 0) {
+          this.explosionQuads.splice(i, 1);
+          continue;
+        }
+        q.pos.addScaledVector(q.vel, dt);
+        q.vel.multiplyScalar(Math.pow(0.88, dt * 60));
+        q.pos.x += Math.sin(q.pos.y * 0.2 + q.life * 4.0) * 0.8 * dt;
+        q.pos.y += Math.cos(q.pos.x * 0.2 + q.life * 4.0) * 0.8 * dt;
+        q.pos.z += Math.sin(q.pos.z * 0.2 + q.life * 4.0) * 0.8 * dt;
+      }
+
+      const activeQuadCount = this.explosionQuads.length;
+      for (let i = 0; i < activeQuadCount; i++) {
+        const q = this.explosionQuads[i];
+        const progress = 1.0 - (q.life / q.maxLife);
+        const fade = q.life / q.maxLife;
+        const scale = q.baseScale * (1.0 + progress * 2.5);
+
+        _meteorDummy.position.copy(q.pos);
+        _meteorDummy.quaternion.copy(_meteorCamQuat);
+        _meteorDummy.scale.set(scale, scale, scale);
+        _meteorDummy.updateMatrix();
+        this.explosionMesh.setMatrixAt(i, _meteorDummy.matrix);
+
+        if (q.isCore) {
+          if (progress < 0.25) {
+            _meteorColor.setRGB(1.0 * fade, 0.95 * fade, 0.8 * fade);
+          } else {
+            _meteorColor.copy(q.color).multiplyScalar(fade * 1.2);
+          }
+        } else {
+          _meteorColor.copy(q.color).multiplyScalar(fade * 1.5);
+        }
+        this.explosionMesh.setColorAt(i, _meteorColor);
+      }
+
+      for (let i = activeQuadCount; i < this.maxExplosionQuads; i++) {
+        this.explosionMesh.setMatrixAt(i, _meteorHideMat);
+      }
+
+      this.explosionMesh.instanceMatrix.needsUpdate = true;
+      if (this.explosionMesh.instanceColor) this.explosionMesh.instanceColor.needsUpdate = true;
+    }
   }
 
   emitTrailParticles(pos, dir, count = 6) {
@@ -320,12 +412,19 @@ export class MeteorSystem {
         pos: pPos,
         vel: pVel,
         life,
-        maxLife: life
+        maxLife: life,
+        baseScale: 38.0 + Math.random() * 24.0
       });
     }
   }
 
-  updateTrailParticles(dt) {
+  updateTrailParticles(dt, camera = null) {
+    if (camera && camera.quaternion) {
+      _meteorCamQuat.copy(camera.quaternion);
+    } else {
+      _meteorCamQuat.identity();
+    }
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= dt;
@@ -334,81 +433,90 @@ export class MeteorSystem {
         continue;
       }
       p.pos.addScaledVector(p.vel, dt);
+      p.vel.multiplyScalar(Math.pow(0.92, dt * 60));
     }
 
     const activeCount = this.particles.length;
     for (let i = 0; i < activeCount; i++) {
       const p = this.particles[i];
+      const progress = 1.0 - (p.life / p.maxLife);
+      const scale = p.baseScale * (1.0 + progress * 2.8);
+
+      _meteorDummy.position.copy(p.pos);
+      _meteorDummy.quaternion.copy(_meteorCamQuat);
+      _meteorDummy.scale.set(scale, scale, scale);
+      _meteorDummy.updateMatrix();
+      this.trailMesh.setMatrixAt(i, _meteorDummy.matrix);
+
+      if (progress < 0.2) {
+        _meteorColor.setRGB(1.0, 0.95, 0.8);
+      } else if (progress < 0.6) {
+        _meteorColor.setRGB(1.0, 0.45 * (1.0 - (progress - 0.2) / 0.4), 0.05);
+      } else {
+        const fade = (1.0 - progress) / 0.4;
+        _meteorColor.setRGB(0.6 * fade, 0.1 * fade, 0.02 * fade);
+      }
+      this.trailMesh.setColorAt(i, _meteorColor);
+
       const idx = i * 3;
       this.trailPositions[idx] = p.pos.x;
       this.trailPositions[idx + 1] = p.pos.y;
       this.trailPositions[idx + 2] = p.pos.z;
-
-      const progress = 1.0 - (p.life / p.maxLife);
-      if (progress < 0.2) {
-        this.trailColors[idx] = 1.0;
-        this.trailColors[idx + 1] = 0.95;
-        this.trailColors[idx + 2] = 0.8;
-      } else if (progress < 0.6) {
-        this.trailColors[idx] = 1.0;
-        this.trailColors[idx + 1] = 0.45 * (1.0 - (progress - 0.2) / 0.4);
-        this.trailColors[idx + 2] = 0.05;
-      } else {
-        const fade = (1.0 - progress) / 0.4;
-        this.trailColors[idx] = 0.6 * fade;
-        this.trailColors[idx + 1] = 0.1 * fade;
-        this.trailColors[idx + 2] = 0.02 * fade;
-      }
+      this.trailColors[idx] = _meteorColor.r;
+      this.trailColors[idx + 1] = _meteorColor.g;
+      this.trailColors[idx + 2] = _meteorColor.b;
     }
 
     for (let i = activeCount; i < this.maxParticles; i++) {
+      this.trailMesh.setMatrixAt(i, _meteorHideMat);
       const idx = i * 3;
       this.trailPositions[idx] = 0;
       this.trailPositions[idx + 1] = 0;
       this.trailPositions[idx + 2] = 999999;
+      this.trailColors[idx] = 0;
+      this.trailColors[idx + 1] = 0;
+      this.trailColors[idx + 2] = 0;
     }
 
-    this.trailGeom.attributes.position.needsUpdate = true;
-    this.trailGeom.attributes.color.needsUpdate = true;
+    this.trailMesh.instanceMatrix.needsUpdate = true;
+    if (this.trailMesh.instanceColor) this.trailMesh.instanceColor.needsUpdate = true;
   }
 
   triggerExplosion(pos, radius = 28, color = 0xff5500) {
-    // Large fireball sphere
-    const geom = new THREE.SphereGeometry(radius * 0.4, 16, 12);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending
-    });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.position.copy(pos);
-    this.scene.add(mesh);
-
-    audio.playExplosion(2.5);
+    audio.playExplosion(2.5, pos);
 
     if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {
       this.spaceEnv.triggerCombatFlash(pos, color, 6.0);
     }
 
-    const startTime = performance.now();
-    const duration = 550; // ms
-
-    const animateExplosion = () => {
-      const elapsed = performance.now() - startTime;
-      const progress = elapsed / duration;
-      if (progress >= 1.0) {
-        this.scene.remove(mesh);
-        geom.dispose();
-        mat.dispose();
-        return;
+    // Spawn 60 GPU InstancedMesh explosion quads
+    const count = 60;
+    const baseColor = new THREE.Color(color);
+    for (let i = 0; i < count; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) {
+        this.explosionQuads.shift();
       }
-      const scale = 1.0 + progress * 3.5;
-      mesh.scale.set(scale, scale, scale);
-      mat.opacity = Math.max(0, 1.0 - progress);
-      requestAnimationFrame(animateExplosion);
-    };
-    requestAnimationFrame(animateExplosion);
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2.0 * Math.random() - 1.0);
+      const dir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      );
+      const speed = (radius * 1.5) + Math.random() * (radius * 3.0);
+      const life = 0.4 + Math.random() * 0.35;
+      const isCore = i < count * 0.4;
+
+      this.explosionQuads.push({
+        pos: pos.clone().addScaledVector(dir, Math.random() * (radius * 0.3)),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: isCore ? (radius * 0.6 + Math.random() * (radius * 0.4)) : (radius * 0.25 + Math.random() * (radius * 0.3)),
+        isCore,
+        color: baseColor.clone()
+      });
+    }
   }
 
   destroyMeteor() {
@@ -422,8 +530,17 @@ export class MeteorSystem {
 
   cleanup() {
     this.destroyMeteor();
-    this.scene.remove(this.trailPoints);
-    this.trailGeom.dispose();
-    this.trailMat.dispose();
+    if (this.trailMesh && this.trailMesh.parent) {
+      this.trailMesh.parent.remove(this.trailMesh);
+    }
+    if (this.explosionMesh && this.explosionMesh.parent) {
+      this.explosionMesh.parent.remove(this.explosionMesh);
+    }
+    if (this.trailPlaneGeo) this.trailPlaneGeo.dispose();
+    if (this.glowTexture) this.glowTexture.dispose();
+    if (this.trailMat) this.trailMat.dispose();
+    if (this.explosionMat) this.explosionMat.dispose();
+    this.particles = [];
+    this.explosionQuads = [];
   }
 }

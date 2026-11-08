@@ -17,7 +17,7 @@ export class GameEngine {
     this.network = network;
     this.mapSeed = mapSeed;
     this.config = config || {
-      voxelQuality: 'low',
+      voxelQuality: 'high',
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10
@@ -42,9 +42,11 @@ export class GameEngine {
     this.lastWidth = 0;
     this.lastHeight = 0;
 
-    // Mouse look state (3x sensitivity for rapid agile tracking)
+    // Mouse look state (unthrottled instant Pilot POV look target)
     this.isPointerLocked = false;
-    this.mouseSensitivity = 0.0066;
+    this.mouseSensitivity = 0.0022;
+    this.lastMouseX = null;
+    this.lastMouseY = null;
 
     // Firing state
     this.isFiringLaser = false;
@@ -106,6 +108,7 @@ export class GameEngine {
 
     this.cockpit = new Cockpit(this.camera);
     this.weaponsSystem = new WeaponsSystem(this.scene, this.spaceEnv, this.network);
+    this.weapons = this.weaponsSystem;
 
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
@@ -119,6 +122,10 @@ export class GameEngine {
     try {
       this.renderer.compile(this.scene, this.camera);
     } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.gameEngine = this;
+    }
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
   }
@@ -348,6 +355,9 @@ export class GameEngine {
 
     // Mouse flight & weapons
     this.renderer.domElement.addEventListener('mousedown', (e) => {
+      if (!document.pointerLockElement) {
+        this.renderer.domElement.requestPointerLock?.();
+      }
       if (e.button === 0) {
         // Left click: Laser fire
         this.isFiringLaser = true;
@@ -375,12 +385,45 @@ export class GameEngine {
 
     document.addEventListener('pointerlockchange', () => {
       this.isPointerLocked = (document.pointerLockElement === this.renderer.domElement);
+      this.lastMouseX = null;
+      this.lastMouseY = null;
     });
 
     document.addEventListener('mousemove', (e) => {
-      if (this.isPointerLocked) {
-        this.playerShip.input.analogYaw = -e.movementX * this.mouseSensitivity * 25.0;
-        this.playerShip.input.analogPitch = -e.movementY * this.mouseSensitivity * 25.0;
+      const target = e.target;
+      const isOverInteractiveUI = Boolean(
+        target && typeof target.closest === 'function' &&
+        target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .touch-joystick-container')
+      );
+
+      let movementX = typeof e.movementX === 'number' ? e.movementX : undefined;
+      let movementY = typeof e.movementY === 'number' ? e.movementY : undefined;
+
+      if (movementX === undefined || movementY === undefined || (!this.isPointerLocked && movementX === 0 && movementY === 0 && this.lastMouseX !== null)) {
+        if (this.lastMouseX !== null && this.lastMouseY !== null && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+          movementX = e.clientX - this.lastMouseX;
+          movementY = e.clientY - this.lastMouseY;
+        } else {
+          movementX = movementX || 0;
+          movementY = movementY || 0;
+        }
+      }
+
+      if (typeof e.clientX === 'number') this.lastMouseX = e.clientX;
+      if (typeof e.clientY === 'number') this.lastMouseY = e.clientY;
+
+      if (!this.isRunning || !this.playerShip) {
+        return;
+      }
+
+      if (!this.isPointerLocked && isOverInteractiveUI) {
+        return;
+      }
+
+      if (movementX !== 0 || movementY !== 0) {
+        const deltaYaw = -movementX * this.mouseSensitivity;
+        const deltaPitch = -movementY * this.mouseSensitivity;
+        this.playerShip.applyMouseLook(deltaYaw, deltaPitch);
       }
     });
   }
@@ -433,12 +476,6 @@ export class GameEngine {
       const currentFps = dt > 0 ? (1 / dt) : 60;
       this.fpsRolling = this.fpsRolling * 0.9 + currentFps * 0.1;
 
-      // Decay mouse analog inputs smoothly
-      if (this.isPointerLocked) {
-        this.playerShip.input.analogPitch *= 0.7;
-        this.playerShip.input.analogYaw *= 0.7;
-      }
-
       // 1. Update Player Ship Physics
       this.playerShip.update(dt);
 
@@ -463,7 +500,7 @@ export class GameEngine {
       this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
         this.timeSinceLastCombat = 0;
         this.cockpit.triggerDamageFlash();
-      });
+      }, this.camera);
 
       // Tactical Space Power-Ups (Shield Replenish, Cloak Invisibility, Hologram Decoy)
       if (this.powerUpSystem) {
@@ -575,22 +612,18 @@ export class GameEngine {
       }
 
       // 6. Decaying Ship Thruster Trails (15s lifetime)
-      this.trailEmitTimer += dt;
-      if (this.trailEmitTimer >= 0.12) {
-        this.trailEmitTimer = 0;
-        // Thruster trails are emitted ONLY when active engine propulsion is engaged
-        // If drifting with momentum, no trail is left behind
-        if (this.playerShip.input.thrust) {
-          this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false);
-        }
-        for (const remote of this.remoteShips.values()) {
-          if (!remote.isDead && remote.isThrusting) {
-            const rFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(remote.quaternion);
-            this.thrusterTrails.emit(remote.position, rFwd, true);
-          }
+      // Thruster trails are emitted ONLY when active engine propulsion is engaged
+      // Sub-frame interpolation ensures a dense, gapless, glowing plasma wake
+      if (this.playerShip.input.thrust) {
+        this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false, 'local');
+      }
+      for (const [peerId, remote] of this.remoteShips.entries()) {
+        if (!remote.isDead && remote.isThrusting) {
+          const rFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(remote.quaternion);
+          this.thrusterTrails.emit(remote.position, rFwd, true, peerId);
         }
       }
-      this.thrusterTrails.update(dt);
+      this.thrusterTrails.update(dt, this.camera);
       this.beaconSystem.update(dt);
 
       // 7. Chaotic Fiery Meteor Event (Every 10 seconds)
@@ -598,7 +631,7 @@ export class GameEngine {
         this.meteorSystem.update(dt, this.playerShip, this.remoteShips, (notice) => {
           this.cockpit.triggerDamageFlash();
           this.onDeathNotice(notice);
-        });
+        }, this.camera);
       }
 
       // 7. 5-Second Diagnostics Telemetry Stats
@@ -622,7 +655,7 @@ export class GameEngine {
         }
       }
 
-      // 8. Update Cockpit visual tilt and shield glass
+      // 8. Update Cockpit visual tilt and dynamic lag relative to Pilot POV
       const flightInput = {
         thrust: this.playerShip.input.thrust,
         brake: this.playerShip.input.brake,
@@ -630,10 +663,73 @@ export class GameEngine {
         pitch: (this.playerShip.input.pitchUp ? 1 : 0) - (this.playerShip.input.pitchDown ? 1 : 0) + this.playerShip.input.analogPitch,
         roll: (this.playerShip.input.rollRight ? 1 : 0) - (this.playerShip.input.rollLeft ? 1 : 0)
       };
-      this.cockpit.update(dt, flightInput, this.playerShip.velocity);
+      this.cockpit.update(dt, flightInput, this.playerShip.velocity, this.playerShip.quaternion, this.playerShip.desiredQuaternion);
+
+      // Dynamic Ship Bore-Sight Reticle Projection (Physical hull vs Pilot POV camera)
+      let boreScreen = {
+        x: 50,
+        y: 50,
+        inFront: true,
+        isOffscreen: false,
+        edgeAngle: 0,
+        angleError: 0,
+        isAligned: true
+      };
+
+      if (this.playerShip && this.camera) {
+        const shipFwd = this.playerShip.getForwardVector();
+        const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const dot = Math.min(1.0, Math.max(-1.0, shipFwd.dot(camFwd)));
+        const angleError = Math.acos(dot);
+        const isAligned = angleError < 0.035; // ~2.0 degrees threshold
+        const inFront = dot > 0;
+
+        let x = 50;
+        let y = 50;
+        let isOffscreen = false;
+        let edgeAngle = 0;
+
+        if (typeof this.camera.project === 'function' || (this.camera.projectionMatrix && typeof this.camera.matrixWorldInverse !== 'undefined')) {
+          try {
+            const boreTarget = this.camera.position.clone().addScaledVector(shipFwd, 100.0);
+            const proj = boreTarget.clone().project(this.camera);
+
+            // Screen space box (-0.88 to 0.88 NDC allows margin before clamping to edge)
+            if (inFront && proj.x >= -0.88 && proj.x <= 0.88 && proj.y >= -0.88 && proj.y <= 0.88) {
+              x = (proj.x * 0.5 + 0.5) * 100;
+              y = (-proj.y * 0.5 + 0.5) * 100;
+              isOffscreen = false;
+            } else {
+              isOffscreen = true;
+              const localDir = shipFwd.clone().applyQuaternion(this.camera.quaternion.clone().invert());
+              const dirX = inFront ? proj.x : localDir.x;
+              const dirY = inFront ? -proj.y : -localDir.y;
+              const len = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+              const normX = dirX / len;
+              const normY = dirY / len;
+              const edgeDist = Math.min(42 / Math.abs(normX || 0.0001), 42 / Math.abs(normY || 0.0001));
+              x = 50 + normX * edgeDist;
+              y = 50 + normY * edgeDist;
+              edgeAngle = Math.atan2(normY, normX) * (180 / Math.PI);
+            }
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
+
+        boreScreen = {
+          x: Math.round(x * 10) / 10,
+          y: Math.round(y * 10) / 10,
+          inFront,
+          isOffscreen,
+          edgeAngle: Math.round(edgeAngle),
+          angleError,
+          isAligned
+        };
+      }
 
       // 9. Update Space Environment (asteroid physics & pairwise collisions)
-      this.spaceEnv.update(dt, this.playerShip.position, this.playerShip.velocity);
+      this.spaceEnv.update(dt, this.playerShip.position, this.playerShip.velocity, this.camera);
 
       // 10. Network State Broadcast (20Hz)
       this.broadcastTimer += dt;
@@ -677,6 +773,7 @@ export class GameEngine {
         missileLocked: this.weaponsSystem.lockSystem.isLocked,
         missileLockProgress: this.weaponsSystem.lockSystem.getProgress(),
         missileTarget: this.weaponsSystem.lockSystem.targetScreenPos,
+        shipBore: boreScreen,
         storedPowerUp: this.playerShip.storedPowerUp,
         cannonEnergy: Math.round(this.weaponsSystem.cannonEnergy),
         cannonMaxEnergy: this.weaponsSystem.cannonMaxEnergy,

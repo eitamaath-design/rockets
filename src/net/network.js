@@ -342,7 +342,8 @@ export class GameNetwork {
     if (this.sendMissile) {
       const payload = {
         ...missileData,
-        targetPeerId: missileData.targetPeerId !== undefined ? missileData.targetPeerId : null
+        targetPeerId: missileData.targetPeerId !== undefined ? missileData.targetPeerId : null,
+        velocity: missileData.velocity || { x: 0, y: 0, z: 0 }
       };
       this.sendMissile(payload);
     }

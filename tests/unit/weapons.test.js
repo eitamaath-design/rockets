@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
-import { WeaponsSystem } from '../../src/game/weapons.js';
+import { WeaponsSystem, StandardPursuitGuidance } from '../../src/game/weapons.js';
 import { PlayerShip } from '../../src/game/ship.js';
+import { GameNetwork } from '../../src/net/network.js';
 
 describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () => {
   let scene;
@@ -256,6 +257,258 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(dmgAmount).toBe(5.0);
       expect(cRadius).toBeGreaterThanOrEqual(42.0);
       expect(cDepth).toBeGreaterThanOrEqual(32.0);
+    });
+  });
+
+  describe('Missile Launch Velocity Inheritance & Guaranteed Forward Separation', () => {
+    it('should launch missile at base initialSpeed (85 u/s) and accelerate to maxSpeed (210 u/s) when ship is stationary', () => {
+      ship.velocity.set(0, 0, 0);
+      const fired = weapons.triggerSecondary(true, ship, 1000);
+      expect(fired).toBe(true);
+      expect(weapons.missiles.length).toBe(1);
+
+      const m = weapons.missiles[0];
+      expect(m.guidance.baseInitialSpeed).toBe(85.0);
+      expect(m.guidance.baseMaxSpeed).toBe(210.0);
+      expect(m.guidance.inheritedSpeed).toBe(0);
+      expect(m.guidance.currentSpeed).toBe(85.0);
+      expect(m.guidance.maxSpeed).toBe(210.0);
+      expect(m.velocity.length()).toBeCloseTo(85.0, 1);
+
+      // Accelerate over time (dt = 0.5s increments, total 3.0s)
+      for (let t = 0; t < 6; t++) {
+        weapons.update(0.5, ship, new Map(), () => {});
+      }
+      expect(m.guidance.currentSpeed).toBe(210.0);
+      expect(m.velocity.length()).toBeCloseTo(210.0, 1);
+    });
+
+    it('should inherit ship velocity and guarantee forward separation when ship moves at cruising speed (90 u/s)', () => {
+      // Ship moving forward at maximum cruising speed 90 u/s along -Z
+      ship.velocity.set(0, 0, -90);
+      expect(ship.getSpeed()).toBe(90.0);
+
+      const fired = weapons.triggerSecondary(true, ship, 1000);
+      expect(fired).toBe(true);
+      const m = weapons.missiles[0];
+
+      // Initial speed must equal baseInitialSpeed (85) + ship forward velocity (90) = 175 u/s
+      expect(m.guidance.inheritedSpeed).toBe(90.0);
+      expect(m.guidance.currentSpeed).toBe(175.0);
+      expect(m.guidance.maxSpeed).toBe(300.0); // 210 + 90
+      expect(m.velocity.length()).toBeCloseTo(175.0, 1);
+      expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
+
+      // Advance 60 frames (1 second at 60 FPS) and verify separation distance increases monotonically
+      let prevDistance = m.group.position.distanceTo(ship.position);
+      for (let frame = 0; frame < 60; frame++) {
+        const dt = 1 / 60;
+        ship.position.addScaledVector(ship.velocity, dt);
+        weapons.update(dt, ship, new Map(), () => {});
+
+        const currentDistance = m.group.position.distanceTo(ship.position);
+        expect(currentDistance).toBeGreaterThan(prevDistance);
+
+        // Missile must remain ahead of ship along heading
+        const toMissile = m.group.position.clone().sub(ship.position);
+        const forwardProjection = toMissile.dot(ship.getForwardVector());
+        expect(forwardProjection).toBeGreaterThan(0);
+
+        prevDistance = currentDistance;
+      }
+    });
+
+    it('should inherit ship velocity and guarantee forward separation when ship moves at evasive boost speed (270 u/s)', () => {
+      // Ship moving forward at maximum evasive boost speed (90 cruising + 180 impulse = 270 u/s)
+      ship.velocity.set(0, 0, -270);
+      expect(ship.getSpeed()).toBe(270.0);
+
+      const fired = weapons.triggerSecondary(true, ship, 2000);
+      expect(fired).toBe(true);
+      const m = weapons.missiles[0];
+
+      // Initial speed must equal 85 + 270 = 355 u/s
+      expect(m.guidance.inheritedSpeed).toBe(270.0);
+      expect(m.guidance.currentSpeed).toBe(355.0);
+      expect(m.guidance.maxSpeed).toBe(480.0); // 210 + 270
+      expect(m.velocity.length()).toBeCloseTo(355.0, 1);
+      expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
+
+      // Advance 60 frames and verify separation distance increases monotonically
+      let prevDistance = m.group.position.distanceTo(ship.position);
+      for (let frame = 0; frame < 60; frame++) {
+        const dt = 1 / 60;
+        ship.position.addScaledVector(ship.velocity, dt);
+        weapons.update(dt, ship, new Map(), () => {});
+
+        const currentDistance = m.group.position.distanceTo(ship.position);
+        expect(currentDistance).toBeGreaterThan(prevDistance);
+
+        const toMissile = m.group.position.clone().sub(ship.position);
+        const forwardProjection = toMissile.dot(ship.getForwardVector());
+        expect(forwardProjection).toBeGreaterThan(0);
+
+        prevDistance = currentDistance;
+      }
+    });
+
+    it('should inherit velocity and maintain forward separation for guided missiles tracking a locked target', () => {
+      // Simulate acquired lock on target
+      weapons.lockSystem.isLocked = true;
+      weapons.lockSystem.currentTargetId = 'pilot-target-1';
+
+      ship.velocity.set(0, 0, -90);
+      weapons.triggerSecondary(true, ship, 1000);
+      const m = weapons.missiles[0];
+
+      expect(m.targetId).toBe('pilot-target-1');
+      expect(m.guidance.currentSpeed).toBe(175.0);
+
+      const remoteTarget = {
+        position: new THREE.Vector3(0, 0, -1500),
+        isDead: false,
+        isInvisible: false
+      };
+      const remoteMap = new Map([['pilot-target-1', remoteTarget]]);
+
+      // Advance 60 frames: ship at 90 u/s, missile homing towards target
+      let prevDistance = m.group.position.distanceTo(ship.position);
+      for (let frame = 0; frame < 60; frame++) {
+        const dt = 1 / 60;
+        ship.position.addScaledVector(ship.velocity, dt);
+        weapons.update(dt, ship, remoteMap, () => {});
+
+        const currentDistance = m.group.position.distanceTo(ship.position);
+        expect(currentDistance).toBeGreaterThan(prevDistance);
+        prevDistance = currentDistance;
+      }
+    });
+
+    it('should dynamically clamp missile speed via ensureSeparationSpeed when ship activates boost after launch', () => {
+      // Fired while cruising at 90 u/s
+      ship.velocity.set(0, 0, -90);
+      weapons.triggerSecondary(true, ship, 1000);
+      const m = weapons.missiles[0];
+      expect(m.guidance.currentSpeed).toBe(175.0);
+
+      // Advance 10 frames at cruising speed
+      for (let i = 0; i < 10; i++) {
+        const dt = 1 / 60;
+        ship.position.addScaledVector(ship.velocity, dt);
+        weapons.update(dt, ship, new Map(), () => {});
+      }
+
+      // Pilot activates evasive boost AFTER launching missile: velocity surges to 270 u/s
+      ship.velocity.set(0, 0, -270);
+      expect(ship.getSpeed()).toBe(270.0);
+
+      // Next update call must trigger ensureSeparationSpeed(270)
+      weapons.update(1 / 60, ship, new Map(), () => {});
+      expect(m.guidance.currentSpeed).toBeGreaterThanOrEqual(270 + 85); // At least 355 u/s
+      expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
+
+      // Advance 50 more frames: ship can never catch up or overtake the missile
+      let prevDistance = m.group.position.distanceTo(ship.position);
+      for (let i = 0; i < 50; i++) {
+        const dt = 1 / 60;
+        ship.position.addScaledVector(ship.velocity, dt);
+        weapons.update(dt, ship, new Map(), () => {});
+
+        const currentDistance = m.group.position.distanceTo(ship.position);
+        expect(currentDistance).toBeGreaterThan(prevDistance);
+        prevDistance = currentDistance;
+      }
+    });
+
+    it('should broadcast missile velocity in network packet and deserialize properly in spawnRemoteMissile', () => {
+      let broadcastPayload = null;
+      mockNetwork.broadcastMissile = (data) => {
+        broadcastPayload = data;
+      };
+
+      ship.velocity.set(15, -10, -90);
+      weapons.triggerSecondary(true, ship, 1000);
+
+      expect(broadcastPayload).toBeDefined();
+      expect(broadcastPayload.velocity).toEqual({ x: 15, y: -10, z: -90 });
+
+      // Test spawnRemoteMissile with deserialized velocity
+      weapons.spawnRemoteMissile({
+        id: 'remote-missile-100',
+        origin: { x: 50, y: 20, z: 100 },
+        dir: { x: 0, y: 0, z: -1 },
+        velocity: { x: 0, y: 0, z: -90 },
+        targetPeerId: null
+      }, 'peer-remote-host');
+
+      const remoteM = weapons.missiles[weapons.missiles.length - 1];
+      expect(remoteM.guidance.inheritedSpeed).toBe(90.0);
+      expect(remoteM.guidance.currentSpeed).toBe(175.0);
+      expect(remoteM.velocity.z).toBeCloseTo(-175.0, 1);
+      expect(remoteM.ownerId).toBe('peer-remote-host');
+
+      // Test backward-compatible fallback when velocity is omitted in network packet
+      weapons.spawnRemoteMissile({
+        id: 'remote-missile-legacy',
+        origin: { x: 0, y: 0, z: 0 },
+        dir: { x: 0, y: 0, z: -1 },
+        targetPeerId: null
+      }, 'peer-legacy-host');
+
+      const legacyM = weapons.missiles[weapons.missiles.length - 1];
+      expect(legacyM.guidance.inheritedSpeed).toBe(0);
+      expect(legacyM.guidance.currentSpeed).toBe(85.0);
+    });
+
+    it('should integrate and aerodynamically damp lateral velocity component', () => {
+      // Ship moving sideways at (40, 0, 0) while firing forward along (0, 0, -1)
+      const origin = new THREE.Vector3(0, 0, 0);
+      const dir = new THREE.Vector3(0, 0, -1);
+      const shipVel = new THREE.Vector3(40, 0, 0);
+
+      const m = weapons.spawnMissile(origin, dir, null, true, 'm-lateral', shipVel);
+      expect(m.guidance.inheritedSpeed).toBe(0); // Orthogonal to forward
+      expect(m.guidance.currentSpeed).toBe(85.0);
+      expect(m.lateralVelocity.x).toBe(40.0);
+
+      const initialLateralSpeed = m.lateralVelocity.length();
+      expect(initialLateralSpeed).toBe(40.0);
+
+      // Advance several frames
+      for (let i = 0; i < 30; i++) {
+        weapons.update(1 / 60, ship, new Map(), () => {});
+      }
+
+      // Lateral velocity should have damped down smoothly
+      expect(m.lateralVelocity.length()).toBeLessThan(initialLateralSpeed);
+      expect(m.lateralVelocity.length()).toBeGreaterThan(0);
+      // Position moved both forward and laterally
+      expect(m.group.position.x).toBeGreaterThan(0);
+      expect(m.group.position.z).toBeLessThan(0);
+    });
+
+    it('should serialize velocity with fallback {x:0, y:0, z:0} in GameNetwork.prototype.broadcastMissile', () => {
+      let sentPayload = null;
+      const fakeNetwork = {
+        sendMissile: (p) => { sentPayload = p; }
+      };
+
+      // When velocity is provided
+      GameNetwork.prototype.broadcastMissile.call(fakeNetwork, {
+        id: 'test-m-1',
+        origin: { x: 1, y: 2, z: 3 },
+        dir: { x: 0, y: 0, z: -1 },
+        velocity: { x: 5, y: 10, z: -90 }
+      });
+      expect(sentPayload.velocity).toEqual({ x: 5, y: 10, z: -90 });
+
+      // When velocity is omitted
+      GameNetwork.prototype.broadcastMissile.call(fakeNetwork, {
+        id: 'test-m-2',
+        origin: { x: 1, y: 2, z: 3 },
+        dir: { x: 0, y: 0, z: -1 }
+      });
+      expect(sentPayload.velocity).toEqual({ x: 0, y: 0, z: 0 });
     });
   });
 });

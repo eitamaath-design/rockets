@@ -49,6 +49,7 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
     // Verify HUD elements
     await expect(page.locator('#hud-room-title')).toBeVisible();
     await expect(page.locator('.hud-center-crosshair')).toBeVisible();
+    await expect(page.locator('#hud-ship-boresight')).toBeVisible();
 
     // Verify Drag Touch D-Pad / Joystick
     await expect(page.locator('#touch-joystick-container')).toBeVisible();
@@ -87,5 +88,32 @@ test.describe('Rockets Headless Browser End-to-End Tests', () => {
     // Must jump directly into the sector
     await expect(page.locator('#game-canvas-container canvas')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#hud-room-title')).toHaveText('Test-Sector-99');
+  });
+
+  test('should support seamless unthrottled mouse look without requiring prior pointer lock', async ({ page }) => {
+    await page.goto('/');
+    await page.click('#btn-create-match');
+    await expect(page.locator('#game-canvas-container canvas')).toBeVisible({ timeout: 5000 });
+
+    // Verify initial ship desired quaternion
+    const initialQuat = await page.evaluate(() => {
+      const q = window.gameEngine.playerShip.desiredQuaternion;
+      return { x: q.x, y: q.y, z: q.z, w: q.w };
+    });
+
+    // Move mouse across canvas in free-cursor mode (without pointer lock)
+    const box = await page.locator('#game-canvas-container canvas').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2 + 50);
+
+    // Verify that desiredQuaternion (Pilot POV) has rotated from the mouse movement
+    const movedQuat = await page.evaluate(() => {
+      const q = window.gameEngine.playerShip.desiredQuaternion;
+      return { x: q.x, y: q.y, z: q.z, w: q.w };
+    });
+
+    // The POV quaternion must have changed from mouse movement
+    const dot = initialQuat.x * movedQuat.x + initialQuat.y * movedQuat.y + initialQuat.z * movedQuat.z + initialQuat.w * movedQuat.w;
+    expect(Math.abs(dot)).toBeLessThan(0.9999);
   });
 });

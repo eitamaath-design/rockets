@@ -2,6 +2,275 @@ import * as THREE from 'three';
 import { MarchingCubes } from 'three/examples/jsm/objects/MarchingCubes.js';
 import { createPRNG } from '../utils/math.js';
 import { audio } from './audio.js';
+import { logger } from '../utils/logger.js';
+import { createRadialGlowTexture } from './trail.js';
+
+// Module-level scratch objects for GPU InstancedMesh debris & explosions (zero heap allocation)
+const _debrisDummy = new THREE.Object3D();
+const _flashDummy = new THREE.Object3D();
+const _debrisColor = new THREE.Color();
+const _flashColor = new THREE.Color();
+const _debrisHideMat = new THREE.Matrix4().makeScale(0, 0, 0);
+const _spaceCamQuat = new THREE.Quaternion();
+
+export const ISOSURFACE_SCALE = 0.80;
+
+/**
+ * Creates deterministic 3D smooth Perlin/Gradient noise + FBM + Ridged Multifractal
+ * generators seeded by map seed.
+ */
+function create3DNoise(seed) {
+  const p = new Uint8Array(512);
+  const prng = createPRNG(seed);
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(prng() * (i + 1));
+    const t = perm[i];
+    perm[i] = perm[j];
+    perm[j] = t;
+  }
+  for (let i = 0; i < 512; i++) {
+    p[i] = perm[i & 255];
+  }
+
+  function fade(t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+  }
+  function lerp(t, a, b) {
+    return a + t * (b - a);
+  }
+  function grad(hash, x, y, z) {
+    const h = hash & 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+  }
+
+  function noise(x, y, z) {
+    const X = Math.floor(x) & 255;
+    const Y = Math.floor(y) & 255;
+    const Z = Math.floor(z) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const fz = z - Math.floor(z);
+    const u = fade(fx);
+    const v = fade(fy);
+    const w = fade(fz);
+
+    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+
+    return lerp(w,
+      lerp(v,
+        lerp(u, grad(p[AA], fx, fy, fz), grad(p[BA], fx - 1, fy, fz)),
+        lerp(u, grad(p[AB], fx, fy - 1, fz), grad(p[BB], fx - 1, fy - 1, fz))
+      ),
+      lerp(v,
+        lerp(u, grad(p[AA + 1], fx, fy, fz - 1), grad(p[BA + 1], fx - 1, fy, fz - 1)),
+        lerp(u, grad(p[AB + 1], fx, fy - 1, fz - 1), grad(p[BB + 1], fx - 1, fy - 1, fz - 1))
+      )
+    );
+  }
+
+  function fbm(x, y, z, octaves = 3) {
+    let total = 0;
+    let freq = 1.0;
+    let amp = 1.0;
+    let maxAmp = 0;
+    for (let i = 0; i < octaves; i++) {
+      total += noise(x * freq, y * freq, z * freq) * amp;
+      maxAmp += amp;
+      freq *= 2.0;
+      amp *= 0.5;
+    }
+    return total / maxAmp;
+  }
+
+  function ridge(x, y, z, octaves = 3) {
+    let total = 0;
+    let freq = 1.0;
+    let amp = 1.0;
+    let maxAmp = 0;
+    for (let i = 0; i < octaves; i++) {
+      let n = noise(x * freq, y * freq, z * freq);
+      n = 1.0 - Math.abs(n);
+      n = n * n;
+      total += n * amp;
+      maxAmp += amp;
+      freq *= 2.0;
+      amp *= 0.5;
+    }
+    return total / maxAmp;
+  }
+
+  return { noise, fbm, ridge };
+}
+
+/**
+ * Fast, unit-normalized central-difference normal computation for MarchingCubes.
+ * Pre-populates mc.normal_cache with strictly unit-length normals and guarantees nx !== 0,
+ * preventing MarchingCubes' internal un-normalized compNorm() from overwriting it.
+ */
+function updateNormalCache(mc, minX, maxX, minY, maxY, minZ, maxZ) {
+  if (!mc || !mc.field || !mc.normal_cache) return;
+  const res = mc.resolution;
+  const x0 = Math.max(1, minX);
+  const x1 = Math.min(res - 2, maxX);
+  const y0 = Math.max(1, minY);
+  const y1 = Math.min(res - 2, maxY);
+  const z0 = Math.max(1, minZ);
+  const z1 = Math.min(res - 2, maxZ);
+
+  for (let z = z0; z <= z1; z++) {
+    const zOffset = z * mc.size2;
+    for (let y = y0; y <= y1; y++) {
+      const yzOffset = zOffset + y * mc.size;
+      for (let x = x0; x <= x1; x++) {
+        const q = yzOffset + x;
+        const q3 = q * 3;
+        let nx = mc.field[q - 1] - mc.field[q + 1];
+        let ny = mc.field[q - mc.yd] - mc.field[q + mc.yd];
+        let nz = mc.field[q - mc.zd] - mc.field[q + mc.zd];
+        const len = Math.hypot(nx, ny, nz);
+        if (len > 0.0001) {
+          nx /= len;
+          ny /= len;
+          nz /= len;
+        } else {
+          nx = 1e-5;
+          ny = 0;
+          nz = 0;
+        }
+        if (nx === 0.0) nx = 1e-5;
+        mc.normal_cache[q3] = nx;
+        mc.normal_cache[q3 + 1] = ny;
+        mc.normal_cache[q3 + 2] = nz;
+      }
+    }
+  }
+}
+
+/**
+ * Custom 3D world/local-space triplanar rock grain & derivative normal-perturbation shader.
+ * Eliminates MarchingCubes planar UV stretching and provides rich geological micro-relief.
+ */
+function applyTriplanarRockShader(shader) {
+  shader.vertexShader = `
+    varying vec3 vRockLocalPos;
+    varying vec3 vRockWorldPos;
+  ` + shader.vertexShader;
+
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <begin_vertex>',
+    `#include <begin_vertex>
+     vRockLocalPos = position;
+    `
+  );
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <worldpos_vertex>',
+    `#include <worldpos_vertex>
+     vRockWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+    `
+  );
+
+  shader.fragmentShader = `
+    varying vec3 vRockLocalPos;
+    varying vec3 vRockWorldPos;
+
+    float rockHash3D(vec3 p) {
+      p = fract(p * 0.3183099 + 0.1);
+      p *= 17.0;
+      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+
+    float rockNoise3D(vec3 x) {
+      vec3 i = floor(x);
+      vec3 f = fract(x);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(mix(rockHash3D(i + vec3(0,0,0)), rockHash3D(i + vec3(1,0,0)), f.x),
+            mix(rockHash3D(i + vec3(0,1,0)), rockHash3D(i + vec3(1,1,0)), f.x), f.y),
+        mix(mix(rockHash3D(i + vec3(0,0,1)), rockHash3D(i + vec3(1,0,1)), f.x),
+            mix(rockHash3D(i + vec3(0,1,1)), rockHash3D(i + vec3(1,1,1)), f.x), f.y), f.z
+      );
+    }
+
+    float rockFbmTriplanar(vec3 p) {
+      float v = 0.0;
+      v += rockNoise3D(p) * 0.50;
+      v += rockNoise3D(p * 2.02) * 0.25;
+      v += rockNoise3D(p * 4.04) * 0.125;
+      return v;
+    }
+
+    float rockDetailHeight(vec3 wp, float closeFactor) {
+      // Macro & medium rocky crags (always active, anti-aliased at orbital distance)
+      float h = rockFbmTriplanar(wp * 0.006) * 0.55
+              + rockFbmTriplanar(wp * 0.022) * 0.30
+              + (1.0 - abs(rockNoise3D(wp * 0.012) * 2.0 - 1.0)) * 0.15;
+      // High-frequency close-up stony grain & fractures (fades in smoothly inside 2200u so it never aliases at 4200u!)
+      if (closeFactor > 0.001) {
+        float fine = rockFbmTriplanar(wp * 0.09) * 0.65
+                   + rockFbmTriplanar(wp * 0.32) * 0.35;
+        h += (fine - 0.45) * 0.45 * closeFactor;
+      }
+      return h;
+    }
+  ` + shader.fragmentShader;
+
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <color_fragment>',
+    `#include <color_fragment>
+     float cDist = length(vViewPosition);
+     float cClose = smoothstep(2400.0, 250.0, cDist);
+     float nMacro = rockFbmTriplanar(vRockWorldPos * 0.005);
+     float nMid = rockFbmTriplanar(vRockWorldPos * 0.020);
+     float nFine = mix(0.45, rockFbmTriplanar(vRockWorldPos * 0.10), cClose);
+     float nRidge = 1.0 - abs(rockNoise3D(vRockWorldPos * 0.011) * 2.0 - 1.0);
+
+     float rockContrast = clamp(0.62 + (nMacro - 0.45) * 0.55 + (nMid - 0.45) * 0.45 + (nFine - 0.45) * 0.40 + (nRidge - 0.5) * 0.28, 0.32, 1.32);
+     diffuseColor.rgb *= rockContrast;
+
+     // Slope dust / regolith highlight on upper sunlit rock faces (like PoC 2)
+     vec3 worldN = normalize(( vec4(vNormal, 0.0) * viewMatrix ).xyz);
+     float slope = clamp(dot(worldN, vec3(0.35, 0.85, 0.38)), 0.0, 1.0);
+     float dust = smoothstep(0.42, 0.82, slope + (nMid - 0.45) * 0.25);
+     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.14, 1.10, 1.04) + vec3(0.05, 0.04, 0.03), dust * 0.50);
+
+     // Subterranean carved tunnel interior strata & mineral veins
+     float rLocal = length(vRockLocalPos);
+     if (rLocal < 0.75) {
+       float depthFactor = clamp((0.75 - rLocal) / 0.22, 0.0, 1.0);
+       float strata = sin(rLocal * 95.0 + nMacro * 8.0) * 0.5 + 0.5;
+       vec3 strataCol = mix(vec3(0.18, 0.20, 0.25), vec3(0.42, 0.36, 0.30), strata);
+       float veinNoise = rockNoise3D(vRockWorldPos * 0.035);
+       float cyanVein = smoothstep(0.74, 0.82, veinNoise);
+       float goldVein = smoothstep(0.24, 0.16, veinNoise);
+       strataCol += cyanVein * vec3(0.15, 0.65, 0.85) + goldVein * vec3(0.75, 0.48, 0.12);
+       diffuseColor.rgb = mix(diffuseColor.rgb, strataCol * rockContrast, depthFactor * 0.75);
+     }
+    `
+  );
+
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <normal_fragment_maps>',
+    `#include <normal_fragment_maps>
+     float distToCam = length(vViewPosition);
+     float closeDetail = smoothstep(2400.0, 250.0, distToCam);
+     float eps = mix(4.5, 0.65, closeDetail);
+     float h0 = rockDetailHeight(vRockWorldPos, closeDetail);
+     vec3 worldGrad = vec3(
+       rockDetailHeight(vRockWorldPos + vec3(eps, 0.0, 0.0), closeDetail) - h0,
+       rockDetailHeight(vRockWorldPos + vec3(0.0, eps, 0.0), closeDetail) - h0,
+       rockDetailHeight(vRockWorldPos + vec3(0.0, 0.0, eps), closeDetail) - h0
+     ) / eps;
+     vec3 viewGrad = mat3(viewMatrix) * worldGrad;
+     viewGrad -= normal * dot(viewGrad, normal);
+     normal = normalize(normal - viewGrad * mix(2.4, 1.35, closeDetail));
+    `
+  );
+}
 
 /**
  * Creates a circular soft glow texture so point particles render as
@@ -101,6 +370,46 @@ export class SpaceEnvironment {
     this.asteroids = []; // { mesh, mc, radius, position, rotationSpeed, boundingSphere }
     this.asteroidGroup = new THREE.Group();
     this.debrisList = [];
+
+    // Pre-allocated GPU InstancedMesh rock debris & explosion flash
+    this.maxDebris = 400;
+    this._debrisGeo = new THREE.DodecahedronGeometry(0.85, 0);
+    this._debrisMat = new THREE.MeshStandardMaterial({
+      color: 0x6a727d,
+      roughness: 0.88,
+      metalness: 0.12
+    });
+    this.debrisMesh = new THREE.InstancedMesh(this._debrisGeo, this._debrisMat, this.maxDebris);
+    this.debrisMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.debrisMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxDebris * 3), 3);
+    this.debrisMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.debrisMesh.frustumCulled = false;
+
+    this._flashGeo = new THREE.PlaneGeometry(1, 1);
+    this._flashTex = createRadialGlowTexture(64);
+    this._flashMat = new THREE.MeshBasicMaterial({
+      map: this._flashTex,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.debrisFlashMesh = new THREE.InstancedMesh(this._flashGeo, this._flashMat, this.maxDebris);
+    this.debrisFlashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.debrisFlashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxDebris * 3), 3);
+    this.debrisFlashMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.debrisFlashMesh.frustumCulled = false;
+
+    for (let i = 0; i < this.maxDebris; i++) {
+      this.debrisMesh.setMatrixAt(i, _debrisHideMat);
+      this.debrisFlashMesh.setMatrixAt(i, _debrisHideMat);
+    }
+    this.debrisMesh.instanceMatrix.needsUpdate = true;
+    this.debrisFlashMesh.instanceMatrix.needsUpdate = true;
+
+    this.scene.add(this.debrisMesh);
+    this.scene.add(this.debrisFlashMesh);
 
     this.init();
   }
@@ -212,50 +521,54 @@ export class SpaceEnvironment {
 
     const rockBump = createRockBumpTexture();
 
-    // Smooth-shaded planetary rock materials with subtle micro-relief bump mapping & DoubleSide rendering
+    // Smooth-shaded planetary rock materials with vertexColors & 3D triplanar shader
     const rustChondrite = new THREE.MeshStandardMaterial({
-      color: 0x9b5842,
+      color: 0xffffff,
       roughness: 0.88,
       metalness: 0.16,
       flatShading: false,
-      bumpMap: rockBump || null,
-      bumpScale: 1.2,
+      bumpMap: null,
       depthWrite: true,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      vertexColors: true
     });
+    rustChondrite.onBeforeCompile = applyTriplanarRockShader;
 
     const charcoalBasalt = new THREE.MeshStandardMaterial({
-      color: 0x383e46,
+      color: 0xffffff,
       roughness: 0.92,
       metalness: 0.10,
       flatShading: false,
-      bumpMap: rockBump || null,
-      bumpScale: 1.2,
+      bumpMap: null,
       depthWrite: true,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      vertexColors: true
     });
+    charcoalBasalt.onBeforeCompile = applyTriplanarRockShader;
 
     const slateRock = new THREE.MeshStandardMaterial({
-      color: 0x5e6875,
+      color: 0xffffff,
       roughness: 0.86,
       metalness: 0.14,
       flatShading: false,
-      bumpMap: rockBump || null,
-      bumpScale: 1.2,
+      bumpMap: null,
       depthWrite: true,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      vertexColors: true
     });
+    slateRock.onBeforeCompile = applyTriplanarRockShader;
 
     const nickelGranite = new THREE.MeshStandardMaterial({
-      color: 0x7e8c9a,
+      color: 0xffffff,
       roughness: 0.80,
       metalness: 0.26,
       flatShading: false,
-      bumpMap: rockBump || null,
-      bumpScale: 1.2,
+      bumpMap: null,
       depthWrite: true,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      vertexColors: true
     });
+    nickelGranite.onBeforeCompile = applyTriplanarRockShader;
 
     const materials = [rustChondrite, charcoalBasalt, slateRock, nickelGranite];
 
@@ -284,31 +597,164 @@ export class SpaceEnvironment {
 
       const mat = materials[Math.floor(prng() * materials.length)];
       const res = isMega ? this.megaResolution : (isMedium ? 20 : 16);
-      const maxPolys = isMega ? 120000 : 30000;
+      const maxPolys = isMega ? 150000 : 30000;
 
-      const mc = new MarchingCubes(res, mat, true, false, maxPolys);
+      const mc = new MarchingCubes(res, mat, false, true, maxPolys);
       mc.maxPolys = maxPolys;
       mc.isolation = 40.0;
 
-      // Initialize density field: Solid rock core formulation (dist < 0.6 => D >> 40.0, D approx 70-100)
+      // Seeded impact crater basins (16-18 for mega, 3-5 for medium)
+      const numCraters = isMega ? Math.floor(16 + prng() * 3) : (isMedium ? Math.floor(3 + prng() * 3) : 0);
+      const craters = [];
+      for (let c = 0; c < numCraters; c++) {
+        const u = prng();
+        const v = prng();
+        const theta = u * 2.0 * Math.PI;
+        const phi = Math.acos(2.0 * v - 1.0);
+        craters.push({
+          cx: Math.sin(phi) * Math.cos(theta),
+          cy: Math.sin(phi) * Math.sin(theta),
+          cz: Math.cos(phi),
+          radius: 0.18 + prng() * 0.22,
+          depth: 0.07 + prng() * 0.08,
+          rimHeight: 0.03 + prng() * 0.03
+        });
+      }
+
       const half = mc.halfsize;
+      const hInv = 1.0 / half;
+      const noiseGen = create3DNoise(this.mapSeed + i * 47);
+
       for (let z = 0; z < res; z++) {
-        const dz = (z - half) / half;
+        const dz = (z - half) * hInv;
         for (let y = 0; y < res; y++) {
-          const dy = (y - half) / half;
+          const dy = (y - half) * hInv;
           for (let x = 0; x < res; x++) {
-            const dx = (x - half) / half;
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            const noise = Math.sin(dx * 8) * Math.cos(dy * 8) * Math.sin(dz * 8) * 0.15
-                        + Math.sin(dx * 18) * Math.cos(dz * 18) * 0.08;
-            const density = Math.max(0, (1.0 - (dist + noise)) * 100);
+            const dx = (x - half) * hInv;
+            const index = mc.size2 * z + mc.size * y + x;
+
+            // 1. Boundary Safety: Strictly D = 0 on all outer boundary faces of mc.field to eliminate flat clipping
+            if (x === 0 || x === res - 1 || y === 0 || y === res - 1 || z === 0 || z === res - 1) {
+              mc.setCell(x, y, z, 0);
+              if (mc.palette) {
+                mc.palette[index * 3] = 0.2;
+                mc.palette[index * 3 + 1] = 0.2;
+                mc.palette[index * 3 + 2] = 0.2;
+              }
+              continue;
+            }
+
+            // Triaxial planetesimal asymmetry
+            const dxA = dx * 1.02;
+            const dyA = dy * 0.98;
+            const dzA = dz * 1.03;
+            const dist = Math.sqrt(dxA * dxA + dyA * dyA + dzA * dzA);
+
+            if (dist < 0.0001) {
+              mc.setCell(x, y, z, 100.0);
+              if (mc.palette) {
+                mc.palette[index * 3] = 0.20;
+                mc.palette[index * 3 + 1] = 0.22;
+                mc.palette[index * 3 + 2] = 0.25;
+              }
+              continue;
+            }
+
+            // 2. Multi-octave FBM + Ridged Noise
+            const nFbm = noiseGen.fbm(dx * 2.8, dy * 2.8, dz * 2.8, 3) * 0.08;
+            const nRidge = noiseGen.ridge(dx * 3.6, dy * 3.6, dz * 3.6, 3) * 0.06;
+
+            // 3. Impact Craters SDF
+            const dirX = dx / dist;
+            const dirY = dy / dist;
+            const dirZ = dz / dist;
+            let craterDisplacement = 0;
+            let craterTotalDepth = 0;
+
+            for (let c = 0; c < craters.length; c++) {
+              const cr = craters[c];
+              const dot = dirX * cr.cx + dirY * cr.cy + dirZ * cr.cz;
+              const chordSq = Math.max(0, 2.0 * (1.0 - dot));
+              const chord = Math.sqrt(chordSq);
+              if (chord < cr.radius * 1.35) {
+                if (chord < cr.radius) {
+                  // Bowl indentation
+                  const normDist = chord / cr.radius;
+                  const bowl = cr.depth * (1.0 - normDist * normDist);
+                  craterDisplacement -= bowl;
+                  craterTotalDepth += bowl;
+                } else {
+                  // Raised rim ring
+                  const rimNorm = (chord - cr.radius) / (cr.radius * 0.35);
+                  const rim = cr.rimHeight * (1.0 - rimNorm * rimNorm);
+                  craterDisplacement += rim;
+                }
+              }
+            }
+
+            const distEff = dist + nFbm + nRidge - craterDisplacement;
+
+            // 4. Smooth Hermite spherical boundary falloff near grid edge to guarantee zero clipping
+            const radialDist = Math.hypot(dx, dy, dz);
+            const edgeFalloff = radialDist > 0.82 ? Math.max(0, 1.0 - (radialDist - 0.82) / 0.13) : 1.0;
+            const smoothEdge = edgeFalloff * edgeFalloff * (3.0 - 2.0 * edgeFalloff);
+
+            // 5. Monotonic Solid Core Density Formulation (Center=100, Surface=isolation 40.0)
+            let density;
+            if (distEff <= ISOSURFACE_SCALE) {
+              const t = Math.max(0.0, distEff / ISOSURFACE_SCALE);
+              density = 100.0 - Math.pow(t, 1.4) * 60.0;
+            } else {
+              const t = Math.min(1.0, (distEff - ISOSURFACE_SCALE) / (0.94 - ISOSURFACE_SCALE));
+              density = Math.max(0, 40.0 * (1.0 - t * t));
+            }
+            density *= smoothEdge;
             mc.setCell(x, y, z, density);
+
+            // 6. Geological Strata Palette
+            if (mc.palette) {
+              const heightFactor = Math.min(1.0, Math.max(0.0, (dist - 0.55) / 0.25));
+              const craterDarken = Math.max(0.0, Math.min(1.0, craterTotalDepth * 6.0));
+              const ridgeFactor = Math.max(0.0, nRidge * 2.0);
+
+              let r, g, b;
+              if (dist < 0.55) {
+                const oreNoise = noiseGen.noise(dx * 12.0 + 10.0, dy * 12.0 + 10.0, dz * 12.0 + 10.0);
+                if (oreNoise > 0.62) {
+                  r = 0.95; g = 0.62; b = 0.15; // rich amber/gold ore
+                } else if (oreNoise < -0.65) {
+                  r = 0.22; g = 0.80; b = 0.92; // cyan crystal/mineral vein
+                } else {
+                  r = 0.28; g = 0.30; b = 0.34; // dark subterranean basalt
+                }
+              } else {
+                const baseR = 0.52, baseG = 0.50, baseB = 0.48;
+                const ridgeR = 0.85, ridgeG = 0.75, ridgeB = 0.62; // weathered tan ridge
+                const floorR = 0.25, floorG = 0.26, floorB = 0.29; // deep charcoal crater floor
+
+                r = baseR * (1.0 - heightFactor) + ridgeR * heightFactor;
+                g = baseG * (1.0 - heightFactor) + ridgeG * heightFactor;
+                b = baseB * (1.0 - heightFactor) + ridgeB * heightFactor;
+
+                r += ridgeFactor * 0.18;
+                g += ridgeFactor * 0.14;
+                b += ridgeFactor * 0.08;
+
+                r = r * (1.0 - craterDarken) + floorR * craterDarken;
+                g = g * (1.0 - craterDarken) + floorG * craterDarken;
+                b = b * (1.0 - craterDarken) + floorB * craterDarken;
+              }
+              mc.palette[index * 3 + 0] = Math.min(1.0, Math.max(0.0, r));
+              mc.palette[index * 3 + 1] = Math.min(1.0, Math.max(0.0, g));
+              mc.palette[index * 3 + 2] = Math.min(1.0, Math.max(0.0, b));
+            }
           }
         }
       }
 
+      updateNormalCache(mc, 1, res - 2, 1, res - 2, 1, res - 2);
       mc.update();
-      mc.scale.set(radius / 0.65, radius / 0.65, radius / 0.65);
+      mc.scale.set(radius / ISOSURFACE_SCALE, radius / ISOSURFACE_SCALE, radius / ISOSURFACE_SCALE);
 
       let posX = 0, posY = 0, posZ = 0;
       let driftVelocity = new THREE.Vector3(0, 0, 0);
@@ -392,7 +838,7 @@ export class SpaceEnvironment {
     const mc = target && target.field ? target : (target ? (target.mc || target.mesh) : null);
     if (!mc || !mc.field) return 0;
     const radius = R !== undefined ? R : (target.radius || 1.0);
-    const scaleR = radius / 0.65;
+    const scaleR = radius / ISOSURFACE_SCALE;
     const res = mc.resolution;
     const half = mc.halfsize;
     const gx = (lx / scaleR) * half + half;
@@ -438,7 +884,7 @@ export class SpaceEnvironment {
   computeDensityGradientNormal(asteroid, localPos) {
     const mc = asteroid.mc || asteroid.mesh;
     const R = asteroid.radius;
-    const scaleR = R / 0.65;
+    const scaleR = R / ISOSURFACE_SCALE;
     const delta = (scaleR / mc.halfsize) * 0.5;
 
     const dx = this.sampleDensity(mc, localPos.x + delta, localPos.y, localPos.z, R) -
@@ -510,22 +956,71 @@ export class SpaceEnvironment {
   /**
    * Update asteroid drift, Keplerian orbital dynamics, and resolve pairwise asteroid-asteroid momentum collisions.
    */
-  update(dt, playerPosition, playerVelocity) {
-    // Update rock debris particles
+  update(dt, playerPosition, playerVelocity, camera = null) {
+    if (camera && camera.quaternion) {
+      _spaceCamQuat.copy(camera.quaternion);
+    } else {
+      _spaceCamQuat.identity();
+    }
+
+    // Update rock debris particles via GPU InstancedMesh
     for (let i = this.debrisList.length - 1; i >= 0; i--) {
       const d = this.debrisList[i];
       d.life -= dt;
       if (d.life <= 0) {
-        this.scene.remove(d.mesh);
         this.debrisList.splice(i, 1);
         continue;
       }
-      d.mesh.position.addScaledVector(d.vel, dt);
-      d.mesh.rotation.x += d.rot.x * dt;
-      d.mesh.rotation.y += d.rot.y * dt;
-      const scale = (d.life / d.maxLife);
-      d.mesh.scale.set(scale, scale, scale);
+      d.pos.addScaledVector(d.vel, dt);
+      d.vel.multiplyScalar(Math.pow(0.94, dt * 60));
+      if (d.rot && d.rotAngle) {
+        d.rotAngle.x += d.rot.x * dt;
+        d.rotAngle.y += d.rot.y * dt;
+        d.rotAngle.z += d.rot.z * dt;
+      }
+      if (d.mesh) {
+        if (d.mesh.position) d.mesh.position.copy(d.pos);
+        if (d.mesh.rotation && d.rotAngle) d.mesh.rotation.copy(d.rotAngle);
+      }
     }
+
+    const activeDebrisCount = this.debrisList.length;
+    for (let i = 0; i < activeDebrisCount; i++) {
+      const d = this.debrisList[i];
+      const normLife = d.life / d.maxLife;
+      const scale = (d.baseScale || 1.0) * normLife;
+
+      // 1. Rock chunk instance
+      _debrisDummy.position.copy(d.pos);
+      if (d.rotAngle) _debrisDummy.rotation.copy(d.rotAngle);
+      _debrisDummy.scale.set(scale, scale, scale);
+      _debrisDummy.updateMatrix();
+      this.debrisMesh.setMatrixAt(i, _debrisDummy.matrix);
+
+      _debrisColor.setRGB(0.42 * normLife, 0.45 * normLife, 0.48 * normLife);
+      this.debrisMesh.setColorAt(i, _debrisColor);
+
+      // 2. Dust/flash billboard instance
+      _flashDummy.position.copy(d.pos);
+      _flashDummy.quaternion.copy(_spaceCamQuat);
+      const flashScale = scale * 2.8;
+      _flashDummy.scale.set(flashScale, flashScale, flashScale);
+      _flashDummy.updateMatrix();
+      this.debrisFlashMesh.setMatrixAt(i, _flashDummy.matrix);
+
+      _flashColor.setRGB(1.0 * normLife, 0.75 * normLife, 0.45 * normLife);
+      this.debrisFlashMesh.setColorAt(i, _flashColor);
+    }
+
+    for (let i = activeDebrisCount; i < this.maxDebris; i++) {
+      this.debrisMesh.setMatrixAt(i, _debrisHideMat);
+      this.debrisFlashMesh.setMatrixAt(i, _debrisHideMat);
+    }
+
+    this.debrisMesh.instanceMatrix.needsUpdate = true;
+    if (this.debrisMesh.instanceColor) this.debrisMesh.instanceColor.needsUpdate = true;
+    this.debrisFlashMesh.instanceMatrix.needsUpdate = true;
+    if (this.debrisFlashMesh.instanceColor) this.debrisFlashMesh.instanceColor.needsUpdate = true;
 
     if (this.combatFlashLight && this.combatFlashLight.intensity > 0) {
       this.combatFlashLight.intensity = Math.max(0, this.combatFlashLight.intensity - dt * 6.0);
@@ -680,6 +1175,8 @@ export class SpaceEnvironment {
 
   /**
    * Fast collision query for projectiles and weapons
+   * Uses volumetric density narrowphase for MarchingCubes asteroids so projectiles/missiles
+   * can fly cleanly through carved tunnel corridors and only collide when striking solid rock.
    */
   checkCollision(position, radius = 2.5) {
     for (let i = 0; i < this.asteroids.length; i++) {
@@ -687,7 +1184,20 @@ export class SpaceEnvironment {
       const distSq = position.distanceToSquared(a.position);
       const combinedRadius = a.radius + radius;
       if (distSq < combinedRadius * combinedRadius) {
-        return a;
+        if (a.mc && a.mc.field) {
+          if (a.mesh && a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
+          const invMatrix = a.mesh?.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
+          const scaleR = a.radius / ISOSURFACE_SCALE;
+          const localPt = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+          if (this.checkInsideCarvings(a, localPt)) continue;
+          const density = this.sampleDensity(a.mc, localPt.x, localPt.y, localPt.z, a.radius);
+          const iso = a.mc.isolation || 40.0;
+          if (density > iso) {
+            return a;
+          }
+        } else {
+          return a;
+        }
       }
     }
     return null;
@@ -715,7 +1225,8 @@ export class SpaceEnvironment {
           if (a.carvings && a.carvings.length > 0 && a.mesh) {
             if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
             const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
-            const localStart = startPos.clone().applyMatrix4(invMatrix).multiplyScalar(a.radius);
+            const scaleR = a.radius / ISOSURFACE_SCALE;
+            const localStart = startPos.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
             const localDir = segDir.clone().transformDirection(invMatrix).normalize();
 
             let passesThroughHole = false;
@@ -742,10 +1253,10 @@ export class SpaceEnvironment {
 
   /**
    * Cast a ray forward and find closest asteroid hit within maxDist.
-   * If ray enters an excavated tunnel or cavern, it checks volumetric density
-   * and carving corridor to allow penetrating through hollowed tunnels!
+   * Performs true volumetric ray-marching through mc.field with sub-voxel bisection refinement.
+   * Penetrates excavated tunnels and hollow cavities.
    */
-  checkRayCollision(origin, dir, maxDist = 750.0) {
+  checkRayCollision(origin, dir, maxDist = 3500.0) {
     let closestHit = null;
     let closestDist = maxDist;
 
@@ -753,61 +1264,84 @@ export class SpaceEnvironment {
       const a = this.asteroids[i];
       const toCenter = a.position.clone().sub(origin);
       const tca = toCenter.dot(dir);
-      const r = a.radius;
-      const distToCenter = toCenter.length();
-      const isInsideSphere = distToCenter < r;
+      const distSqToCenter = toCenter.lengthSq();
+      const rBound = a.radius * 1.15;
+      const rBoundSq = rBound * rBound;
 
-      if (tca < 0 && !isInsideSphere) continue;
-      if (tca - r > closestDist) continue;
+      let tEnter, tExit;
+      if (distSqToCenter <= rBoundSq) {
+        // Origin is already inside or on the bounding sphere
+        tEnter = 0.0;
+        const d2 = distSqToCenter - (tca * tca);
+        const thc = Math.sqrt(Math.max(0, rBoundSq - d2));
+        tExit = Math.min(closestDist, tca + thc);
+      } else {
+        if (tca < 0) continue; // Sphere is behind ray
+        const d2 = distSqToCenter - (tca * tca);
+        if (d2 > rBoundSq) continue; // Ray misses bounding sphere
+        const thc = Math.sqrt(Math.max(0, rBoundSq - d2));
+        tEnter = Math.max(0.0, tca - thc);
+        tExit = Math.min(closestDist, tca + thc);
+        if (tEnter > closestDist || tEnter >= tExit) continue;
+      }
 
-      const d2 = toCenter.lengthSq() - (tca * tca);
-      if (d2 > r * r) continue;
+      if (a.mc && a.mc.field) {
+        if (a.mesh && a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
+        const invMatrix = a.mesh?.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
+        const scaleR = a.radius / ISOSURFACE_SCALE;
+        const iso = a.mc.isolation || 40.0;
+        const stepSize = a.isMegaAsteroid ? 28.0 : Math.max(4.0, a.radius * 0.12);
 
-      const thc = Math.sqrt(Math.max(0, r * r - d2));
-      let t0 = tca - thc;
-      if (t0 < 0) t0 = tca + thc;
+        let hitFound = false;
+        let tHit = -1;
+        let prevT = tEnter;
 
-      if (t0 > 0 && t0 < closestDist) {
-        let hitPt = origin.clone().addScaledVector(dir, t0);
-        let entersCavity = false;
-        let deepestDist = t0;
+        for (let t = tEnter; t <= tExit; t += stepSize) {
+          const pt = origin.clone().addScaledVector(dir, t);
+          const localPt = pt.applyMatrix4(invMatrix).multiplyScalar(scaleR);
+          const density = this.sampleDensity(a.mc, localPt.x, localPt.y, localPt.z, a.radius);
+          const insideCarving = (!a.isMegaAsteroid && this.checkInsideCarvings(a, localPt));
 
-        if (a.mesh) {
-          if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
-          const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
-          const scaleR = a.radius / 0.65;
-          const localHit = hitPt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-
-          // Check density at hit point or along tunnel
-          const density = this.sampleDensity(a.mc || a.mesh, localHit.x, localHit.y, localHit.z, a.radius);
-          const insideCarving = this.checkInsideCarvings(a, localHit);
-
-          if (density <= (a.mc?.isolation || 40.0) || insideCarving) {
-            entersCavity = true;
-            // Ray penetrates through tunnel
-            if (a.carvings && a.carvings.some(c => c.isThroughTunnel)) {
-              deepestDist = Math.max(deepestDist, tca + thc + 5.0);
-            } else {
-              deepestDist = Math.max(deepestDist, t0 + 60.0);
+          if (density > iso && !insideCarving) {
+            // Sub-voxel bisection refinement between prevT and t
+            let tLow = prevT;
+            let tHigh = t;
+            for (let iter = 0; iter < 4; iter++) {
+              const tMid = 0.5 * (tLow + tHigh);
+              const midPt = origin.clone().addScaledVector(dir, tMid);
+              const midLocal = midPt.applyMatrix4(invMatrix).multiplyScalar(scaleR);
+              const midDensity = this.sampleDensity(a.mc, midLocal.x, midLocal.y, midLocal.z, a.radius);
+              const midInside = (!a.isMegaAsteroid && this.checkInsideCarvings(a, midLocal));
+              if (midDensity > iso && !midInside) {
+                tHigh = tMid;
+              } else {
+                tLow = tMid;
+              }
             }
+            tHit = 0.5 * (tLow + tHigh);
+            hitFound = true;
+            break;
           }
+          prevT = t;
         }
 
-        if (entersCavity) {
-          if (deepestDist >= (tca + thc)) {
-            // Ray punches completely through the excavated tunnel!
-            continue;
-          }
-          t0 = deepestDist;
-          hitPt = origin.clone().addScaledVector(dir, t0);
+        if (hitFound && tHit > 0 && tHit < closestDist) {
+          closestDist = tHit;
+          closestHit = {
+            asteroid: a,
+            distance: tHit,
+            hitPoint: origin.clone().addScaledVector(dir, tHit)
+          };
         }
-
+      } else {
+        // Fallback for non-marching cubes bodies
+        let t0 = tEnter > 0 ? tEnter : tExit;
         if (t0 > 0 && t0 < closestDist) {
           closestDist = t0;
           closestHit = {
             asteroid: a,
             distance: t0,
-            hitPoint: hitPt
+            hitPoint: origin.clone().addScaledVector(dir, t0)
           };
         }
       }
@@ -820,18 +1354,18 @@ export class SpaceEnvironment {
    * Narrowphase samples MarchingCubes volumetric density field and continuous capsule corridor.
    * If D <= mc.isolation (or inside carved tunnel corridor), free flight clearance is granted!
    * If D > mc.isolation, calculates outward surface normal from density gradient ∇D,
-   * separates position, deflects velocity, and inflicts debounced impact damage.
+   * steps position outward along normal until clear, and deflects velocity.
    */
   resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200) {
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
       const dist = position.distanceTo(a.position);
-      const minDist = a.radius + shipRadius;
+      const boundCheck = a.radius * 1.12 + shipRadius;
 
-      if (dist < minDist) {
-        if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
-        const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
-        const scaleR = a.radius / 0.65;
+      if (dist < boundCheck) {
+        if (a.mesh && a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
+        const invMatrix = a.mesh?.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
+        const scaleR = a.radius / ISOSURFACE_SCALE;
         const localShip = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
 
         // Narrowphase: Check volumetric density & carved corridor clearance
@@ -847,8 +1381,19 @@ export class SpaceEnvironment {
         // Intersecting solid rock! Calculate outward normal from continuous density gradient ∇D
         const normal = this.computeDensityGradientNormal(a, localShip);
 
-        // Push ship out of penetration along surface normal
-        position.copy(a.position).addScaledVector(normal, minDist + 0.3);
+        // Instead of teleporting to outer bounding sphere, step outward along normal until density <= iso
+        let stepDist = 0;
+        const maxPush = a.isMegaAsteroid ? 40.0 : (shipRadius + 18.0);
+        const stepInc = 2.0;
+        while (stepDist < maxPush) {
+          position.addScaledVector(normal, stepInc);
+          stepDist += stepInc;
+          const testLocal = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+          if (this.sampleDensity(a.mc || a.mesh, testLocal.x, testLocal.y, testLocal.z, a.radius) <= iso) {
+            break;
+          }
+        }
+        position.addScaledVector(normal, shipRadius * 0.5);
 
         const relVel = velocity.clone().sub(a.velocity);
         const vNorm = relVel.dot(normal);
@@ -874,22 +1419,10 @@ export class SpaceEnvironment {
   }
 
   spawnRockDebris(hitPoint, hitDir, count = 8) {
-    const chunkGeom = new THREE.DodecahedronGeometry(0.85, 0);
-    const chunkMat = new THREE.MeshStandardMaterial({
-      color: 0x5a626d,
-      roughness: 0.9,
-      metalness: 0.1
-    });
-
     for (let i = 0; i < count; i++) {
-      if (this.debrisList.length > 60) {
-        const old = this.debrisList.shift();
-        this.scene.remove(old.mesh);
+      if (this.debrisList.length >= this.maxDebris) {
+        this.debrisList.shift();
       }
-      const mesh = new THREE.Mesh(chunkGeom, chunkMat);
-      mesh.position.copy(hitPoint);
-      this.scene.add(mesh);
-
       const spread = new THREE.Vector3(
         (Math.random() - 0.5) * 35.0,
         (Math.random() - 0.5) * 35.0,
@@ -897,13 +1430,26 @@ export class SpaceEnvironment {
       );
       const vel = hitDir.clone().multiplyScalar(-18.0).add(spread);
       const maxLife = 0.5 + Math.random() * 0.4;
+      const baseScale = 0.85 + Math.random() * 0.75;
+      const rotSpeed = new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8);
+      const rotAngle = new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      const pos = hitPoint.clone();
+
+      const mesh = {
+        position: pos,
+        rotation: rotAngle,
+        scale: new THREE.Vector3(baseScale, baseScale, baseScale)
+      };
 
       this.debrisList.push({
-        mesh,
+        pos,
         vel,
-        rot: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8),
+        rot: rotSpeed,
+        rotAngle,
         life: maxLife,
-        maxLife
+        maxLife,
+        baseScale,
+        mesh
       });
     }
   }
@@ -934,8 +1480,8 @@ export class SpaceEnvironment {
     return true;
   }
 
-  damageAsteroid(asteroid, damage = 5, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0) {
-    if (!asteroid) return { destroyed: false };
+  damageAsteroid(asteroid, damage = 5, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 160.0) {
+    if (!asteroid) return { destroyed: false, carveResult: null };
 
     // Small asteroids have finite HP and get obliterated when depleted
     if (asteroid.hp !== undefined && asteroid.hp !== Infinity) {
@@ -948,98 +1494,278 @@ export class SpaceEnvironment {
           audio.playExplosion(1.2, blastPos);
         }
         this.removeAsteroid(asteroid);
-        return { destroyed: true, asteroid };
+        return { destroyed: true, asteroid, hp: 0, carveResult: null };
       }
     }
 
     // Medium asteroids and central mega-asteroid undergo volumetric carving
+    let carveResult = null;
     if (hitPoint && hitDir) {
-      this.carveAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth);
+      carveResult = this.carveAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength);
     }
-    return { destroyed: false, asteroid, hp: asteroid.hp };
+    return { destroyed: false, asteroid, hp: asteroid.hp, carveResult };
   }
 
   /**
    * Runtime volumetric MarchingCubes asteroid carving:
    * - Converts hitPoint and hitDir to asteroid local space
    * - Maps local coordinates [-R, R] to grid cells [0, res-1]
-   * - Subtracts density brush: current = mc.getCell(); mc.setCell(Math.max(0, current - factor * strength))
+   * - Uses zero-allocation localized AABB voxel bounding box
+   * - High-yield flat core falloff: inner 65% of cylinder radius gets factor = 1.0 (full bore strength)
+   * - Outer 35% tapers smoothly with Hermite smoothstep
+   * - Guarantees minimum tunnelRadius >= max(180, voxelSize * 1.65, carveRadius * 3.0) and effectiveDepth >= max(260, voxelSize * 2.4, carveDepth * 5.0)
+   * - Carve strength >= 160 for Mega Asteroid, dropping core density from 100 to 0 on hit 1
+   * - Nearest-voxel fallback: if isMega and isosurface was not crossed, drops closest solid voxel to 0
+   * - Updates mc.palette on partially carved cells for scorched walls & exposed ore
    * - Localized mc.update() to regenerate surface polygons
-   * - Tracks carved volume, cells, and corridor metadata for continuous clearance
+   * - Returns structured carveResult telemetry payload
    */
   carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0) {
-    if (!asteroid || !asteroid.mesh) return;
+    if (!asteroid || !asteroid.mesh) {
+      return {
+        voxelsModified: 0,
+        isosurfaceCrossed: false,
+        isosurfaceCrossedCount: 0,
+        totalDensityDelta: 0,
+        maxDensityDelta: 0,
+        carveRadius: 0,
+        carveDepth: 0,
+        isMega: false,
+        reason: 'invalid_asteroid'
+      };
+    }
     const mc = asteroid.mc || asteroid.mesh;
+    if (!mc || !mc.field || typeof mc.getCell !== 'function') {
+      return {
+        voxelsModified: 0,
+        isosurfaceCrossed: false,
+        isosurfaceCrossedCount: 0,
+        totalDensityDelta: 0,
+        maxDensityDelta: 0,
+        carveRadius: 0,
+        carveDepth: 0,
+        isMega: false,
+        reason: 'invalid_mc_field'
+      };
+    }
 
     if (asteroid.mesh.matrixWorld) asteroid.mesh.updateMatrixWorld(true);
     const invMatrix = asteroid.mesh.matrixWorld ? asteroid.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(asteroid.mesh.matrix).invert();
-    const scaleR = asteroid.radius / 0.65;
+    const scaleR = asteroid.radius / ISOSURFACE_SCALE;
     const localHit = hitPoint.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
     const localDir = hitDir.clone().transformDirection(invMatrix).normalize();
 
-    const isMega = (asteroid.radius >= 2500 || asteroid.isMegaAsteroid);
+    const isMega = !!(asteroid.radius >= 2500 || asteroid.isMegaAsteroid);
     const isMedium = (!isMega && asteroid.radius >= 38.0);
 
     const half = mc.halfsize;
-    // Medium asteroids support through-and-through cylindrical tunnel holes; mega asteroids scale to voxel grid spacing
+    const res = mc.resolution;
+    const voxelSize = (scaleR * 2.0) / res;
+
+    // Mega Asteroid tunnel sizing: wide and deep tunnel shafts spanning >= 1.65 voxels
     const tunnelRadius = isMedium
       ? Math.max(28.0, Math.min(36.0, carveRadius))
-      : (isMega ? Math.max(carveRadius, (scaleR / half) * 0.75) : carveRadius);
-    const effectiveDepth = isMega ? Math.max(120.0, Math.min(180.0, carveDepth * 3.5)) : (isMedium ? asteroid.radius * 2.5 : carveDepth);
+      : (isMega ? (carveRadius >= 100.0 ? carveRadius : Math.max(180.0, voxelSize * 1.65, carveRadius * 3.0)) : carveRadius);
+    const effectiveDepth = isMega
+      ? (carveDepth >= 100.0 ? carveDepth : Math.max(260.0, voxelSize * 2.4, carveDepth * 5.0))
+      : (isMedium ? asteroid.radius * 2.5 : carveDepth);
+    const carveStrength = isMega ? Math.max(strength, 160.0) : strength;
 
-    let carvedVolume = 0;
-    let carvedCells = 0;
+    let voxelsModified = 0;
+    let isosurfaceCrossedCount = 0;
+    let totalDensityDelta = 0.0;
+    let maxDensityDelta = 0.0;
 
-    if (mc && mc.field && typeof mc.getCell === 'function') {
-      const res = mc.resolution;
-      const half = mc.halfsize;
+    const iso = mc.isolation || 40.0;
+    const hInv = 1.0 / half;
+    const ldx = localDir.x, ldy = localDir.y, ldz = localDir.z;
+    const lhx = localHit.x, lhy = localHit.y, lhz = localHit.z;
+    const tunnelRadiusSq = tunnelRadius * tunnelRadius;
+    const invTunnelRadius = 1.0 / tunnelRadius;
 
-      for (let z = 0; z < res; z++) {
-        for (let y = 0; y < res; y++) {
-          for (let x = 0; x < res; x++) {
-            const lp = new THREE.Vector3(
-              (x - half) / half * scaleR,
-              (y - half) / half * scaleR,
-              (z - half) / half * scaleR
-            );
+    // Capsule bounding box in local coordinates
+    const startX = lhx - ldx * (tunnelRadius * 0.35);
+    const startY = lhy - ldy * (tunnelRadius * 0.35);
+    const startZ = lhz - ldz * (tunnelRadius * 0.35);
+    const endX = lhx + ldx * effectiveDepth;
+    const endY = lhy + ldy * effectiveDepth;
+    const endZ = lhz + ldz * effectiveDepth;
 
-            const toP = lp.clone().sub(localHit);
-            const proj = toP.dot(localDir);
-            let dist;
+    const minPx = Math.min(startX, endX) - tunnelRadius;
+    const maxPx = Math.max(startX, endX) + tunnelRadius;
+    const minPy = Math.min(startY, endY) - tunnelRadius;
+    const maxPy = Math.max(startY, endY) + tunnelRadius;
+    const minPz = Math.min(startZ, endZ) - tunnelRadius;
+    const maxPz = Math.max(startZ, endZ) + tunnelRadius;
 
-            if (isMedium) {
-              if (proj >= -25.0 && proj <= (effectiveDepth + 25.0)) {
-                const segPt = localHit.clone().addScaledVector(localDir, proj);
-                dist = lp.distanceTo(segPt);
+    // Clamped grid AABB
+    const minX = Math.max(0, Math.floor((minPx / scaleR) * half + half) - 1);
+    const maxX = Math.min(res - 1, Math.ceil((maxPx / scaleR) * half + half) + 1);
+    const minY = Math.max(0, Math.floor((minPy / scaleR) * half + half) - 1);
+    const maxY = Math.min(res - 1, Math.ceil((maxPy / scaleR) * half + half) + 1);
+    const minZ = Math.max(0, Math.floor((minPz / scaleR) * half + half) - 1);
+    const maxZ = Math.min(res - 1, Math.ceil((maxPz / scaleR) * half + half) + 1);
+
+    let closestSolidVoxel = null;
+    let minSolidDistSq = Infinity;
+
+    for (let z = minZ; z <= maxZ; z++) {
+      const lz = (z - half) * hInv * scaleR;
+      const toZ = lz - lhz;
+      for (let y = minY; y <= maxY; y++) {
+        const ly = (y - half) * hInv * scaleR;
+        const toY = ly - lhy;
+        for (let x = minX; x <= maxX; x++) {
+          const lx = (x - half) * hInv * scaleR;
+          const toX = lx - lhx;
+
+          const proj = toX * ldx + toY * ldy + toZ * ldz;
+
+          let segX, segY, segZ;
+          if (isMedium) {
+            if (proj < -25.0 || proj > (effectiveDepth + 25.0)) continue;
+            segX = lhx + ldx * proj;
+            segY = lhy + ldy * proj;
+            segZ = lhz + ldz * proj;
+          } else {
+            const t = Math.max(0, Math.min(effectiveDepth, proj));
+            segX = lhx + ldx * t;
+            segY = lhy + ldy * t;
+            segZ = lhz + ldz * t;
+          }
+
+          const diffX = lx - segX;
+          const diffY = ly - segY;
+          const diffZ = lz - segZ;
+          const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
+
+          const current = mc.getCell(x, y, z);
+          if (current > iso) {
+            if (distSq < minSolidDistSq) {
+              minSolidDistSq = distSq;
+              closestSolidVoxel = { x, y, z, val: current };
+            }
+          }
+
+          if (distSq < tunnelRadiusSq) {
+            const dist = Math.sqrt(distSq);
+            const u = 1.0 - (dist * invTunnelRadius);
+
+            let factor;
+            if (isMega) {
+              // High-Yield Flat Core Falloff: full bore inside inner 65% of cylinder radius
+              if (u >= 0.35) {
+                factor = 1.0;
               } else {
-                dist = Infinity;
+                const t = Math.max(0.0, u / 0.35);
+                factor = t * t * (3.0 - 2.0 * t);
               }
             } else {
-              const t = Math.max(0, Math.min(effectiveDepth, proj));
-              const segPt = localHit.clone().addScaledVector(localDir, t);
-              dist = lp.distanceTo(segPt);
+              factor = u * u * (3.0 - 2.0 * u);
             }
 
-            if (dist < tunnelRadius) {
-              const factor = Math.max(0, 1.0 - (dist / tunnelRadius));
-              const current = mc.getCell(x, y, z);
-              if (current > 0) {
-                const sub = factor * (strength || 80.0);
-                const nextVal = Math.max(0, current - sub);
+            if (current > 0 && factor > 0) {
+              const sub = factor * carveStrength;
+              const nextVal = Math.max(0, current - sub);
+              const delta = current - nextVal;
+
+              if (delta > 0.001) {
                 mc.setCell(x, y, z, nextVal);
-                carvedCells++;
-                carvedVolume += (current - nextVal);
+                voxelsModified++;
+                totalDensityDelta += delta;
+                if (delta > maxDensityDelta) maxDensityDelta = delta;
+
+                if (current > iso && nextVal <= iso) {
+                  isosurfaceCrossedCount++;
+                }
+
+                // Update palette on tunnel wall / partially carved cells
+                if (mc.palette && nextVal > 0 && nextVal < 60) {
+                  const pIdx = (mc.size2 * z + mc.size * y + x) * 3;
+                  const ore = Math.sin(x * 1.5 + y * 2.3 + z * 1.8);
+                  if (ore > 0.55) {
+                    mc.palette[pIdx] = 1.0;
+                    mc.palette[pIdx + 1] = 0.55;
+                    mc.palette[pIdx + 2] = 0.12;
+                  } else if (ore < -0.6) {
+                    mc.palette[pIdx] = 0.25;
+                    mc.palette[pIdx + 1] = 0.85;
+                    mc.palette[pIdx + 2] = 0.98;
+                  } else {
+                    mc.palette[pIdx] = 0.16;
+                    mc.palette[pIdx + 1] = 0.17;
+                    mc.palette[pIdx + 2] = 0.19;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Guaranteed Nearest-Voxel Fallback for Mega-Asteroid
+    if (isMega && isosurfaceCrossedCount === 0) {
+      let fallbackVoxel = closestSolidVoxel;
+      if (!fallbackVoxel) {
+        // Search immediate 5x5x5 neighborhood around localHit in grid
+        const gx = Math.round((lhx / scaleR) * half + half);
+        const gy = Math.round((lhy / scaleR) * half + half);
+        const gz = Math.round((lhz / scaleR) * half + half);
+        for (let dz = -2; dz <= 2 && !fallbackVoxel; dz++) {
+          const cz = Math.max(0, Math.min(res - 1, gz + dz));
+          for (let dy = -2; dy <= 2 && !fallbackVoxel; dy++) {
+            const cy = Math.max(0, Math.min(res - 1, gy + dy));
+            for (let dx = -2; dx <= 2 && !fallbackVoxel; dx++) {
+              const cx = Math.max(0, Math.min(res - 1, gx + dx));
+              const val = mc.getCell(cx, cy, cz);
+              if (val > iso) {
+                fallbackVoxel = { x: cx, y: cy, z: cz, val };
               }
             }
           }
         }
       }
 
-      mc.update();
-      if (mc.geometry) {
-        mc.geometry.computeBoundingSphere?.();
+      if (fallbackVoxel) {
+        const prev = mc.getCell(fallbackVoxel.x, fallbackVoxel.y, fallbackVoxel.z);
+        if (prev > iso) {
+          mc.setCell(fallbackVoxel.x, fallbackVoxel.y, fallbackVoxel.z, 0);
+          voxelsModified++;
+          isosurfaceCrossedCount++;
+          totalDensityDelta += prev;
+          if (prev > maxDensityDelta) maxDensityDelta = prev;
+          if (mc.palette) {
+            const pIdx = (mc.size2 * fallbackVoxel.z + mc.size * fallbackVoxel.y + fallbackVoxel.x) * 3;
+            mc.palette[pIdx] = 0.16;
+            mc.palette[pIdx + 1] = 0.17;
+            mc.palette[pIdx + 2] = 0.19;
+          }
+        }
       }
     }
+
+    if (voxelsModified > 0) {
+      updateNormalCache(mc, minX - 2, maxX + 2, minY - 2, maxY + 2, minZ - 2, maxZ + 2);
+      mc.update();
+      if (mc.geometry && typeof mc.geometry.computeBoundingSphere === 'function') {
+        mc.geometry.computeBoundingSphere();
+      }
+    }
+
+    const carveResult = {
+      voxelsModified,
+      isosurfaceCrossed: isosurfaceCrossedCount > 0,
+      isosurfaceCrossedCount,
+      totalDensityDelta: Number(totalDensityDelta.toFixed(1)),
+      maxDensityDelta: Number(maxDensityDelta.toFixed(1)),
+      carveRadius: Number(tunnelRadius.toFixed(1)),
+      carveDepth: Number(effectiveDepth.toFixed(1)),
+      isMega,
+      reason: voxelsModified > 0 ? 'ok' : 'no_solid_voxels_in_brush'
+    };
+
+    logger.log('CARVE', `asteroid=${asteroid.id || (isMega ? 'mega' : 'asteroid')} isMega=${isMega} hit=(${hitPoint.x.toFixed(1)},${hitPoint.y.toFixed(1)},${hitPoint.z.toFixed(1)}) r=${carveResult.carveRadius} d=${carveResult.carveDepth} voxels=${carveResult.voxelsModified} crossed=${carveResult.isosurfaceCrossedCount} delta=${carveResult.totalDensityDelta}`);
 
     asteroid.carvings = asteroid.carvings || [];
     asteroid.carvings.push({
@@ -1049,13 +1775,16 @@ export class SpaceEnvironment {
       carveRadius: tunnelRadius,
       carveDepth: effectiveDepth,
       isThroughTunnel: isMedium,
-      carvedVolume,
-      carvedCells,
+      carvedVolume: totalDensityDelta,
+      carvedCells: voxelsModified,
+      carveResult,
       timestamp: Date.now()
     });
 
     const debrisCount = tunnelRadius > 35 ? 16 : 8;
     this.spawnRockDebris(hitPoint, hitDir, debrisCount);
+
+    return carveResult;
   }
 
   cleanup() {
@@ -1063,11 +1792,16 @@ export class SpaceEnvironment {
   }
 
   destroy() {
-    for (const d of this.debrisList) {
-      if (d.mesh) {
-        this.scene.remove(d.mesh);
-        if (d.mesh.geometry) d.mesh.geometry.dispose();
-      }
+    if (this.debrisMesh) {
+      if (this.debrisMesh.parent) this.debrisMesh.parent.remove(this.debrisMesh);
+      if (this._debrisGeo) this._debrisGeo.dispose();
+      if (this._debrisMat) this._debrisMat.dispose();
+    }
+    if (this.debrisFlashMesh) {
+      if (this.debrisFlashMesh.parent) this.debrisFlashMesh.parent.remove(this.debrisFlashMesh);
+      if (this._flashGeo) this._flashGeo.dispose();
+      if (this._flashTex) this._flashTex.dispose();
+      if (this._flashMat) this._flashMat.dispose();
     }
     this.debrisList = [];
 

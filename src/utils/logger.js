@@ -142,6 +142,20 @@ class DiagnosticLogger {
     }
     lines.push('');
 
+    // Weapon & Excavation Telemetry
+    lines.push('--- Recent Weapon & Excavation Telemetry (Last 25 Events) ---');
+    const weaponLogs = this.logs.filter(entry =>
+      entry.includes('[WEAPON_HIT]') || entry.includes('[WEAPON_MISS]') || entry.includes('[CARVE]')
+    ).slice(-25);
+    if (weaponLogs.length > 0) {
+      for (const log of weaponLogs) {
+        lines.push(log);
+      }
+    } else {
+      lines.push('No weapon or excavation events recorded yet.');
+    }
+    lines.push('');
+
     // Console logs
     lines.push('--- Recent Event Stream (Last 50 Logs) ---');
     const recent = this.logs.slice(-50);

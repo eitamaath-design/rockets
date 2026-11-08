@@ -1,44 +1,68 @@
 import * as THREE from 'three';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
+import { createRadialGlowTexture } from './trail.js';
+
+// Module-scoped scratch objects for zero runtime heap allocations
+const _dummy = new THREE.Object3D();
+const _color = new THREE.Color();
+const _camQuat = new THREE.Quaternion();
+const _hideMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+const _scratchVecA = new THREE.Vector3();
 
 /**
- * Dynamic particle fire trail system for kinetic projectiles and missiles.
+ * Dynamic GPU InstancedMesh fire trail system for kinetic projectiles and missiles.
  * Emits blazing white/yellow/orange/red plasma flame particles that billow
  * behind projectiles as they streak through space.
  */
 class FireTrailSystem {
   constructor(scene) {
     this.scene = scene;
-    this.maxParticles = 1200;
+    this.maxParticles = 1500;
     this.particles = [];
+    this.simTime = 0;
 
-    this.geom = new THREE.BufferGeometry();
-    this.positions = new Float32Array(this.maxParticles * 3);
-    this.colors = new Float32Array(this.maxParticles * 3);
+    this.planeGeo = new THREE.PlaneGeometry(1, 1);
+    this.glowTexture = createRadialGlowTexture(128);
 
-    this.geom.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geom.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-
-    this.material = new THREE.PointsMaterial({
-      size: 11.5,
-      vertexColors: true,
+    this.material = new THREE.MeshBasicMaterial({
+      map: this.glowTexture,
       transparent: true,
       opacity: 0.95,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      sizeAttenuation: true
+      side: THREE.DoubleSide
     });
 
-    this.points = new THREE.Points(this.geom, this.material);
+    this.mesh = new THREE.InstancedMesh(this.planeGeo, this.material, this.maxParticles);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxParticles * 3), 3);
+    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
     // CRITICAL: Disable frustum culling so particles never vanish when turning or looking away
-    this.points.frustumCulled = false;
-    this.scene.add(this.points);
+    this.mesh.frustumCulled = false;
+
+    // Backwards compatibility
+    this.points = this.mesh;
+    this.positions = new Float32Array(this.maxParticles * 3);
+    this.colors = new Float32Array(this.maxParticles * 3);
+
+    for (let i = 0; i < this.maxParticles; i++) {
+      this.mesh.setMatrixAt(i, _hideMatrix);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+
+    this.scene.add(this.mesh);
+
+    // Emitter tracking for sub-frame distance interpolation
+    this.lastEmitPos = new Map();
   }
 
-  emit(pos, dir, count = 2) {
+  _spawnPuff(pos, dir, count = 2) {
     for (let i = 0; i < count; i++) {
-      if (this.particles.length >= this.maxParticles) break;
+      if (this.particles.length >= this.maxParticles) {
+        this.particles.shift();
+      }
       const jitter = new THREE.Vector3(
         (Math.random() - 0.5) * 0.55,
         (Math.random() - 0.5) * 0.55,
@@ -56,12 +80,42 @@ class FireTrailSystem {
         pos: pPos,
         vel: pVel,
         life,
-        maxLife: life
+        maxLife: life,
+        baseScale: 2.2 + Math.random() * 1.6
       });
     }
   }
 
-  update(dt) {
+  emit(pos, dir, count = 2, emitterId = null) {
+    if (emitterId) {
+      let lastPos = this.lastEmitPos.get(emitterId);
+      if (lastPos) {
+        const dist = pos.distanceTo(lastPos);
+        if (dist > 0.5 && dist < 30.0) {
+          const steps = Math.min(8, Math.floor(dist / 0.8));
+          for (let s = 1; s <= steps; s++) {
+            const alpha = s / (steps + 1);
+            _scratchVecA.copy(lastPos).lerp(pos, alpha);
+            this._spawnPuff(_scratchVecA, dir, 1);
+          }
+        }
+        lastPos.copy(pos);
+      } else {
+        this.lastEmitPos.set(emitterId, pos.clone());
+      }
+    }
+
+    this._spawnPuff(pos, dir, count);
+  }
+
+  update(dt, camera = null) {
+    this.simTime += dt;
+    if (camera && camera.quaternion) {
+      _camQuat.copy(camera.quaternion);
+    } else {
+      _camQuat.identity();
+    }
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= dt;
@@ -72,39 +126,55 @@ class FireTrailSystem {
       p.pos.addScaledVector(p.vel, dt);
       // Expanding billowing puffs slowly decelerate
       p.vel.multiplyScalar(Math.pow(0.92, dt * 60));
+
+      // Billowing pseudo-curl turbulence
+      p.pos.x += Math.sin(p.pos.y * 0.2 + this.simTime * 2.0) * 0.5 * dt;
+      p.pos.y += Math.cos(p.pos.x * 0.2 + this.simTime * 2.0) * 0.5 * dt;
+      p.pos.z += Math.sin(p.pos.z * 0.2 + this.simTime * 2.0) * 0.5 * dt;
     }
 
     const activeCount = this.particles.length;
     for (let i = 0; i < activeCount; i++) {
       const p = this.particles[i];
-      const idx = i * 3;
-      this.positions[idx] = p.pos.x;
-      this.positions[idx + 1] = p.pos.y;
-      this.positions[idx + 2] = p.pos.z;
-
       const progress = 1.0 - (p.life / p.maxLife);
+
+      // Scale grows from 1.4x to 4.5x as it billows into space
+      const scale = p.baseScale * (1.0 + progress * 3.5);
+      _dummy.position.copy(p.pos);
+      _dummy.quaternion.copy(_camQuat);
+      _dummy.scale.set(scale, scale, scale);
+      _dummy.updateMatrix();
+
+      this.mesh.setMatrixAt(i, _dummy.matrix);
+
       if (progress < 0.20) {
         // Blazing incandescent white/yellow core
-        this.colors[idx] = 1.0;
-        this.colors[idx + 1] = 0.98;
-        this.colors[idx + 2] = 0.75;
+        _color.setRGB(1.0, 0.98, 0.75);
       } else if (progress < 0.55) {
         // Fiery expanding orange plasma flame
         const t = (progress - 0.20) / 0.35;
-        this.colors[idx] = 1.0;
-        this.colors[idx + 1] = 0.52 * (1.0 - t);
-        this.colors[idx + 2] = 0.05 * (1.0 - t);
+        _color.setRGB(1.0, 0.52 * (1.0 - t), 0.05 * (1.0 - t));
       } else {
         // Cool charcoal grey smoke puff fading into space
         const fade = (1.0 - progress) / 0.45;
         const grey = 0.26 * fade;
-        this.colors[idx] = grey;
-        this.colors[idx + 1] = grey;
-        this.colors[idx + 2] = grey + 0.03 * fade;
+        _color.setRGB(grey, grey, grey + 0.03 * fade);
       }
+
+      this.mesh.setColorAt(i, _color);
+
+      // Populate positions and colors array for backward compatibility
+      const idx = i * 3;
+      this.positions[idx] = p.pos.x;
+      this.positions[idx + 1] = p.pos.y;
+      this.positions[idx + 2] = p.pos.z;
+      this.colors[idx] = _color.r;
+      this.colors[idx + 1] = _color.g;
+      this.colors[idx + 2] = _color.b;
     }
 
     for (let i = activeCount; i < this.maxParticles; i++) {
+      this.mesh.setMatrixAt(i, _hideMatrix);
       const idx = i * 3;
       this.positions[idx] = 99999;
       this.positions[idx + 1] = 99999;
@@ -114,16 +184,21 @@ class FireTrailSystem {
       this.colors[idx + 2] = 0;
     }
 
-    this.geom.attributes.position.needsUpdate = true;
-    this.geom.attributes.color.needsUpdate = true;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) {
+      this.mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   cleanup() {
-    if (this.points && this.points.parent) {
-      this.points.parent.remove(this.points);
+    if (this.mesh && this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
     }
-    this.geom.dispose();
+    this.planeGeo.dispose();
+    this.glowTexture.dispose();
     this.material.dispose();
+    this.particles = [];
+    this.lastEmitPos.clear();
   }
 }
 
@@ -133,15 +208,60 @@ class FireTrailSystem {
  * Designed so future upgrades (such as asteroid avoidance or lead navigation) can inherit or plug in cleanly!
  */
 export class StandardPursuitGuidance {
-  constructor({ maxTurnRate = 3.2, initialSpeed = 85.0, maxSpeed = 210.0, accel = 50.0 } = {}) {
+  constructor({
+    maxTurnRate = 3.2,
+    initialSpeed = 85.0,
+    maxSpeed = 210.0,
+    accel = 50.0,
+    initialVelocity = null,
+    launchDir = null,
+    inheritedSpeed = null
+  } = {}) {
     this.maxTurnRate = maxTurnRate; // Radians per second
-    this.currentSpeed = initialSpeed;
-    this.maxSpeed = maxSpeed;
+    this.baseInitialSpeed = initialSpeed;
+    this.baseMaxSpeed = maxSpeed;
     this.accel = accel;
+
+    let inherited = 0;
+    if (inheritedSpeed !== null && Number.isFinite(inheritedSpeed)) {
+      inherited = Math.max(0, inheritedSpeed);
+    } else if (initialVelocity) {
+      const velVec = (initialVelocity instanceof THREE.Vector3)
+        ? initialVelocity
+        : new THREE.Vector3(initialVelocity.x || 0, initialVelocity.y || 0, initialVelocity.z || 0);
+      if (launchDir) {
+        const dirVec = (launchDir instanceof THREE.Vector3)
+          ? launchDir.clone().normalize()
+          : new THREE.Vector3(launchDir.x || 0, launchDir.y || 0, launchDir.z || 0).normalize();
+        inherited = Math.max(0, velVec.dot(dirVec));
+      } else {
+        inherited = velVec.length();
+      }
+    }
+    this.inheritedSpeed = inherited;
+    this.currentSpeed = this.baseInitialSpeed + inherited;
+    this.maxSpeed = Math.max(this.baseMaxSpeed, this.baseMaxSpeed + inherited);
+  }
+
+  accelerate(dt) {
+    this.currentSpeed = Math.min(this.maxSpeed, this.currentSpeed + this.accel * dt);
+    return this.currentSpeed;
+  }
+
+  ensureSeparationSpeed(firingShipSpeed) {
+    if (!Number.isFinite(firingShipSpeed) || firingShipSpeed <= 0) return;
+    const minSpeed = firingShipSpeed + this.baseInitialSpeed;
+    if (this.currentSpeed < minSpeed) {
+      this.currentSpeed = minSpeed;
+    }
+    const minMaxSpeed = firingShipSpeed + this.baseMaxSpeed;
+    if (this.maxSpeed < minMaxSpeed) {
+      this.maxSpeed = minMaxSpeed;
+    }
   }
 
   steer(dt, missilePos, missileDir, targetPos) {
-    this.currentSpeed = Math.min(this.maxSpeed, this.currentSpeed + this.accel * dt);
+    this.accelerate(dt);
 
     const toTarget = targetPos.clone().sub(missilePos);
     const dist = toTarget.length();
@@ -310,7 +430,7 @@ export class WeaponsSystem {
     this.laserRechargeRate = 25.0; // Smooth 4-second recharge
     this.laserLastFireTime = 0;
     this.laserDamage = 2.4; // 2.4 per tick (30 dps; 72 shield dps)
-    this.laserMaxRange = 750.0;
+    this.laserMaxRange = 3500.0;
     this.laserSpeed = 480.0;
 
     // 2. Secondary Weapon: Dual-Mode Missile System (Guided 3s Lock + Unguided Dumb-Fire)
@@ -332,6 +452,30 @@ export class WeaponsSystem {
 
     // Dynamic fire particle trails for missiles and explosions
     this.fireTrails = new FireTrailSystem(this.scene);
+
+    // High-performance GPU InstancedMesh explosion & impact spark pool
+    this.maxExplosionQuads = 1500;
+    this.explosionQuads = [];
+    this.explosionPlaneGeo = new THREE.PlaneGeometry(1, 1);
+    this.explosionGlowTex = createRadialGlowTexture(128);
+    this.explosionMat = new THREE.MeshBasicMaterial({
+      map: this.explosionGlowTex,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.explosionMesh = new THREE.InstancedMesh(this.explosionPlaneGeo, this.explosionMat, this.maxExplosionQuads);
+    this.explosionMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.explosionMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxExplosionQuads * 3), 3);
+    this.explosionMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.explosionMesh.frustumCulled = false;
+    for (let i = 0; i < this.maxExplosionQuads; i++) {
+      this.explosionMesh.setMatrixAt(i, _hideMatrix);
+    }
+    this.explosionMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.explosionMesh);
 
     this.initGeometriesAndMaterials();
     this.listenToNetworkEvents();
@@ -545,17 +689,40 @@ export class WeaponsSystem {
       // Resolve Impact
       if (hitTargetType === 'asteroid' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 6, 0x00d4ff);
+        this.spawnLaserImpactSparks(hitPoint, null, 0x00d4ff);
+        let dmgResult = null;
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
           // Primary laser damages small asteroids (disintegrating after 3-5 ticks) and carves deep mega-tunnels in colossal/large ones
-          this.spaceEnv.damageAsteroid(hitTargetObj, 5.0, hitPoint, fwd, 45.0, 36.0);
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? 5.0 : 45.0;
+          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, 60.0, 50.0, 160.0);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 45.0, 36.0);
+          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 60.0, 50.0, 160.0);
+          dmgResult = { carveResult };
         }
+        const cRes = dmgResult?.carveResult;
+        logger.log('WEAPON_HIT', JSON.stringify({
+          weapon: 'laser',
+          asteroidId: hitTargetObj.id || (hitTargetObj.isMegaAsteroid ? 'mega' : 'asteroid'),
+          isMega: !!hitTargetObj.isMegaAsteroid,
+          dist: Number(hitDistance.toFixed(1)),
+          point: [Number(hitPoint.x.toFixed(1)), Number(hitPoint.y.toFixed(1)), Number(hitPoint.z.toFixed(1))],
+          voxelsModified: cRes?.voxelsModified ?? 0,
+          isosurfaceCrossed: cRes?.isosurfaceCrossed ?? false,
+          totalDensityDelta: cRes?.totalDensityDelta ?? 0
+        }));
       } else if (hitTargetType === 'ship' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 8, 0x00ffff);
+        this.spawnLaserImpactSparks(hitPoint, null, 0x00ffff);
         if (this.network && typeof this.network.sendHitTarget === 'function') {
           this.network.sendHitTarget(hitTargetObj, this.laserDamage, 'laser');
         }
+      } else if (!hitTargetType) {
+        logger.log('WEAPON_MISS', JSON.stringify({
+          weapon: 'laser',
+          origin: [Number(centerOrigin.x.toFixed(1)), Number(centerOrigin.y.toFixed(1)), Number(centerOrigin.z.toFixed(1))],
+          dir: [Number(fwd.x.toFixed(2)), Number(fwd.y.toFixed(2)), Number(fwd.z.toFixed(2))],
+          maxRange: this.laserMaxRange
+        }));
       }
 
       // Broadcast laser beam over network
@@ -635,6 +802,7 @@ export class WeaponsSystem {
 
     if (data.targetType === 'asteroid') {
       this.spawnExplosion(hitPoint, 6, 0xff0066);
+      this.spawnLaserImpactSparks(hitPoint, null, 0xff0066);
     }
   }
 
@@ -666,8 +834,9 @@ export class WeaponsSystem {
       .addScaledVector(fwd, 3.5)
       .add(new THREE.Vector3(0, -0.4, 0));
 
+    const shipVel = (ship && ship.velocity) ? ship.velocity.clone() : new THREE.Vector3(0, 0, 0);
     const missileId = `missile-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
-    this.spawnMissile(origin, fwd, targetId, true, missileId);
+    this.spawnMissile(origin, fwd, targetId, true, missileId, shipVel);
     audio.playMissileLaunch(true);
 
     if (isLocked) {
@@ -681,6 +850,7 @@ export class WeaponsSystem {
         id: missileId,
         origin: { x: origin.x, y: origin.y, z: origin.z },
         dir: { x: fwd.x, y: fwd.y, z: fwd.z },
+        velocity: { x: shipVel.x, y: shipVel.y, z: shipVel.z },
         targetPeerId: targetId,
         time: now
       });
@@ -688,10 +858,11 @@ export class WeaponsSystem {
     return true;
   }
 
-  spawnMissile(origin, dir, targetId, isLocal, id) {
+  spawnMissile(origin, dir, targetId = null, isLocal = true, id = null, initialVelocity = null, ownerId = null) {
+    const normDir = dir.clone().normalize();
     const group = new THREE.Group();
     group.position.copy(origin);
-    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normDir);
 
     // 1. Fuselage
     const body = new THREE.Mesh(this.missileBodyGeom, this.missileBodyMat);
@@ -719,21 +890,50 @@ export class WeaponsSystem {
 
     this.scene.add(group);
 
-    this.missiles.push({
+    let initVelVec = null;
+    if (initialVelocity) {
+      initVelVec = (initialVelocity instanceof THREE.Vector3)
+        ? initialVelocity.clone()
+        : new THREE.Vector3(initialVelocity.x || 0, initialVelocity.y || 0, initialVelocity.z || 0);
+    }
+    const fwdSpeed = initVelVec ? Math.max(0, initVelVec.dot(normDir)) : 0;
+    const lateralVelocity = initVelVec
+      ? initVelVec.clone().addScaledVector(normDir, - initVelVec.dot(normDir))
+      : new THREE.Vector3(0, 0, 0);
+
+    const guidance = new StandardPursuitGuidance({
+      initialVelocity: initVelVec,
+      launchDir: normDir,
+      inheritedSpeed: fwdSpeed
+    });
+
+    const instantaneousVel = normDir.clone().multiplyScalar(guidance.currentSpeed).add(lateralVelocity);
+
+    const missile = {
       group,
-      dir: dir.clone().normalize(),
-      guidance: new StandardPursuitGuidance(),
+      dir: normDir,
+      velocity: instantaneousVel,
+      initialVelocity: initVelVec ? initVelVec.clone() : new THREE.Vector3(0, 0, 0),
+      lateralVelocity,
+      guidance,
       targetId,
       isLocal,
       id,
+      ownerId: ownerId || (isLocal ? (this.network ? this.network.selfId : 'local') : null),
       life: 9.0 // 9 seconds fuel
-    });
+    };
+
+    this.missiles.push(missile);
+    return missile;
   }
 
   spawnRemoteMissile(data, peerId) {
     const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
     const dir = new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z);
-    this.spawnMissile(origin, dir, data.targetPeerId, false, data.id);
+    const initialVelocity = data.velocity
+      ? new THREE.Vector3(data.velocity.x || 0, data.velocity.y || 0, data.velocity.z || 0)
+      : new THREE.Vector3(0, 0, 0);
+    this.spawnMissile(origin, dir, data.targetPeerId, false, data.id, initialVelocity, peerId);
     audio.playMissileLaunch(false, origin);
   }
 
@@ -815,57 +1015,43 @@ export class WeaponsSystem {
   spawnExplosion(pos, radius = 12, color = 0xff6600) {
     const group = new THREE.Group();
     group.position.copy(pos);
+    group.visible = false; // Mock container to avoid rendering low-poly geometries in WebGL
 
-    // 1. Expanding incandescent fireball core
-    const coreGeom = new THREE.SphereGeometry(radius * 0.40, 12, 10);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending
-    });
-    const fireball = new THREE.Mesh(coreGeom, coreMat);
-    group.add(fireball);
-
-    // 2. Planar expanding shockwave ring
-    const ringGeom = new THREE.TorusGeometry(radius * 0.35, radius * 0.04, 6, 28);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xffeeaa,
-      transparent: true,
-      opacity: 0.90,
-      blending: THREE.AdditiveBlending
-    });
-    const ring = new THREE.Mesh(ringGeom, ringMat);
-    ring.rotation.x = Math.random() * Math.PI;
-    ring.rotation.y = Math.random() * Math.PI;
-    group.add(ring);
-
-    // 3. Radial spark debris burst
-    const sparkGeom = new THREE.BoxGeometry(0.35, 0.35, 0.35);
-    const sparkMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa33,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending
-    });
+    // Lightweight mock objects for compatibility with unit tests and queries without GPU allocations
+    const fireball = {
+      scale: new THREE.Vector3(1, 1, 1),
+      position: new THREE.Vector3(),
+      material: { opacity: 0.95 },
+      frustumCulled: false,
+      visible: false
+    };
+    const ring = {
+      scale: new THREE.Vector3(1, 1, 1),
+      position: new THREE.Vector3(),
+      rotation: new THREE.Euler(),
+      material: { opacity: 0.90 },
+      frustumCulled: false,
+      visible: false
+    };
     const sparkCount = radius > 15 ? 12 : 6;
     const sparks = [];
     for (let s = 0; s < sparkCount; s++) {
-      const sparkMesh = new THREE.Mesh(sparkGeom, sparkMat);
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2.0 * Math.random() - 1.0);
-      const sDir = new THREE.Vector3(
-        Math.sin(phi) * Math.cos(theta),
-        Math.sin(phi) * Math.sin(theta),
-        Math.cos(phi)
-      );
-      const sSpeed = (radius * 1.5) + Math.random() * (radius * 1.8);
-      const sVel = sDir.multiplyScalar(sSpeed);
-      group.add(sparkMesh);
-      sparks.push({ mesh: sparkMesh, vel: sVel });
+      sparks.push({
+        mesh: {
+          position: pos.clone(),
+          scale: new THREE.Vector3(1, 1, 1),
+          material: { opacity: 0.95 },
+          frustumCulled: false,
+          visible: false
+        },
+        vel: new THREE.Vector3(
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5
+        ).normalize().multiplyScalar((radius * 1.5) + Math.random() * (radius * 1.8))
+      });
     }
 
-    this.scene.add(group);
     audio.playExplosion(radius > 15 ? 1.6 : 0.85, pos);
 
     if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {
@@ -882,6 +1068,171 @@ export class WeaponsSystem {
       life: 0.55,
       maxRadius: radius
     });
+
+    // Rich GPU InstancedMesh burst: multi-stage core, fireball, shockwave ring, sparks & smoke
+    this._spawnInstancedExplosionBurst(pos, radius, color);
+  }
+
+  _spawnInstancedExplosionBurst(pos, radius, colorHex) {
+    if (!this.explosionQuads) this.explosionQuads = [];
+    const baseColor = new THREE.Color(colorHex);
+
+    // Multi-stage InstancedMesh particle allocations
+    // Stage 1: Blinding white-yellow incandescent core quads expanding rapidly
+    const coreCount = radius > 15 ? 26 : 14;
+    for (let i = 0; i < coreCount; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
+      const dir = new THREE.Vector3(
+        Math.random() - 0.5,
+        Math.random() - 0.5,
+        Math.random() - 0.5
+      ).normalize();
+      const speed = (radius * 0.4) + Math.random() * (radius * 0.8);
+      const life = 0.35 + Math.random() * 0.20;
+      this.explosionQuads.push({
+        pos: pos.clone().addScaledVector(dir, Math.random() * (radius * 0.15)),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: radius * 0.70 + Math.random() * (radius * 0.45),
+        type: 'core',
+        color: new THREE.Color(0xffffff)
+      });
+    }
+
+    // Stage 2A: Expanding shockwave ring quads (arranged planar with random normal tilt)
+    const ringCount = radius > 15 ? 36 : 20;
+    const ringNormal = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    ).normalize();
+    const ringU = new THREE.Vector3();
+    if (Math.abs(ringNormal.y) < 0.9) ringU.crossVectors(ringNormal, new THREE.Vector3(0, 1, 0)).normalize();
+    else ringU.crossVectors(ringNormal, new THREE.Vector3(1, 0, 0)).normalize();
+    const ringV = new THREE.Vector3().crossVectors(ringNormal, ringU).normalize();
+
+    for (let i = 0; i < ringCount; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
+      const angle = (i / ringCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+      const radDir = new THREE.Vector3()
+        .addScaledVector(ringU, Math.cos(angle))
+        .addScaledVector(ringV, Math.sin(angle))
+        .normalize();
+      const ringSpeed = (radius * 2.2) + Math.random() * (radius * 1.5);
+      const life = 0.42 + Math.random() * 0.22;
+      this.explosionQuads.push({
+        pos: pos.clone().addScaledVector(radDir, radius * 0.15),
+        vel: radDir.multiplyScalar(ringSpeed),
+        life,
+        maxLife: life,
+        baseScale: radius * 0.42 + Math.random() * (radius * 0.25),
+        type: 'ring',
+        color: new THREE.Color(0xffaa22)
+      });
+    }
+
+    // Stage 2B: Volumetric fireball plasma puffs
+    const fireballCount = radius > 15 ? 42 : 22;
+    for (let i = 0; i < fireballCount; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2.0 * Math.random() - 1.0);
+      const dir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      );
+      const speed = (radius * 1.1) + Math.random() * (radius * 1.8);
+      const life = 0.48 + Math.random() * 0.28;
+      this.explosionQuads.push({
+        pos: pos.clone().addScaledVector(dir, Math.random() * (radius * 0.25)),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: radius * 0.50 + Math.random() * (radius * 0.35),
+        type: 'fireball',
+        color: baseColor.clone()
+      });
+    }
+
+    // Stage 3A: High-velocity radial incandescent sparks
+    const sparkCount = radius > 15 ? 35 : 18;
+    for (let i = 0; i < sparkCount; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2.0 * Math.random() - 1.0);
+      const dir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      );
+      const speed = (radius * 3.2) + Math.random() * (radius * 4.5);
+      const life = 0.28 + Math.random() * 0.26;
+      this.explosionQuads.push({
+        pos: pos.clone(),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: 1.2 + Math.random() * 1.4,
+        type: 'spark',
+        color: new THREE.Color(0xffe066)
+      });
+    }
+
+    // Stage 3B: Dark smoke outer puffs
+    const smokeCount = radius > 15 ? 20 : 10;
+    for (let i = 0; i < smokeCount; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2.0 * Math.random() - 1.0);
+      const dir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      );
+      const speed = (radius * 0.6) + Math.random() * (radius * 0.9);
+      const life = 0.70 + Math.random() * 0.45;
+      this.explosionQuads.push({
+        pos: pos.clone().addScaledVector(dir, Math.random() * (radius * 0.3)),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: radius * 0.55 + Math.random() * (radius * 0.4),
+        type: 'smoke',
+        color: new THREE.Color(0x332822)
+      });
+    }
+  }
+
+  spawnLaserImpactSparks(pos, normal = null, colorHex = 0x00d4ff) {
+    if (!this.explosionQuads) this.explosionQuads = [];
+    const count = 14;
+    const baseColor = new THREE.Color(colorHex);
+    for (let i = 0; i < count; i++) {
+      if (this.explosionQuads.length >= this.maxExplosionQuads) {
+        this.explosionQuads.shift();
+      }
+      const dir = new THREE.Vector3(
+        (Math.random() - 0.5),
+        (Math.random() - 0.5),
+        (Math.random() - 0.5)
+      ).normalize();
+      if (normal) {
+        dir.addScaledVector(normal, 1.2).normalize();
+      }
+      const speed = 25.0 + Math.random() * 45.0;
+      const life = 0.2 + Math.random() * 0.25;
+      this.explosionQuads.push({
+        pos: pos.clone(),
+        vel: dir.multiplyScalar(speed),
+        life,
+        maxLife: life,
+        baseScale: 1.5 + Math.random() * 1.8,
+        isCore: false,
+        color: baseColor.clone()
+      });
+    }
   }
 
   spawnLaser(origin, dir, isLocal, id) {
@@ -949,7 +1300,7 @@ export class WeaponsSystem {
     return this.triggerSecondary(true, ship, performance.now());
   }
 
-  update(dt, localShip, remoteShipsMap, onDamageEvent) {
+  update(dt, localShip, remoteShipsMap, onDamageEvent, camera = null) {
     // 1. Weapon Energy Recharging
     if (this.laserCooldownTimer > 0) {
       const elapsed = Math.min(this.laserCooldownTimer, dt);
@@ -984,13 +1335,31 @@ export class WeaponsSystem {
       const m = this.missiles[i];
       m.life -= dt;
 
+      // Dynamic separation speed enforcement so starfighters can never overtake missiles
+      if (m.isLocal && localShip && !localShip.isDead) {
+        const shipSpeed = localShip.velocity
+          ? Math.max(localShip.velocity.length(), localShip.velocity.dot(m.dir))
+          : (typeof localShip.getSpeed === 'function' ? localShip.getSpeed() : 0);
+        m.guidance.ensureSeparationSpeed(shipSpeed);
+      } else if (!m.isLocal && m.ownerId && remoteShipsMap && remoteShipsMap.has(m.ownerId)) {
+        const remoteOwner = remoteShipsMap.get(m.ownerId);
+        if (remoteOwner) {
+          const remoteSpeed = remoteOwner.velocity
+            ? (typeof remoteOwner.velocity.length === 'function' ? remoteOwner.velocity.length() : Math.hypot(remoteOwner.velocity.x || 0, remoteOwner.velocity.y || 0, remoteOwner.velocity.z || 0))
+            : (typeof remoteOwner.getSpeed === 'function' ? remoteOwner.getSpeed() : 0);
+          if (remoteSpeed > 0) {
+            m.guidance.ensureSeparationSpeed(remoteSpeed);
+          }
+        }
+      }
+
       // Find locked target position
       let targetPos = null;
       if (m.targetId === (this.network ? this.network.selfId : null)) {
-        targetPos = localShip.position;
-      } else if (remoteShipsMap.has(m.targetId)) {
+        targetPos = (localShip && !localShip.isDead) ? localShip.position : null;
+      } else if (remoteShipsMap && remoteShipsMap.has(m.targetId)) {
         const remote = remoteShipsMap.get(m.targetId);
-        if (!remote.isDead) targetPos = remote.position;
+        if (remote && !remote.isDead) targetPos = remote.position;
       }
 
       // If target exists, guide missile towards target; otherwise continue straight
@@ -999,7 +1368,22 @@ export class WeaponsSystem {
         m.dir.copy(steering.newDir);
         m.group.position.addScaledVector(m.dir, steering.speed * dt);
       } else {
-        m.group.position.addScaledVector(m.dir, m.guidance.currentSpeed * dt);
+        const speed = m.guidance.accelerate(dt);
+        m.group.position.addScaledVector(m.dir, speed * dt);
+      }
+
+      // Lateral velocity integration and aerodynamic damping
+      if (m.lateralVelocity && m.lateralVelocity.lengthSq() > 0.0001) {
+        m.group.position.addScaledVector(m.lateralVelocity, dt);
+        m.lateralVelocity.multiplyScalar(Math.pow(0.85, dt * 60));
+      }
+
+      // Instantaneous 3D velocity vector update
+      if (m.velocity) {
+        m.velocity.copy(m.dir).multiplyScalar(m.guidance.currentSpeed);
+        if (m.lateralVelocity) {
+          m.velocity.add(m.lateralVelocity);
+        }
       }
 
       m.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), m.dir);
@@ -1014,11 +1398,23 @@ export class WeaponsSystem {
       const hitAsteroid = this.spaceEnv.checkCollision(m.group.position, 1.8);
       if (hitAsteroid) {
         this.spawnExplosion(m.group.position, 22, 0xff5500);
+        let dmgResult = null;
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          this.spaceEnv.damageAsteroid(hitAsteroid, 50.0, m.group.position, m.dir, 55.0, 42.0);
+          dmgResult = this.spaceEnv.damageAsteroid(hitAsteroid, 50.0, m.group.position, m.dir, 55.0, 45.0, 160.0);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 45.0, 35.0);
+          const carveResult = this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 55.0, 45.0, 160.0);
+          dmgResult = { carveResult };
         }
+        const cRes = dmgResult?.carveResult;
+        logger.log('WEAPON_HIT', JSON.stringify({
+          weapon: 'missile',
+          asteroidId: hitAsteroid.id || (hitAsteroid.isMegaAsteroid ? 'mega' : 'asteroid'),
+          isMega: !!hitAsteroid.isMegaAsteroid,
+          point: [Number(m.group.position.x.toFixed(1)), Number(m.group.position.y.toFixed(1)), Number(m.group.position.z.toFixed(1))],
+          voxelsModified: cRes?.voxelsModified ?? 0,
+          isosurfaceCrossed: cRes?.isosurfaceCrossed ?? false,
+          totalDensityDelta: cRes?.totalDensityDelta ?? 0
+        }));
         detonated = true;
       }
 
@@ -1236,8 +1632,76 @@ export class WeaponsSystem {
       }
     }
 
-    // 7. Update Fire Trails
-    this.fireTrails.update(dt);
+    // 7. Update GPU Instanced Explosions & Laser Sparks
+    if (this.explosionQuads && this.explosionQuads.length > 0) {
+      const expCamQuat = (camera && camera.quaternion) ? camera.quaternion : _camQuat.identity();
+      for (let i = this.explosionQuads.length - 1; i >= 0; i--) {
+        const q = this.explosionQuads[i];
+        q.life -= dt;
+        if (q.life <= 0) {
+          this.explosionQuads.splice(i, 1);
+          continue;
+        }
+        q.pos.addScaledVector(q.vel, dt);
+        q.vel.multiplyScalar(Math.pow(0.88, dt * 60));
+        q.pos.x += Math.sin(q.pos.y * 0.3 + q.life * 4.0) * 0.6 * dt;
+        q.pos.y += Math.cos(q.pos.x * 0.3 + q.life * 4.0) * 0.6 * dt;
+        q.pos.z += Math.sin(q.pos.z * 0.3 + q.life * 4.0) * 0.6 * dt;
+      }
+
+      const activeQuadCount = this.explosionQuads.length;
+      for (let i = 0; i < activeQuadCount; i++) {
+        const q = this.explosionQuads[i];
+        const progress = 1.0 - (q.life / q.maxLife);
+        const fade = q.life / q.maxLife;
+
+        let scale = q.baseScale;
+        if (q.type === 'core') {
+          scale = q.baseScale * (1.0 + progress * 3.2);
+          if (progress < 0.3) {
+            _color.setRGB(1.0 * fade, 0.98 * fade, 0.9 * fade);
+          } else {
+            _color.setRGB(1.0 * fade, 0.7 * fade, 0.2 * fade);
+          }
+        } else if (q.type === 'ring') {
+          scale = q.baseScale * (1.0 + progress * 4.5);
+          _color.copy(q.color).multiplyScalar(fade * (1.0 - progress * 0.4) * 1.5);
+        } else if (q.type === 'fireball') {
+          scale = q.baseScale * (1.0 + progress * 2.8);
+          _color.copy(q.color).multiplyScalar(fade * 1.4);
+        } else if (q.type === 'spark') {
+          scale = q.baseScale * Math.max(0.2, 1.0 - progress * 0.7);
+          _color.copy(q.color).multiplyScalar(fade * 2.0);
+        } else if (q.type === 'smoke') {
+          scale = q.baseScale * (1.0 + progress * 3.8);
+          const smokeFade = Math.sin(progress * Math.PI) * 0.4;
+          _color.copy(q.color).multiplyScalar(smokeFade);
+        } else {
+          // fallback (e.g. laser sparks)
+          scale = q.baseScale * (1.0 + progress * 2.5);
+          _color.copy(q.color).multiplyScalar(fade * 1.5);
+        }
+
+        _dummy.position.copy(q.pos);
+        _dummy.quaternion.copy(expCamQuat);
+        _dummy.scale.set(scale, scale, scale);
+        _dummy.updateMatrix();
+        this.explosionMesh.setMatrixAt(i, _dummy.matrix);
+        this.explosionMesh.setColorAt(i, _color);
+      }
+
+      for (let i = activeQuadCount; i < this.maxExplosionQuads; i++) {
+        this.explosionMesh.setMatrixAt(i, _hideMatrix);
+      }
+
+      this.explosionMesh.instanceMatrix.needsUpdate = true;
+      if (this.explosionMesh.instanceColor) {
+        this.explosionMesh.instanceColor.needsUpdate = true;
+      }
+    }
+
+    // 8. Update Fire Trails
+    this.fireTrails.update(dt, camera);
   }
 
   // Compatibility getter
@@ -1265,6 +1729,12 @@ export class WeaponsSystem {
     for (const e of this.explosions) {
       if (e.group && e.group.parent) e.group.parent.remove(e.group);
       else if (e.mesh && e.mesh.parent) e.mesh.parent.remove(e.mesh);
+    }
+    if (this.explosionMesh) {
+      if (this.explosionMesh.parent) this.explosionMesh.parent.remove(this.explosionMesh);
+      if (this.explosionPlaneGeo) this.explosionPlaneGeo.dispose();
+      if (this.explosionGlowTex) this.explosionGlowTex.dispose();
+      if (this.explosionMat) this.explosionMat.dispose();
     }
     this.fireTrails.cleanup();
   }

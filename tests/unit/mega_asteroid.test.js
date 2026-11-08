@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
 import { SpaceEnvironment } from '../../src/game/space.js';
 import { PlayerShip } from '../../src/game/ship.js';
+import { WeaponsSystem } from '../../src/game/weapons.js';
+import { logger } from '../../src/utils/logger.js';
 
 describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
   let scene;
@@ -207,9 +209,9 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       const beltAsteroid = space.asteroids[1];
       expect(beltAsteroid.mc.maxPolys).toBeGreaterThanOrEqual(30000);
 
-      // mc.scale.x is approximately radius / 0.65
-      expect(mega.mc.scale.x).toBeCloseTo(mega.radius / 0.65, 1);
-      expect(beltAsteroid.mc.scale.x).toBeCloseTo(beltAsteroid.radius / 0.65, 1);
+      // mc.scale.x is approximately radius / 0.80
+      expect(mega.mc.scale.x).toBeCloseTo(mega.radius / 0.80, 1);
+      expect(beltAsteroid.mc.scale.x).toBeCloseTo(beltAsteroid.radius / 0.80, 1);
     });
 
     it('should support configurable voxelQuality: low (32³), medium (48³), high (64³)', () => {
@@ -267,6 +269,221 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       space.destroy();
       expect(space.asteroids.length).toBe(0);
       expect(space.debrisList.length).toBe(0);
+    });
+
+    it('should support multi-shot progressive laser tunnel drilling advancing hit distance deeper with each carve', () => {
+      const space = new SpaceEnvironment(scene, 123);
+      const mega = space.asteroids[0];
+      expect(mega.isMegaAsteroid).toBe(true);
+
+      const rayOrigin = new THREE.Vector3(0, 0, 5600);
+      const rayDir = new THREE.Vector3(0, 0, -1);
+
+      // Shot 1: hits outer surface of Mega Asteroid
+      const hit1 = space.checkRayCollision(rayOrigin, rayDir, 7000.0);
+      expect(hit1).not.toBeNull();
+      expect(hit1.asteroid).toBe(mega);
+      const dist1 = hit1.distance;
+
+      // Carve at hit 1 point forward along rayDir
+      space.carveAsteroid(mega, hit1.hitPoint, rayDir, 45.0, 36.0);
+
+      // Shot 2: ray penetrates into the carved tunnel and strikes deeper solid rock
+      const hit2 = space.checkRayCollision(rayOrigin, rayDir, 7000.0);
+      expect(hit2).not.toBeNull();
+      expect(hit2.asteroid).toBe(mega);
+      const dist2 = hit2.distance;
+      expect(dist2).toBeGreaterThan(dist1 + 30.0);
+
+      // Carve at hit 2 point
+      space.carveAsteroid(mega, hit2.hitPoint, rayDir, 45.0, 36.0);
+
+      // Shot 3: penetrates even deeper
+      const hit3 = space.checkRayCollision(rayOrigin, rayDir, 7000.0);
+      expect(hit3).not.toBeNull();
+      expect(hit3.asteroid).toBe(mega);
+      const dist3 = hit3.distance;
+      expect(dist3).toBeGreaterThan(dist2 + 30.0);
+    });
+
+    it('should enforce boundary safety with D === 0 on all outer boundary faces of mc.field to eliminate flat cube clipping', () => {
+      const space = new SpaceEnvironment(scene, 456);
+      const mega = space.asteroids[0];
+      const res = mega.mc.resolution;
+
+      for (let z = 0; z < res; z++) {
+        for (let y = 0; y < res; y++) {
+          for (let x = 0; x < res; x++) {
+            if (x === 0 || x === res - 1 || y === 0 || y === res - 1 || z === 0 || z === res - 1) {
+              const d = mega.mc.getCell(x, y, z);
+              expect(d).toBe(0);
+            }
+          }
+        }
+      }
+    });
+
+    it('should initialize MarchingCubes with enableColors true and populate mc.palette with geological strata', () => {
+      const space = new SpaceEnvironment(scene, 789);
+      const mega = space.asteroids[0];
+      expect(mega.mc.enableColors).toBe(true);
+      expect(mega.mc.palette).toBeInstanceOf(Float32Array);
+      expect(mega.mc.palette.length).toBe(mega.mc.resolution ** 3 * 3);
+
+      // Verify non-zero color channels across the palette
+      let hasColors = false;
+      for (let i = 0; i < mega.mc.palette.length; i++) {
+        if (mega.mc.palette[i] > 0.05) {
+          hasColors = true;
+          break;
+        }
+      }
+      expect(hasColors).toBe(true);
+    });
+
+    it('should guarantee core density excavation (isosurfaceCrossed === true, voxelsModified > 0) across all 3 voxel quality presets (low, medium, high)', () => {
+      const presets = ['low', 'medium', 'high'];
+      for (const preset of presets) {
+        const testScene = new THREE.Scene();
+        const space = new SpaceEnvironment(testScene, 888, { voxelQuality: preset });
+        const mega = space.asteroids[0];
+        expect(mega.isMegaAsteroid).toBe(true);
+
+        const rayOrigin = new THREE.Vector3(0, 0, 4000);
+        const rayDir = new THREE.Vector3(0, 0, -1);
+        const hit = space.checkRayCollision(rayOrigin, rayDir, 6000.0);
+        expect(hit).not.toBeNull();
+        expect(hit.asteroid).toBe(mega);
+
+        const result = space.carveAsteroid(mega, hit.hitPoint, rayDir, 60.0, 50.0);
+        expect(result.voxelsModified).toBeGreaterThan(0);
+        expect(result.isosurfaceCrossed).toBe(true);
+        expect(result.isosurfaceCrossedCount).toBeGreaterThan(0);
+        expect(result.totalDensityDelta).toBeGreaterThan(0);
+        expect(result.isMega).toBe(true);
+        expect(result.reason).toBe('ok');
+        space.destroy();
+      }
+    });
+
+    it('should return structured carveResult metadata from carveAsteroid and damageAsteroid', () => {
+      const space = new SpaceEnvironment(scene, 1122);
+      const mega = space.asteroids[0];
+
+      const hitPoint = new THREE.Vector3(0, 0, 2750);
+      const hitDir = new THREE.Vector3(0, 0, -1);
+
+      const carveResult = space.carveAsteroid(mega, hitPoint, hitDir, 60.0, 50.0, 160.0);
+      expect(carveResult).toHaveProperty('voxelsModified');
+      expect(carveResult).toHaveProperty('isosurfaceCrossed');
+      expect(carveResult).toHaveProperty('isosurfaceCrossedCount');
+      expect(carveResult).toHaveProperty('totalDensityDelta');
+      expect(carveResult).toHaveProperty('maxDensityDelta');
+      expect(carveResult).toHaveProperty('carveRadius');
+      expect(carveResult).toHaveProperty('carveDepth');
+      expect(carveResult).toHaveProperty('isMega', true);
+      expect(carveResult).toHaveProperty('reason', 'ok');
+
+      const dmgResult = space.damageAsteroid(mega, 45.0, hitPoint, hitDir, 60.0, 50.0, 160.0);
+      expect(dmgResult.destroyed).toBe(false);
+      expect(dmgResult.asteroid).toBe(mega);
+      expect(dmgResult.carveResult).toBeDefined();
+      expect(dmgResult.carveResult.voxelsModified).toBeGreaterThanOrEqual(0);
+      expect(dmgResult.carveResult.isMega).toBe(true);
+    });
+
+    it('should provide narrowphase density checkCollision clearance allowing missiles to fly inside carved tunnels', () => {
+      const space = new SpaceEnvironment(scene, 3344);
+      const mega = space.asteroids[0];
+
+      const startOrigin = new THREE.Vector3(0, 0, 3500);
+      const rayDir = new THREE.Vector3(0, 0, -1);
+      const hit1 = space.checkRayCollision(startOrigin, rayDir, 5000.0);
+      expect(hit1).not.toBeNull();
+
+      // Carve a deep shaft at the surface
+      const carveRes = space.carveAsteroid(mega, hit1.hitPoint, rayDir, 60.0, 100.0, 160.0);
+      expect(carveRes.isosurfaceCrossed).toBe(true);
+
+      // Point inside the tunnel corridor (past the outer surface radius R=2800, but in hollow carved air)
+      const tunnelCorridorPoint = hit1.hitPoint.clone().addScaledVector(rayDir, 40.0);
+      expect(tunnelCorridorPoint.length()).toBeLessThan(mega.radius);
+
+      // In the carved air, checkCollision should return null (free flight clearance!)
+      const missileInsideTunnel = space.checkCollision(tunnelCorridorPoint, 1.8);
+      expect(missileInsideTunnel).toBeNull();
+
+      // Deep solid rock point far past the excavation should return the asteroid
+      const solidRockPoint = hit1.hitPoint.clone().addScaledVector(rayDir, 600.0);
+      const missileInSolidRock = space.checkCollision(solidRockPoint, 1.8);
+      expect(missileInSolidRock).toBe(mega);
+    });
+
+    it('should record structured CARVE and WEAPON_HIT telemetry logs in logger.logs for every impact', () => {
+      logger.logs = [];
+      const space = new SpaceEnvironment(scene, 5566);
+      const weapons = new WeaponsSystem(scene, space, null);
+      const ship = new PlayerShip(scene);
+      ship.position.set(0, 0, 3400);
+      ship.quaternion.set(0, 0, 0, 1); // facing -Z towards mega-asteroid at (0,0,0)
+
+      weapons.triggerPrimary(true, ship, performance.now());
+
+      const hitLogs = logger.logs.filter(l => l.includes('[WEAPON_HIT]'));
+      const carveLogs = logger.logs.filter(l => l.includes('[CARVE]'));
+
+      expect(hitLogs.length).toBeGreaterThan(0);
+      expect(carveLogs.length).toBeGreaterThan(0);
+
+      // Verify payload of WEAPON_HIT log
+      const hitEntry = hitLogs[hitLogs.length - 1];
+      expect(hitEntry).toContain('"weapon":"laser"');
+      expect(hitEntry).toContain('"isMega":true');
+      expect(hitEntry).toContain('"voxelsModified":');
+      expect(hitEntry).toContain('"isosurfaceCrossed":');
+
+      // Verify diagnostic report includes the telemetry section
+      const report = logger.generateDiagnosticReport();
+      expect(report).toContain('--- Recent Weapon & Excavation Telemetry (Last 25 Events) ---');
+      expect(report).toContain('[WEAPON_HIT]');
+    });
+
+    it('should support complete through-tunnel drilling simulation penetrating through to the far side of Mega-Asteroid', () => {
+      // Use low resolution for fast headless simulation
+      const space = new SpaceEnvironment(scene, 7788, { voxelQuality: 'low' });
+      const mega = space.asteroids[0];
+
+      const rayOrigin = new THREE.Vector3(0, 0, 4000);
+      const rayDir = new THREE.Vector3(0, 0, -1);
+
+      let prevDist = 0;
+      let breakthrough = false;
+
+      // Repeatedly fire laser/carve through the colossus
+      for (let shot = 0; shot < 35; shot++) {
+        const hit = space.checkRayCollision(rayOrigin, rayDir, 10000.0);
+        if (!hit || hit.asteroid !== mega) {
+          // Ray passed completely through the asteroid!
+          breakthrough = true;
+          break;
+        }
+
+        expect(hit.distance).toBeGreaterThanOrEqual(prevDist);
+        prevDist = hit.distance;
+
+        // Bore deep forward
+        const res = space.carveAsteroid(mega, hit.hitPoint, rayDir, 60.0, 80.0, 160.0);
+        expect(res.voxelsModified).toBeGreaterThan(0);
+      }
+
+      expect(breakthrough).toBe(true);
+      // Now a ray cast from (0, 0, 4000) straight down (0, 0, -1) sees clear space all the way through!
+      const postHit = space.checkRayCollision(rayOrigin, rayDir, 10000.0);
+      if (postHit) {
+        expect(postHit.asteroid).not.toBe(mega);
+      } else {
+        expect(postHit).toBeNull();
+      }
     });
   });
 });
