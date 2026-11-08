@@ -268,4 +268,79 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.shipCollisionDebounceTimer).toBe(0.25);
     expect(ship.shield).toBe(88);
   });
+
+  describe('Constrained Desired-Orientation Ship Controller', () => {
+    it('should initialize desiredQuaternion and maxTurnRate, and restore on resetSpawn', () => {
+      expect(ship.desiredQuaternion).toBeInstanceOf(THREE.Quaternion);
+      expect(ship.maxTurnRate).toBeCloseTo(2.2, 2);
+
+      // Mutate quaternions
+      ship.quaternion.set(0.5, 0.5, 0.5, 0.5).normalize();
+      ship.desiredQuaternion.set(0.2, 0.3, 0.4, 0.8).normalize();
+
+      ship.resetSpawn();
+
+      expect(ship.quaternion.x).toBe(0);
+      expect(ship.quaternion.y).toBe(0);
+      expect(ship.quaternion.z).toBe(0);
+      expect(ship.quaternion.w).toBe(1);
+
+      expect(ship.desiredQuaternion.x).toBe(0);
+      expect(ship.desiredQuaternion.y).toBe(0);
+      expect(ship.desiredQuaternion.z).toBe(0);
+      expect(ship.desiredQuaternion.w).toBe(1);
+    });
+
+    it('should steer desiredQuaternion and clamp ship alignment step to maxTurnRate * dt', () => {
+      // Set yaw input to turn right
+      ship.input.yawRight = true;
+      const dt = 0.05; // 50ms frame
+      const initialQuat = ship.quaternion.clone();
+
+      ship.update(dt);
+
+      // Desired quaternion steered away from identity
+      const desiredAngle = initialQuat.angleTo(ship.desiredQuaternion);
+      expect(desiredAngle).toBeGreaterThan(0);
+
+      // Ship quaternion rotated towards desiredQuaternion
+      const rotatedAngle = initialQuat.angleTo(ship.quaternion);
+      expect(rotatedAngle).toBeGreaterThan(0);
+
+      // Alignment rate must not exceed maxTurnRate * dt (+ small epsilon)
+      const maxAllowedStep = ship.maxTurnRate * dt + 0.001;
+      expect(rotatedAngle).toBeLessThanOrEqual(maxAllowedStep);
+    });
+
+    it('should clamp lead angle between desiredQuaternion and quaternion to 1.2 radians', () => {
+      // Simulate extreme instantaneous steer (e.g. large mouse movement)
+      ship.input.analogYaw = 100.0;
+      ship.update(1.0);
+
+      const leadAngle = ship.quaternion.angleTo(ship.desiredQuaternion);
+      expect(leadAngle).toBeLessThanOrEqual(1.2001);
+    });
+
+    it('should synchronize manual roll to both quaternion and desiredQuaternion without fighting', () => {
+      // Set desired quaternion ahead
+      ship.input.pitchUp = true;
+      ship.update(0.1);
+      const preAngle = ship.quaternion.angleTo(ship.desiredQuaternion);
+
+      // Apply manual roll
+      ship.input.pitchUp = false;
+      ship.input.rollLeft = true;
+      const qBefore = ship.quaternion.clone();
+      const dqBefore = ship.desiredQuaternion.clone();
+
+      ship.handleRotation(0.05);
+
+      // Both should have rolled
+      expect(ship.quaternion.equals(qBefore)).toBe(false);
+      expect(ship.desiredQuaternion.equals(dqBefore)).toBe(false);
+
+      // The relative pitch angle should be preserved rather than cancelled
+      expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBeLessThanOrEqual(preAngle + 0.1);
+    });
+  });
 });

@@ -63,6 +63,7 @@ export class GameEngine {
     this.timeSinceLastCombat = 0;
     this.beaconPulseTimer = 0;
     this.netStatsTimer = 0;
+    this.fpsRolling = 60;
 
     this.initThree();
     this.setupNetworkHandlers();
@@ -428,6 +429,10 @@ export class GameEngine {
       const dt = Math.min(0.1, (now - this.lastTime) / 1000);
       this.lastTime = now;
 
+      // Rolling average FPS
+      const currentFps = dt > 0 ? (1 / dt) : 60;
+      this.fpsRolling = this.fpsRolling * 0.9 + currentFps * 0.1;
+
       // Decay mouse analog inputs smoothly
       if (this.isPointerLocked) {
         this.playerShip.input.analogPitch *= 0.7;
@@ -692,7 +697,24 @@ export class GameEngine {
         activePeersCount: this.network.peers.size + 1,
         isMaster: this.network.isMaster,
         masterId: this.network.currentMasterId,
-        avgPing: this.network.getAveragePing()
+        avgPing: this.network.getAveragePing(),
+        fps: Math.round(this.fpsRolling),
+        frameTime: Number((dt * 1000).toFixed(1)),
+        drawCalls: (this.renderer && this.renderer.info) ? this.renderer.info.render.calls : 0,
+        triangles: (this.renderer && this.renderer.info) ? this.renderer.info.render.triangles : 0,
+        memory: (typeof performance !== 'undefined' && performance.memory) ? Number((performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(1)) : null,
+        megaDistance: Math.round(this.playerShip.position.length()),
+        telemetry: {
+          fps: Math.round(this.fpsRolling),
+          frameTime: Number((dt * 1000).toFixed(1)),
+          drawCalls: (this.renderer && this.renderer.info) ? this.renderer.info.render.calls : 0,
+          triangles: (this.renderer && this.renderer.info) ? this.renderer.info.render.triangles : 0,
+          memory: (typeof performance !== 'undefined' && performance.memory) ? Number((performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(1)) : null,
+          ping: typeof this.network.getAveragePing === 'function' ? this.network.getAveragePing() : 0,
+          megaDistance: Math.round(this.playerShip.position.length()),
+          speed: Math.round(this.playerShip.getSpeed()),
+          isMaster: !!this.network.isMaster
+        }
       });
     } catch (loopErr) {
       logger.log('CRASH', `Render loop exception: ${loopErr.message}\n${loopErr.stack}`);

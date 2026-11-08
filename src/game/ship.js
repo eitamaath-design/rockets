@@ -10,6 +10,8 @@ export class PlayerShip {
     this.position = new THREE.Vector3(0, 80, 3200);
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.quaternion = new THREE.Quaternion();
+    this.desiredQuaternion = new THREE.Quaternion();
+    this.maxTurnRate = 2.2; // Base constrained maneuverability turn rate in rad/s
 
     // Flight parameters
     this.maxSpeed = 90.0; // units per second
@@ -83,6 +85,7 @@ export class PlayerShip {
     this.position.set(0, 80, 3200);
     this.velocity.set(0, 0, 0);
     this.quaternion.set(0, 0, 0, 1); // Looking straight down -Z
+    this.desiredQuaternion.set(0, 0, 0, 1);
 
     this.hp = this.maxHp;
     this.shield = this.maxShield;
@@ -280,6 +283,9 @@ export class PlayerShip {
     if (isNaN(this.quaternion.x) || isNaN(this.quaternion.w)) {
       this.quaternion.set(0, 0, 0, 1);
     }
+    if (isNaN(this.desiredQuaternion.x) || isNaN(this.desiredQuaternion.w)) {
+      this.desiredQuaternion.copy(this.quaternion);
+    }
 
     this.handleRotation(dt);
     this.handleThrustAndMovement(dt);
@@ -317,25 +323,41 @@ export class PlayerShip {
     const yawAxis = new THREE.Vector3(0, 1, 0);
     const rollAxis = new THREE.Vector3(0, 0, 1);
 
-    // Apply pitch
+    // Pitch & Yaw steer desiredQuaternion (virtual steering target)
     if (pitchInput !== 0) {
       const qPitch = new THREE.Quaternion().setFromAxisAngle(pitchAxis, pitchInput * this.pitchSpeed * dt);
-      this.quaternion.multiply(qPitch);
+      this.desiredQuaternion.multiply(qPitch);
     }
 
-    // Apply yaw
     if (yawInput !== 0) {
       const qYaw = new THREE.Quaternion().setFromAxisAngle(yawAxis, yawInput * this.yawSpeed * dt);
-      this.quaternion.multiply(qYaw);
+      this.desiredQuaternion.multiply(qYaw);
     }
 
-    // Apply roll
+    // Clamp maximum lead angle between desiredQuaternion and quaternion (1.2 rad / ~70°) to prevent disorientation
+    const maxLead = 1.2;
+    const leadAngle = this.quaternion.angleTo(this.desiredQuaternion);
+    if (leadAngle > maxLead) {
+      this.desiredQuaternion.copy(this.quaternion).rotateTowards(this.desiredQuaternion, maxLead);
+    }
+
+    // Manual roll inputs directly rotate both quaternion and desiredQuaternion
+    // so automated alignment controller does not fight or unwind manual banking
     if (rollInput !== 0) {
       const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxis, rollInput * this.rollSpeed * dt);
       this.quaternion.multiply(qRoll);
+      this.desiredQuaternion.multiply(qRoll);
+    }
+
+    // Constrained alignment towards desired target orientation
+    const angle = this.quaternion.angleTo(this.desiredQuaternion);
+    if (angle > 0.0001) {
+      const step = Math.min(angle, this.maxTurnRate * dt);
+      this.quaternion.rotateTowards(this.desiredQuaternion, step);
     }
 
     this.quaternion.normalize();
+    this.desiredQuaternion.normalize();
   }
 
   handleThrustAndMovement(dt) {

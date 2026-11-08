@@ -7,6 +7,8 @@ export class GameHUD {
     this.engine = engine;
     this.hudElement = null;
     this.isVoteActive = false;
+    this.lastMonitorUpdateTime = 0;
+    this.monitorThrottleMs = 100; // 10Hz throttle (100ms)
 
     this.createDom();
     this.bindJoystick();
@@ -109,6 +111,49 @@ export class GameHUD {
           <button class="hud-btn-diag" id="hud-btn-diag" title="Client Diagnostics & Telemetry Logs">🐞 Logs</button>
           <button class="hud-btn-fullscreen" id="hud-btn-fullscreen" title="Toggle Fullscreen">⛶</button>
           <button class="hud-btn-leave" id="hud-btn-leave" title="Leave Match">✕</button>
+        </div>
+      </div>
+
+      <!-- Room Master Real-Time Debug & Diagnostics Monitor -->
+      <div class="hud-master-monitor" id="hud-master-monitor" style="display: none;">
+        <div class="master-monitor-header">
+          <span class="master-pulse-dot">●</span>
+          <span class="master-monitor-title">ROOM MASTER DIAGNOSTICS</span>
+          <span class="master-monitor-freq">10Hz</span>
+        </div>
+        <div class="master-monitor-grid">
+          <div class="monitor-metric" id="metric-fps">
+            <span class="metric-key">FPS</span>
+            <span class="metric-badge nominal" id="mon-fps-badge">--</span>
+          </div>
+          <div class="monitor-metric" id="metric-frame-time">
+            <span class="metric-key">FRAME</span>
+            <span class="metric-badge nominal" id="mon-frame-badge">-- ms</span>
+          </div>
+          <div class="monitor-metric" id="metric-draw-calls">
+            <span class="metric-key">CALLS</span>
+            <span class="metric-badge nominal" id="mon-calls-badge">--</span>
+          </div>
+          <div class="monitor-metric" id="metric-triangles">
+            <span class="metric-key">TRIS</span>
+            <span class="metric-badge nominal" id="mon-tris-badge">--</span>
+          </div>
+          <div class="monitor-metric" id="metric-memory">
+            <span class="metric-key">HEAP</span>
+            <span class="metric-badge nominal" id="mon-mem-badge">-- MB</span>
+          </div>
+          <div class="monitor-metric" id="metric-ping">
+            <span class="metric-key">PING</span>
+            <span class="metric-badge nominal" id="mon-ping-badge">-- ms</span>
+          </div>
+          <div class="monitor-metric" id="metric-mega">
+            <span class="metric-key">MEGA DIST</span>
+            <span class="metric-badge nominal" id="mon-mega-badge">-- u</span>
+          </div>
+          <div class="monitor-metric" id="metric-speed">
+            <span class="metric-key">SPEED</span>
+            <span class="metric-badge nominal" id="mon-speed-badge">-- u/s</span>
+          </div>
         </div>
       </div>
 
@@ -558,7 +603,7 @@ export class GameHUD {
       }
     });
 
-    if (this.engine && this.engine.network) {
+    if (this.engine && this.engine.network && typeof this.engine.network.onMapResetVote === 'function') {
       this.engine.network.onMapResetVote((voteData) => {
         if (!voteBanner) return;
         if (voteData.active) {
@@ -827,6 +872,102 @@ export class GameHUD {
       } else {
         respawnOverlay.style.display = 'none';
       }
+    }
+
+    // Room Master Real-Time Debug & Diagnostics Monitor (10Hz Throttled)
+    const monitorEl = document.getElementById('hud-master-monitor');
+    if (monitorEl) {
+      const isMaster = !!state.isMaster;
+      if (!isMaster) {
+        monitorEl.style.display = 'none';
+      } else {
+        monitorEl.style.display = 'block';
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        if (now - this.lastMonitorUpdateTime >= this.monitorThrottleMs) {
+          this.lastMonitorUpdateTime = now;
+          this.updateMasterMonitor(state);
+        }
+      }
+    }
+  }
+
+  updateMasterMonitor(state) {
+    // 1. FPS: >=50 (nominal), 30-49 (warning), <30 (alert)
+    const fps = state.fps !== undefined ? state.fps : (state.telemetry?.fps ?? 60);
+    const fpsBadge = document.getElementById('mon-fps-badge');
+    if (fpsBadge) {
+      fpsBadge.textContent = `${fps}`;
+      fpsBadge.className = 'metric-badge ' + (fps >= 50 ? 'nominal' : (fps >= 30 ? 'warning' : 'alert'));
+    }
+
+    // 2. Frame Time: <=16.7ms (nominal), 16.8-33ms (warning), >33ms (alert)
+    const frameTime = state.frameTime !== undefined ? state.frameTime : (state.telemetry?.frameTime ?? 16.6);
+    const frameBadge = document.getElementById('mon-frame-badge');
+    if (frameBadge) {
+      frameBadge.textContent = `${frameTime}ms`;
+      frameBadge.className = 'metric-badge ' + (frameTime <= 16.7 ? 'nominal' : (frameTime <= 33.0 ? 'warning' : 'alert'));
+    }
+
+    // 3. Draw Calls: <=100 (nominal), 101-250 (warning), >250 (alert)
+    const calls = state.drawCalls !== undefined ? state.drawCalls : (state.telemetry?.drawCalls ?? 0);
+    const callsBadge = document.getElementById('mon-calls-badge');
+    if (callsBadge) {
+      callsBadge.textContent = `${calls}`;
+      callsBadge.className = 'metric-badge ' + (calls <= 100 ? 'nominal' : (calls <= 250 ? 'warning' : 'alert'));
+    }
+
+    // 4. Triangles: <=250k (nominal), 250k-500k (warning), >500k (alert)
+    const tris = state.triangles !== undefined ? state.triangles : (state.telemetry?.triangles ?? 0);
+    const trisBadge = document.getElementById('mon-tris-badge');
+    if (trisBadge) {
+      const trisStr = tris >= 1000 ? `${Math.round(tris / 1000)}k` : `${tris}`;
+      trisBadge.textContent = trisStr;
+      trisBadge.className = 'metric-badge ' + (tris <= 250000 ? 'nominal' : (tris <= 500000 ? 'warning' : 'alert'));
+    }
+
+    // 5. Memory: <=150MB (nominal), 151-300MB (warning), >300MB (alert), or 'N/A' (nominal)
+    const mem = state.memory !== undefined ? state.memory : state.telemetry?.memory;
+    const memBadge = document.getElementById('mon-mem-badge');
+    if (memBadge) {
+      if (mem === null || mem === undefined) {
+        memBadge.textContent = 'N/A';
+        memBadge.className = 'metric-badge nominal';
+      } else {
+        memBadge.textContent = `${mem}MB`;
+        memBadge.className = 'metric-badge ' + (mem <= 150 ? 'nominal' : (mem <= 300 ? 'warning' : 'alert'));
+      }
+    }
+
+    // 6. Latency / Ping: <=60ms (nominal), 61-120ms (warning), >120ms (alert)
+    const ping = state.avgPing !== undefined ? state.avgPing : (state.telemetry?.ping ?? 0);
+    const pingBadge = document.getElementById('mon-ping-badge');
+    if (pingBadge) {
+      pingBadge.textContent = `${ping}ms`;
+      pingBadge.className = 'metric-badge ' + (ping <= 60 ? 'nominal' : (ping <= 120 ? 'warning' : 'alert'));
+    }
+
+    // 7. Mega Proximity: >3000u Safe Orbit (nominal), 2800-3000u Surface (warning), <2800u Cavern (cyan)
+    const megaDist = state.megaDistance !== undefined ? state.megaDistance : (state.telemetry?.megaDistance ?? 3200);
+    const megaBadge = document.getElementById('mon-mega-badge');
+    if (megaBadge) {
+      if (megaDist > 3000) {
+        megaBadge.textContent = `${megaDist}u Orbit`;
+        megaBadge.className = 'metric-badge nominal';
+      } else if (megaDist >= 2800) {
+        megaBadge.textContent = `${megaDist}u Surface`;
+        megaBadge.className = 'metric-badge warning';
+      } else {
+        megaBadge.textContent = `${megaDist}u Cavern`;
+        megaBadge.className = 'metric-badge cavern';
+      }
+    }
+
+    // 8. Speed: <=100u/s (nominal), >100u/s (warning)
+    const speed = state.speed !== undefined ? state.speed : (state.telemetry?.speed ?? 0);
+    const speedBadge = document.getElementById('mon-speed-badge');
+    if (speedBadge) {
+      speedBadge.textContent = `${speed}u/s`;
+      speedBadge.className = 'metric-badge ' + (speed <= 100 ? 'nominal' : 'warning');
     }
   }
 
