@@ -188,6 +188,63 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       expect(c.carveDepth).toBeGreaterThanOrEqual(120.0);
     });
 
+    it('should initialize Central Mega-Asteroid with MarchingCubes volumetric density field', () => {
+      const space = new SpaceEnvironment(scene, 444);
+      const mega = space.asteroids[0];
+      expect(mega.mc).toBeDefined();
+      expect(mega.mc.isMarchingCubes).toBe(true);
+      expect(mega.mc.field).toBeInstanceOf(Float32Array);
+      expect(mega.mc.field.length).toBe(32 * 32 * 32);
+      expect(mega.mc.isolation).toBe(80);
+    });
+
+    it('should support configurable voxelQuality: low (32³), medium (48³), high (64³)', () => {
+      const spaceLow = new SpaceEnvironment(scene, 101, { voxelQuality: 'low' });
+      expect(spaceLow.megaResolution).toBe(32);
+      expect(spaceLow.asteroids[0].mc.resolution).toBe(32);
+
+      const spaceMed = new SpaceEnvironment(scene, 102, { voxelQuality: 'medium' });
+      expect(spaceMed.megaResolution).toBe(48);
+      expect(spaceMed.asteroids[0].mc.resolution).toBe(48);
+
+      const spaceHigh = new SpaceEnvironment(scene, 103, { voxelQuality: 'high' });
+      expect(spaceHigh.megaResolution).toBe(64);
+      expect(spaceHigh.asteroids[0].mc.resolution).toBe(64);
+    });
+
+    it('should support configurable asteroidCount and megaRadius', () => {
+      const spaceCustom = new SpaceEnvironment(scene, 202, { asteroidCount: 50, megaRadius: 1400 });
+      expect(spaceCustom.asteroidCount).toBe(50);
+      expect(spaceCustom.megaRadius).toBe(1400);
+      expect(spaceCustom.asteroids.length).toBe(51); // 1 mega + 50 belt
+      expect(spaceCustom.asteroids[0].radius).toBe(1400);
+    });
+
+    it('should subtract volumetric density and record carved volume on carveAsteroid', () => {
+      const space = new SpaceEnvironment(scene, 303);
+      const mega = space.asteroids[0];
+      const initialField = new Float32Array(mega.mc.field);
+
+      const hitPoint = mega.position.clone().add(new THREE.Vector3(0, mega.radius * 0.9, 0));
+      const hitDir = new THREE.Vector3(0, -1, 0);
+
+      space.carveAsteroid(mega, hitPoint, hitDir, 60.0, 50.0);
+
+      const c = mega.carvings[0];
+      expect(c).toBeDefined();
+      expect(c.carvedVolume).toBeGreaterThan(0);
+      expect(c.carvedCells).toBeGreaterThan(0);
+
+      // Verify density decreased in field
+      let decreasedCount = 0;
+      for (let i = 0; i < mega.mc.field.length; i++) {
+        if (mega.mc.field[i] < initialField[i]) {
+          decreasedCount++;
+        }
+      }
+      expect(decreasedCount).toBeGreaterThan(0);
+    });
+
     it('should cleanly dispose all resources in destroy and cleanup', () => {
       const space = new SpaceEnvironment(scene, 555);
       expect(space.asteroids.length).toBeGreaterThan(0);

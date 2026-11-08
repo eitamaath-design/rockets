@@ -103,6 +103,53 @@ describe('Sector Hazards: Periodic Flaming Meteors & Lighting Stability', () => 
       expect(deathNoticeReceived).toContain('Incinerated');
       expect(meteorSystem.activeMeteor).toBeNull();
     });
+
+    it('should respect configurable frequency options (e.g. 5s interval)', () => {
+      const fastSystem = new MeteorSystem(scene, mockSpaceEnv, { frequency: 5.0 });
+      expect(fastSystem.spawnInterval).toBe(5.0);
+      expect(fastSystem.enabled).toBe(true);
+
+      expect(fastSystem.activeMeteor).toBeNull();
+      // After 5s update, meteor should be spawned
+      fastSystem.update(5.1, playerShip, new Map(), () => {});
+      expect(fastSystem.activeMeteor).not.toBeNull();
+    });
+
+    it('should completely disable meteor hazard when frequency is 0', () => {
+      const offSystem = new MeteorSystem(scene, mockSpaceEnv, { frequency: 0 });
+      expect(offSystem.spawnInterval).toBe(0);
+      expect(offSystem.enabled).toBe(false);
+
+      // Advance 100 seconds
+      offSystem.update(100.0, playerShip, new Map(), () => {});
+      expect(offSystem.activeMeteor).toBeNull();
+    });
+
+    it('should carve crater into mega-asteroid without shifting its position on impact', () => {
+      let carveCalled = false;
+      const megaAsteroid = {
+        position: new THREE.Vector3(0, 0, 0),
+        velocity: new THREE.Vector3(0, 0, 0),
+        radius: 2800,
+        isMegaAsteroid: true
+      };
+      mockSpaceEnv.asteroids.push(megaAsteroid);
+      mockSpaceEnv.carveAsteroid = (a, hitPt, hitDir, r, d) => {
+        carveCalled = true;
+        expect(a).toBe(megaAsteroid);
+        expect(r).toBeGreaterThanOrEqual(120);
+      };
+
+      meteorSystem.spawnMeteor();
+      const meteor = meteorSystem.activeMeteor;
+      meteor.position.set(0, 0, 2810);
+      meteor.velocity.set(0, 0, -250);
+
+      meteorSystem.update(0.016, playerShip, new Map(), () => {});
+      expect(carveCalled).toBe(true);
+      expect(megaAsteroid.position.length()).toBe(0); // Remained stationary!
+      expect(meteorSystem.activeMeteor).toBeNull();
+    });
   });
 
   describe('WebGL Shader Stability: Zero Dynamic PointLight Thrashing', () => {

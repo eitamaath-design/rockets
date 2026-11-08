@@ -20,6 +20,18 @@ export class GameHUD {
     if (roomTitle && this.engine && this.engine.network) {
       roomTitle.textContent = this.engine.network.roomName || this.engine.network.roomId || 'Orion Sector';
     }
+
+    // Initialize room config pill immediately
+    const configPill = document.getElementById('hud-config-pill');
+    if (configPill && this.engine && this.engine.config) {
+      const cfg = this.engine.config;
+      const q = (cfg.voxelQuality || 'low').toUpperCase();
+      const resMap = { low: '32³', medium: '48³', high: '64³' };
+      const res = resMap[cfg.voxelQuality] || '32³';
+      const belt = cfg.asteroidCount !== undefined ? cfg.asteroidCount : 100;
+      const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor}`;
+    }
   }
 
   createDom() {
@@ -91,6 +103,7 @@ export class GameHUD {
         </div>
 
         <div class="hud-top-right">
+          <div class="hud-stat-pill hud-config-pill" id="hud-config-pill">VOX: LOW (32³) | BELT: 100 | METEOR: 10s</div>
           <div class="hud-stat-pill" id="hud-peers-count">👥 1</div>
           <div class="hud-stat-pill" id="hud-ping-val">📡 0ms</div>
           <button class="hud-btn-diag" id="hud-btn-diag" title="Client Diagnostics & Telemetry Logs">🐞 Logs</button>
@@ -586,6 +599,18 @@ export class GameHUD {
 
     const pingEl = document.getElementById('hud-ping-val');
     if (pingEl) pingEl.textContent = `📡 ${state.avgPing}ms`;
+
+    // Active Room Configuration Pill
+    const configPill = document.getElementById('hud-config-pill');
+    if (configPill && this.engine && this.engine.config) {
+      const cfg = this.engine.config;
+      const q = (cfg.voxelQuality || 'low').toUpperCase();
+      const resMap = { low: '32³', medium: '48³', high: '64³' };
+      const res = resMap[cfg.voxelQuality] || '32³';
+      const belt = cfg.asteroidCount !== undefined ? cfg.asteroidCount : 100;
+      const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor}`;
+    }
 
     // Shield Bar (recharges over 15s)
     const shieldBar = document.getElementById('hud-shield-bar');

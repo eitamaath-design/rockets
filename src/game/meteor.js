@@ -9,11 +9,15 @@ import { logger } from '../utils/logger.js';
  * completely incinerating ships on collision.
  */
 export class MeteorSystem {
-  constructor(scene, spaceEnv) {
+  constructor(scene, spaceEnv, options = {}) {
     this.scene = scene;
     this.spaceEnv = spaceEnv;
 
-    this.spawnInterval = 10.0; // Every 10 seconds
+    const freq = typeof options === 'number'
+      ? options
+      : (options?.frequency !== undefined ? options.frequency : 10.0);
+    this.spawnInterval = freq;
+    this.enabled = freq > 0;
     this.spawnTimer = 4.0; // First meteor enters 4s after spawn
 
     this.activeMeteor = null;
@@ -154,11 +158,13 @@ export class MeteorSystem {
   }
 
   update(dt, playerShip, remoteShipsMap, onPlayerKilled) {
-    // 1. Periodic 10-second spawn timer
-    this.spawnTimer += dt;
-    if (this.spawnTimer >= this.spawnInterval) {
-      this.spawnTimer = 0;
-      this.spawnMeteor();
+    // 1. Periodic spawn timer
+    if (this.enabled && this.spawnInterval > 0) {
+      this.spawnTimer += dt;
+      if (this.spawnTimer >= this.spawnInterval) {
+        this.spawnTimer = 0;
+        this.spawnMeteor();
+      }
     }
 
     // 2. Update active meteor
@@ -231,6 +237,11 @@ export class MeteorSystem {
             // Cap asteroid velocity to physically plausible limit
             if (a.velocity.length() > 40.0) {
               a.velocity.setLength(40.0);
+            }
+
+            // Also carve crater into belt asteroid if MarchingCubes
+            if (typeof this.spaceEnv.carveAsteroid === 'function') {
+              this.spaceEnv.carveAsteroid(a, m.position.clone(), m.dir.clone(), 36.0, 25.0);
             }
 
             // Give the asteroid a violent rotational kick

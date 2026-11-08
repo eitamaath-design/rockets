@@ -230,4 +230,65 @@ describe('Netcode & Leader Election', () => {
       expect(net.mapSeed).toBe(200);
     });
   });
+
+  describe('Room Configuration Suite & P2P State Synchronization', () => {
+    it('should store initial config and notify onConfig listeners on broadcastConfig', () => {
+      const net = new GameNetwork({
+        roomId: 'test-config-room',
+        mapSeed: 50,
+        config: {
+          voxelQuality: 'medium',
+          asteroidCount: 150,
+          megaRadius: 4000,
+          meteorFrequency: 5
+        }
+      });
+
+      expect(net.config.voxelQuality).toBe('medium');
+      expect(net.config.asteroidCount).toBe(150);
+      expect(net.config.megaRadius).toBe(4000);
+      expect(net.config.meteorFrequency).toBe(5);
+
+      let configReceived = null;
+      net.onConfig((newCfg) => {
+        configReceived = newCfg;
+      });
+
+      net.broadcastConfig({ voxelQuality: 'high', meteorFrequency: 0 });
+      expect(net.config.voxelQuality).toBe('high');
+      expect(net.config.meteorFrequency).toBe(0);
+      expect(net.config.asteroidCount).toBe(150); // Preserved
+    });
+
+    it('should include room config in lobby service heartbeats', () => {
+      const mockLobby = {
+        activeRooms: new Map(),
+        getRoomsList() {
+          return Array.from(this.activeRooms.values());
+        }
+      };
+
+      const testConfig = {
+        voxelQuality: 'high',
+        asteroidCount: 150,
+        megaRadius: 4000,
+        meteorFrequency: 5
+      };
+
+      mockLobby.activeRooms.set('room-cfg', {
+        roomId: 'room-cfg',
+        roomName: 'High Res Sector',
+        masterId: 'host-1',
+        config: testConfig,
+        lastSeen: Date.now(),
+        ttlMs: 12000
+      });
+
+      const list = mockLobby.getRoomsList();
+      expect(list.length).toBe(1);
+      expect(list[0].config).toEqual(testConfig);
+      expect(list[0].config.voxelQuality).toBe('high');
+      expect(list[0].config.asteroidCount).toBe(150);
+    });
+  });
 });

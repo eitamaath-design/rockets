@@ -35,15 +35,23 @@ class AppRouter {
   }
 
   init() {
-    // Check if URL has ?room=
+    // Check if URL has ?room= and optional config params
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
+
+    const config = {
+      voxelQuality: params.get('quality') || 'low',
+      asteroidCount: params.get('density') ? parseInt(params.get('density'), 10) : 100,
+      megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
+      meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10
+    };
 
     if (roomParam) {
       this.startMatch({
         roomId: roomParam,
         roomName: roomParam,
-        mapSeed: Math.abs(this.hashCode(roomParam))
+        mapSeed: Math.abs(this.hashCode(roomParam)),
+        config
       });
     } else {
       this.renderLobby();
@@ -89,6 +97,47 @@ class AppRouter {
               <label for="sector-name-input">Sector / Room Name</label>
               <input type="text" id="sector-name-input" class="lobby-input" value="${getRandomSectorName()}" />
             </div>
+
+            <!-- Room Configuration Drawer -->
+            <div class="room-config-drawer" id="room-config-drawer">
+              <div class="drawer-header">⚙️ Sector Physics & Voxel Parameters</div>
+              <div class="config-grid">
+                <div class="config-field">
+                  <label for="voxel-quality-select">Voxel Quality</label>
+                  <select id="voxel-quality-select" class="lobby-select">
+                    <option value="low" selected>Low (32³)</option>
+                    <option value="medium">Medium (48³)</option>
+                    <option value="high">High (64³)</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="asteroid-count-select">Belt Asteroids</label>
+                  <select id="asteroid-count-select" class="lobby-select">
+                    <option value="50">50 Asteroids</option>
+                    <option value="100" selected>100 Asteroids</option>
+                    <option value="150">150 Asteroids</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="mega-radius-select">Mega Asteroid Radius</label>
+                  <select id="mega-radius-select" class="lobby-select">
+                    <option value="1400">1,400u (Compact)</option>
+                    <option value="2800" selected>2,800u (Standard)</option>
+                    <option value="4000">4,000u (Colossal)</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="meteor-freq-select">Meteor Hazard</label>
+                  <select id="meteor-freq-select" class="lobby-select">
+                    <option value="0">0 (Off)</option>
+                    <option value="20">20s (Mild)</option>
+                    <option value="10" selected>10s (Standard)</option>
+                    <option value="5">5s (Chaos)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <button class="btn-primary" id="btn-create-match">LAUNCH SECTOR</button>
           </div>
 
@@ -187,10 +236,17 @@ class AppRouter {
       createBtn.addEventListener('click', () => {
         const roomName = (sectorInput.value.trim()) || getRandomSectorName();
         const roomId = roomName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+        const config = {
+          voxelQuality: document.getElementById('voxel-quality-select')?.value || 'low',
+          asteroidCount: parseInt(document.getElementById('asteroid-count-select')?.value, 10) || 100,
+          megaRadius: parseInt(document.getElementById('mega-radius-select')?.value, 10) || 2800,
+          meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10
+        };
         this.startMatch({
           roomId,
           roomName,
-          mapSeed: Math.abs(this.hashCode(roomId))
+          mapSeed: Math.abs(this.hashCode(roomId)),
+          config
         });
       });
     }
@@ -247,8 +303,14 @@ class AppRouter {
             <span>👑 Host: Pilot-${(room.masterId || 'Host').slice(0, 4)}</span>
             <span class="room-ttl-badge">⏳ TTL: ${room.ttlSecondsRemaining}s</span>
           </div>
+          <div class="room-config-badges">
+            <span class="room-badge badge-vox">VOX: ${(room.config?.voxelQuality || 'low').toUpperCase()}</span>
+            <span class="room-badge badge-belt">BELT: ${room.config?.asteroidCount ?? 100}</span>
+            <span class="room-badge badge-mega">MEGA: ${room.config?.megaRadius ?? 2800}u</span>
+            <span class="room-badge badge-meteor">METEOR: ${room.config?.meteorFrequency ? room.config.meteorFrequency + 's' : 'OFF'}</span>
+          </div>
         </div>
-        <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}">
+        <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}" data-config='${JSON.stringify(room.config || {})}'>
           JOIN SECTOR
         </button>
       </div>
@@ -261,13 +323,24 @@ class AppRouter {
         const roomId = btn.getAttribute('data-room-id');
         const roomName = btn.getAttribute('data-room-name');
         const mapSeed = parseInt(btn.getAttribute('data-seed'), 10) || 42;
-        this.startMatch({ roomId, roomName, mapSeed });
+        let config = null;
+        try {
+          config = JSON.parse(btn.getAttribute('data-config'));
+        } catch (_) {}
+        this.startMatch({ roomId, roomName, mapSeed, config });
       });
     });
   }
 
-  startMatch({ roomId, roomName, mapSeed }) {
+  startMatch({ roomId, roomName, mapSeed, config }) {
     this.currentMode = 'game';
+
+    const activeConfig = config || {
+      voxelQuality: 'low',
+      asteroidCount: 100,
+      megaRadius: 2800,
+      meteorFrequency: 10
+    };
 
     // Clear DOM
     app.innerHTML = '';
@@ -280,7 +353,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh
@@ -288,6 +361,7 @@ class AppRouter {
       roomId,
       roomName,
       mapSeed,
+      config: activeConfig,
       playerName: this.playerName,
       onCombatLog: (msg) => {
         if (this.hud) this.hud.showCombatMessage(msg);
@@ -299,6 +373,7 @@ class AppRouter {
       container: gameContainer,
       network: this.network,
       mapSeed,
+      config: activeConfig,
       onHudUpdate: (hudState) => {
         if (this.hud) this.hud.update(hudState);
       },

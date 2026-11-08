@@ -12,10 +12,16 @@ import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
 export class GameEngine {
-  constructor({ container, network, mapSeed, onHudUpdate, onDeathNotice }) {
+  constructor({ container, network, mapSeed, config, onHudUpdate, onDeathNotice }) {
     this.container = container;
     this.network = network;
     this.mapSeed = mapSeed;
+    this.config = config || {
+      voxelQuality: 'low',
+      asteroidCount: 100,
+      megaRadius: 2800,
+      meteorFrequency: 10
+    };
     this.onHudUpdate = onHudUpdate || (() => {});
     this.onDeathNotice = onDeathNotice || (() => {});
 
@@ -93,7 +99,7 @@ export class GameEngine {
     this.container.appendChild(this.renderer.domElement);
 
     // Initialize subsystems
-    this.spaceEnv = new SpaceEnvironment(this.scene, this.mapSeed);
+    this.spaceEnv = new SpaceEnvironment(this.scene, this.mapSeed, this.config);
     this.playerShip = new PlayerShip(this.camera, this.spaceEnv);
     this.playerShip.resetSpawn();
 
@@ -102,7 +108,9 @@ export class GameEngine {
 
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
-    this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv);
+    this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv, {
+      frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10
+    });
     this.powerUpSystem = new PowerUpSystem(this.scene);
 
     // Pre-warm and compile all WebGL materials and shaders upfront
@@ -174,16 +182,43 @@ export class GameEngine {
     this.network.onMapReset((seed) => {
       this.resetMap(seed);
     });
+
+    // Synchronized Room Configuration Handshake
+    if (this.network && typeof this.network.onConfig === 'function') {
+      this.network.onConfig((newConfig) => {
+        if (!newConfig) return;
+        this.config = { ...this.config, ...newConfig };
+        logger.log('CONFIG', `Received room config update: ${JSON.stringify(this.config)}`);
+        if (this.spaceEnv) {
+          this.spaceEnv.destroy();
+          this.spaceEnv = new SpaceEnvironment(this.scene, this.mapSeed, this.config);
+          if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
+          if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
+          if (this.playerShip) this.playerShip.spaceEnv = this.spaceEnv;
+        }
+        if (this.meteorSystem) {
+          this.meteorSystem.spawnInterval = this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10;
+          this.meteorSystem.enabled = this.meteorSystem.spawnInterval > 0;
+        }
+      });
+    }
   }
 
-  resetMap(newSeed) {
+  resetMap(newSeed, newConfig = null) {
     this.mapSeed = newSeed;
+    if (newConfig) {
+      this.config = { ...this.config, ...newConfig };
+    }
     if (this.spaceEnv) {
       this.spaceEnv.destroy();
     }
-    this.spaceEnv = new SpaceEnvironment(this.scene, newSeed);
+    this.spaceEnv = new SpaceEnvironment(this.scene, newSeed, this.config);
     if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
-    if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
+    if (this.meteorSystem) {
+      this.meteorSystem.spaceEnv = this.spaceEnv;
+      this.meteorSystem.spawnInterval = this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10;
+      this.meteorSystem.enabled = this.meteorSystem.spawnInterval > 0;
+    }
     if (this.playerShip) {
       this.playerShip.spaceEnv = this.spaceEnv;
       this.playerShip.position.set(0, 80, 3200);

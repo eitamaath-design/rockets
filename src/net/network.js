@@ -3,10 +3,16 @@ import { lobbyService, APP_ID, RELIABLE_NOSTR_RELAYS } from './lobby.js';
 import { createActionChannel } from './actions.js';
 
 export class GameNetwork {
-  constructor({ roomId, roomName, mapSeed, playerName, onPeerJoined, onPeerLeft, onMasterChanged, onCombatLog }) {
+  constructor({ roomId, roomName, mapSeed, config, playerName, onPeerJoined, onPeerLeft, onMasterChanged, onCombatLog }) {
     this.roomId = roomId;
     this.roomName = roomName || roomId;
     this.mapSeed = mapSeed || 42;
+    this.config = config || {
+      voxelQuality: 'low',
+      asteroidCount: 100,
+      megaRadius: 2800,
+      meteorFrequency: 10
+    };
     this.playerName = playerName || `Pilot-${(selfId || 'Host').slice(0, 4)}`;
     this.selfId = selfId;
 
@@ -33,6 +39,7 @@ export class GameNetwork {
     this.sendMissile = null;
     this.sendMapResetVote = null;
     this.sendMapReset = null;
+    this.sendConfig = null;
 
     // Action listeners registered by game systems
     this.cannonListeners = new Set();
@@ -44,6 +51,7 @@ export class GameNetwork {
     this.missileListeners = new Set();
     this.mapResetVoteListeners = new Set();
     this.mapResetListeners = new Set();
+    this.configListeners = new Set();
 
     this.currentMapResetVote = null;
     this.voteTimeoutTimer = null;
@@ -71,6 +79,7 @@ export class GameNetwork {
     const decoyChannel = createActionChannel(this.room, 'decoy');
     const mapResetVoteChannel = createActionChannel(this.room, 'map_reset_vote');
     const mapResetChannel = createActionChannel(this.room, 'map_reset');
+    const configChannel = createActionChannel(this.room, 'config');
 
     this.sendState = stateChannel.send;
     this.sendCannon = cannonChannel.send;
@@ -84,6 +93,17 @@ export class GameNetwork {
     this.sendDecoy = decoyChannel.send;
     this.sendMapResetVote = mapResetVoteChannel.send;
     this.sendMapReset = mapResetChannel.send;
+    this.sendConfig = configChannel.send;
+
+    // Incoming synchronized room configuration from host
+    configChannel.onReceive((data, peerId) => {
+      if (!data || !data.config) return;
+      this.config = { ...this.config, ...data.config };
+      if (data.mapSeed !== undefined) this.mapSeed = data.mapSeed;
+      for (const cb of this.configListeners) {
+        cb(this.config, peerId);
+      }
+    });
 
     // Incoming map reset vote actions
     mapResetVoteChannel.onReceive((data, peerId) => {
@@ -191,6 +211,9 @@ export class GameNetwork {
       console.log(`[Mesh] Peer connected: ${peerId}`);
       this.peers.set(peerId, { id: peerId, ping: 40, lastSeen: Date.now() });
       this.updateMasterElection();
+      if (this.isMaster && this.sendConfig) {
+        this.sendConfig({ config: this.config, mapSeed: this.mapSeed }, peerId);
+      }
       this.onPeerJoined(peerId);
       this.onCombatLog(`🛰️ Pilot joined the mesh: ${peerId.slice(0, 5)}`);
     };
@@ -223,6 +246,7 @@ export class GameNetwork {
         roomId: this.roomId,
         roomName: this.roomName,
         mapSeed: this.mapSeed,
+        config: this.config,
         isMaster: () => this.isMaster,
         getPlayerCount: () => this.peers.size + 1
       });
@@ -263,6 +287,7 @@ export class GameNetwork {
           roomId: this.roomId,
           roomName: this.roomName,
           mapSeed: this.mapSeed,
+          config: this.config,
           isMaster: () => this.isMaster,
           getPlayerCount: () => this.peers.size + 1
         });
@@ -291,6 +316,18 @@ export class GameNetwork {
   broadcastCannon(shotData) {
     if (this.sendCannon) {
       this.sendCannon(shotData);
+    }
+  }
+
+  onConfig(cb) {
+    this.configListeners.add(cb);
+    return () => this.configListeners.delete(cb);
+  }
+
+  broadcastConfig(newConfig) {
+    this.config = { ...this.config, ...newConfig };
+    if (this.sendConfig) {
+      this.sendConfig({ config: this.config, mapSeed: this.mapSeed });
     }
   }
 

@@ -144,6 +144,12 @@ class LobbyService {
         masterId: selfId,
         playerCount: count,
         mapSeed: match.mapSeed || 42,
+        config: match.config || {
+          voxelQuality: 'low',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10
+        },
         timestamp: Date.now(),
         ttlMs: ROOM_TTL_MS
       };
@@ -180,6 +186,12 @@ class LobbyService {
       const remainingTTL = Math.max(0, Math.round((room.lastSeen + room.ttlMs - now) / 1000));
       result.push({
         ...room,
+        config: room.config || {
+          voxelQuality: 'low',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10
+        },
         ttlSecondsRemaining: remainingTTL
       });
     }
