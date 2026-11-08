@@ -3,13 +3,12 @@ import { createActionChannel } from './actions.js';
 
 export const APP_ID = 'rockets-3d-space-shooter';
 export const LOBBY_ROOM_ID = 'rockets_public_directory_v1';
-export const HEARTBEAT_INTERVAL_MS = 3000;
-export const ROOM_TTL_MS = 12000;
+export const HEARTBEAT_INTERVAL_MS = 6000;
+export const ROOM_TTL_MS = 18000;
 
 export const RELIABLE_NOSTR_RELAYS = [
+  'wss://relay.primal.net',
   'wss://nos.lol',
-  'wss://relay.damus.io',
-  'wss://relay.snort.social',
   'wss://nostr.mom'
 ];
 

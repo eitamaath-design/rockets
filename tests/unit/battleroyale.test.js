@@ -228,7 +228,7 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
 
       const asteroid = space.asteroids[0];
       // Position ship right on the uncarved asteroid perimeter
-      ship.position.copy(asteroid.position).add(new THREE.Vector3(asteroid.radius + 1.0, 0, 0));
+      ship.position.copy(asteroid.position).add(new THREE.Vector3(asteroid.radius * 0.80, 0, 0));
       ship.velocity.set(-15, 0, 0); // Moving into asteroid
 
       // Frame 1: collision occurs and inflicts damage

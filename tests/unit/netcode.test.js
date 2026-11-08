@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
 import { RemoteShip } from '../../src/game/remoteShip.js';
 import { GameNetwork } from '../../src/net/network.js';
+import { RELIABLE_NOSTR_RELAYS, HEARTBEAT_INTERVAL_MS, ROOM_TTL_MS } from '../../src/net/lobby.js';
 
 describe('Netcode & Leader Election', () => {
   describe('Deterministic Master Election Protocol', () => {
@@ -289,6 +290,18 @@ describe('Netcode & Leader Election', () => {
       expect(list[0].config).toEqual(testConfig);
       expect(list[0].config.voxelQuality).toBe('high');
       expect(list[0].config.asteroidCount).toBe(150);
+    });
+  });
+
+  describe('Nostr Relay Health & Rate-Limit Prevention', () => {
+    it('should use reliable Nostr relays containing relay.primal.net and excluding rate-limited relay.damus.io', () => {
+      expect(RELIABLE_NOSTR_RELAYS).toContain('wss://relay.primal.net');
+      expect(RELIABLE_NOSTR_RELAYS).not.toContain('wss://relay.damus.io');
+    });
+
+    it('should configure relaxed heartbeat cadence (6000ms) and TTL (18000ms)', () => {
+      expect(HEARTBEAT_INTERVAL_MS).toBe(6000);
+      expect(ROOM_TTL_MS).toBe(18000);
     });
   });
 });

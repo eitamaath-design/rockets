@@ -188,14 +188,28 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       expect(c.carveDepth).toBeGreaterThanOrEqual(120.0);
     });
 
-    it('should initialize Central Mega-Asteroid with MarchingCubes volumetric density field', () => {
+    it('should initialize Central Mega-Asteroid with MarchingCubes volumetric density field and solid core', () => {
       const space = new SpaceEnvironment(scene, 444);
       const mega = space.asteroids[0];
       expect(mega.mc).toBeDefined();
       expect(mega.mc.isMarchingCubes).toBe(true);
       expect(mega.mc.field).toBeInstanceOf(Float32Array);
       expect(mega.mc.field.length).toBe(32 * 32 * 32);
-      expect(mega.mc.isolation).toBe(80);
+      expect(mega.mc.isolation).toBe(40.0);
+
+      // Solid core density at center >= 70 (nominal 100)
+      const half = mega.mc.halfsize;
+      const centerDensity = mega.mc.getCell(half, half, half);
+      expect(centerDensity).toBeGreaterThanOrEqual(70);
+
+      // maxPolys buffer allocation >= 100000 for mega colossus, >= 30000 for belt asteroids
+      expect(mega.mc.maxPolys).toBeGreaterThanOrEqual(100000);
+      const beltAsteroid = space.asteroids[1];
+      expect(beltAsteroid.mc.maxPolys).toBeGreaterThanOrEqual(30000);
+
+      // mc.scale.x is approximately radius / 0.65
+      expect(mega.mc.scale.x).toBeCloseTo(mega.radius / 0.65, 1);
+      expect(beltAsteroid.mc.scale.x).toBeCloseTo(beltAsteroid.radius / 0.65, 1);
     });
 
     it('should support configurable voxelQuality: low (32³), medium (48³), high (64³)', () => {

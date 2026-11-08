@@ -284,39 +284,31 @@ export class SpaceEnvironment {
 
       const mat = materials[Math.floor(prng() * materials.length)];
       const res = isMega ? this.megaResolution : (isMedium ? 20 : 16);
-      const maxPolys = isMega ? Math.max(30000, res * res * 25) : 8000;
+      const maxPolys = isMega ? 120000 : 30000;
 
       const mc = new MarchingCubes(res, mat, true, false, maxPolys);
-      mc.isolation = 80;
+      mc.maxPolys = maxPolys;
+      mc.isolation = 40.0;
 
-      // Initialize density field: D > isolation inside dist < 1.0; D < isolation outside dist > 1.0
+      // Initialize density field: Solid rock core formulation (dist < 0.6 => D >> 40.0, D approx 70-100)
       const half = mc.halfsize;
-      const p1 = prng() * Math.PI * 2;
-      const p2 = prng() * Math.PI * 2;
-      const p3 = prng() * Math.PI * 2;
-
       for (let z = 0; z < res; z++) {
-        const fz = (z - half) / half;
+        const dz = (z - half) / half;
         for (let y = 0; y < res; y++) {
-          const fy = (y - half) / half;
+          const dy = (y - half) / half;
           for (let x = 0; x < res; x++) {
-            const fx = (x - half) / half;
-            const dist = Math.hypot(fx, fy, fz);
-            const noise = (
-              Math.sin(fx * 3.2 + p1) * Math.cos(fy * 3.2 + p2) +
-              Math.sin(fz * 3.8 + p3) * 0.5 +
-              Math.sin(fx * 6.0 - fz * 5.0) * 0.25
-            ) * (isMega ? 14.0 : 12.0);
-
-            // D > isolation (80) when dist < 1.0; D < isolation (80) when dist > 1.0
-            const d = Math.max(0, Math.min(150, 80 + (1.0 - dist) * 60.0 + noise));
-            mc.setCell(x, y, z, d);
+            const dx = (x - half) / half;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const noise = Math.sin(dx * 8) * Math.cos(dy * 8) * Math.sin(dz * 8) * 0.15
+                        + Math.sin(dx * 18) * Math.cos(dz * 18) * 0.08;
+            const density = Math.max(0, (1.0 - (dist + noise)) * 100);
+            mc.setCell(x, y, z, density);
           }
         }
       }
 
       mc.update();
-      mc.scale.set(radius, radius, radius);
+      mc.scale.set(radius / 0.65, radius / 0.65, radius / 0.65);
 
       let posX = 0, posY = 0, posZ = 0;
       let driftVelocity = new THREE.Vector3(0, 0, 0);
@@ -396,13 +388,16 @@ export class SpaceEnvironment {
   /**
    * Sample volumetric density at local coordinate (lx, ly, lz) within radius R using trilinear interpolation.
    */
-  sampleDensity(mc, lx, ly, lz, R) {
+  sampleDensity(target, lx, ly, lz, R) {
+    const mc = target && target.field ? target : (target ? (target.mc || target.mesh) : null);
     if (!mc || !mc.field) return 0;
+    const radius = R !== undefined ? R : (target.radius || 1.0);
+    const scaleR = radius / 0.65;
     const res = mc.resolution;
     const half = mc.halfsize;
-    const gx = (lx / R) * half + half;
-    const gy = (ly / R) * half + half;
-    const gz = (lz / R) * half + half;
+    const gx = (lx / scaleR) * half + half;
+    const gy = (ly / scaleR) * half + half;
+    const gz = (lz / scaleR) * half + half;
 
     if (gx < 0 || gx >= res - 1 || gy < 0 || gy >= res - 1 || gz < 0 || gz >= res - 1) {
       if (gx < 0 || gx >= res || gy < 0 || gy >= res || gz < 0 || gz >= res) return 0;
@@ -443,7 +438,8 @@ export class SpaceEnvironment {
   computeDensityGradientNormal(asteroid, localPos) {
     const mc = asteroid.mc || asteroid.mesh;
     const R = asteroid.radius;
-    const delta = (R / mc.halfsize) * 0.5;
+    const scaleR = R / 0.65;
+    const delta = (scaleR / mc.halfsize) * 0.5;
 
     const dx = this.sampleDensity(mc, localPos.x + delta, localPos.y, localPos.z, R) -
                this.sampleDensity(mc, localPos.x - delta, localPos.y, localPos.z, R);
@@ -779,13 +775,14 @@ export class SpaceEnvironment {
         if (a.mesh) {
           if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
           const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
-          const localHit = hitPt.clone().applyMatrix4(invMatrix).multiplyScalar(a.radius);
+          const scaleR = a.radius / 0.65;
+          const localHit = hitPt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
 
           // Check density at hit point or along tunnel
           const density = this.sampleDensity(a.mc || a.mesh, localHit.x, localHit.y, localHit.z, a.radius);
           const insideCarving = this.checkInsideCarvings(a, localHit);
 
-          if (density <= (a.mc?.isolation || 80.0) || insideCarving) {
+          if (density <= (a.mc?.isolation || 40.0) || insideCarving) {
             entersCavity = true;
             // Ray penetrates through tunnel
             if (a.carvings && a.carvings.some(c => c.isThroughTunnel)) {
@@ -834,14 +831,16 @@ export class SpaceEnvironment {
       if (dist < minDist) {
         if (a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
         const invMatrix = a.mesh.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
-        const localShip = position.clone().applyMatrix4(invMatrix).multiplyScalar(a.radius);
+        const scaleR = a.radius / 0.65;
+        const localShip = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
 
         // Narrowphase: Check volumetric density & carved corridor clearance
         const insideCarving = this.checkInsideCarvings(a, localShip);
         const density = this.sampleDensity(a.mc || a.mesh, localShip.x, localShip.y, localShip.z, a.radius);
+        const iso = a.mc?.isolation || 40.0;
 
-        if (insideCarving || (density <= (a.mc?.isolation || 80.0) && dist < a.radius * 0.95 && a.carvings && a.carvings.length > 0)) {
-          // Free flight clearance through excavated cavern or through-tunnel!
+        if (insideCarving || density <= iso) {
+          // Free flight clearance through space, excavated cavern, or through-tunnel!
           continue;
         }
 
@@ -968,20 +967,24 @@ export class SpaceEnvironment {
    * - Localized mc.update() to regenerate surface polygons
    * - Tracks carved volume, cells, and corridor metadata for continuous clearance
    */
-  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 120.0) {
+  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0) {
     if (!asteroid || !asteroid.mesh) return;
     const mc = asteroid.mc || asteroid.mesh;
 
     if (asteroid.mesh.matrixWorld) asteroid.mesh.updateMatrixWorld(true);
     const invMatrix = asteroid.mesh.matrixWorld ? asteroid.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(asteroid.mesh.matrix).invert();
-    const localHit = hitPoint.clone().applyMatrix4(invMatrix).multiplyScalar(asteroid.radius);
+    const scaleR = asteroid.radius / 0.65;
+    const localHit = hitPoint.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
     const localDir = hitDir.clone().transformDirection(invMatrix).normalize();
 
     const isMega = (asteroid.radius >= 2500 || asteroid.isMegaAsteroid);
     const isMedium = (!isMega && asteroid.radius >= 38.0);
 
-    // Medium asteroids support through-and-through cylindrical tunnel holes
-    const tunnelRadius = isMedium ? Math.max(28.0, Math.min(36.0, carveRadius)) : carveRadius;
+    const half = mc.halfsize;
+    // Medium asteroids support through-and-through cylindrical tunnel holes; mega asteroids scale to voxel grid spacing
+    const tunnelRadius = isMedium
+      ? Math.max(28.0, Math.min(36.0, carveRadius))
+      : (isMega ? Math.max(carveRadius, (scaleR / half) * 0.75) : carveRadius);
     const effectiveDepth = isMega ? Math.max(120.0, Math.min(180.0, carveDepth * 3.5)) : (isMedium ? asteroid.radius * 2.5 : carveDepth);
 
     let carvedVolume = 0;
@@ -990,15 +993,14 @@ export class SpaceEnvironment {
     if (mc && mc.field && typeof mc.getCell === 'function') {
       const res = mc.resolution;
       const half = mc.halfsize;
-      const R = asteroid.radius;
 
       for (let z = 0; z < res; z++) {
         for (let y = 0; y < res; y++) {
           for (let x = 0; x < res; x++) {
             const lp = new THREE.Vector3(
-              (x - half) / half * R,
-              (y - half) / half * R,
-              (z - half) / half * R
+              (x - half) / half * scaleR,
+              (y - half) / half * scaleR,
+              (z - half) / half * scaleR
             );
 
             const toP = lp.clone().sub(localHit);
@@ -1022,7 +1024,7 @@ export class SpaceEnvironment {
               const factor = Math.max(0, 1.0 - (dist / tunnelRadius));
               const current = mc.getCell(x, y, z);
               if (current > 0) {
-                const sub = factor * (strength || 120.0);
+                const sub = factor * (strength || 80.0);
                 const nextVal = Math.max(0, current - sub);
                 mc.setCell(x, y, z, nextVal);
                 carvedCells++;
