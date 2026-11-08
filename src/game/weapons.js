@@ -10,7 +10,7 @@ import { logger } from '../utils/logger.js';
 class FireTrailSystem {
   constructor(scene) {
     this.scene = scene;
-    this.maxParticles = 900;
+    this.maxParticles = 1200;
     this.particles = [];
 
     this.geom = new THREE.BufferGeometry();
@@ -21,7 +21,7 @@ class FireTrailSystem {
     this.geom.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
 
     this.material = new THREE.PointsMaterial({
-      size: 4.8,
+      size: 11.5,
       vertexColors: true,
       transparent: true,
       opacity: 0.95,
@@ -31,6 +31,8 @@ class FireTrailSystem {
     });
 
     this.points = new THREE.Points(this.geom, this.material);
+    // CRITICAL: Disable frustum culling so particles never vanish when turning or looking away
+    this.points.frustumCulled = false;
     this.scene.add(this.points);
   }
 
@@ -38,17 +40,18 @@ class FireTrailSystem {
     for (let i = 0; i < count; i++) {
       if (this.particles.length >= this.maxParticles) break;
       const jitter = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.45,
-        (Math.random() - 0.5) * 0.45,
-        (Math.random() - 0.5) * 0.45
+        (Math.random() - 0.5) * 0.55,
+        (Math.random() - 0.5) * 0.55,
+        (Math.random() - 0.5) * 0.55
       );
       const pPos = pos.clone().add(jitter);
-      const pVel = dir.clone().multiplyScalar(-24.0).add(new THREE.Vector3(
-        (Math.random() - 0.5) * 9.0,
-        (Math.random() - 0.5) * 9.0,
-        (Math.random() - 0.5) * 9.0
+      const pVel = dir.clone().multiplyScalar(-20.0).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 8.0,
+        (Math.random() - 0.5) * 8.0,
+        (Math.random() - 0.5) * 8.0
       ));
-      const life = 0.32 + Math.random() * 0.22;
+      // Particle lifetime 0.8s to 1.4s for expansive billowing exhaust plume
+      const life = 0.8 + Math.random() * 0.6;
       this.particles.push({
         pos: pPos,
         vel: pVel,
@@ -67,6 +70,8 @@ class FireTrailSystem {
         continue;
       }
       p.pos.addScaledVector(p.vel, dt);
+      // Expanding billowing puffs slowly decelerate
+      p.vel.multiplyScalar(Math.pow(0.92, dt * 60));
     }
 
     const activeCount = this.particles.length;
@@ -78,19 +83,24 @@ class FireTrailSystem {
       this.positions[idx + 2] = p.pos.z;
 
       const progress = 1.0 - (p.life / p.maxLife);
-      if (progress < 0.25) {
+      if (progress < 0.20) {
+        // Blazing incandescent white/yellow core
         this.colors[idx] = 1.0;
         this.colors[idx + 1] = 0.98;
-        this.colors[idx + 2] = 0.70;
-      } else if (progress < 0.65) {
+        this.colors[idx + 2] = 0.75;
+      } else if (progress < 0.55) {
+        // Fiery expanding orange plasma flame
+        const t = (progress - 0.20) / 0.35;
         this.colors[idx] = 1.0;
-        this.colors[idx + 1] = 0.55 * (1.0 - (progress - 0.25) / 0.4);
-        this.colors[idx + 2] = 0.05;
+        this.colors[idx + 1] = 0.52 * (1.0 - t);
+        this.colors[idx + 2] = 0.05 * (1.0 - t);
       } else {
-        const fade = (1.0 - progress) / 0.35;
-        this.colors[idx] = 0.85 * fade;
-        this.colors[idx + 1] = 0.15 * fade;
-        this.colors[idx + 2] = 0.02 * fade;
+        // Cool charcoal grey smoke puff fading into space
+        const fade = (1.0 - progress) / 0.45;
+        const grey = 0.26 * fade;
+        this.colors[idx] = grey;
+        this.colors[idx + 1] = grey;
+        this.colors[idx + 2] = grey + 0.03 * fade;
       }
     }
 
@@ -535,9 +545,11 @@ export class WeaponsSystem {
       // Resolve Impact
       if (hitTargetType === 'asteroid' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 6, 0x00d4ff);
-        if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          // Primary laser continuously carves and melts deep tunnels through asteroid!
-          this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 30.0, 20.0);
+        if (typeof this.spaceEnv.damageAsteroid === 'function') {
+          // Primary laser damages small asteroids (disintegrating after 3-5 ticks) and carves deep mega-tunnels in colossal/large ones
+          this.spaceEnv.damageAsteroid(hitTargetObj, 5.0, hitPoint, fwd, 45.0, 36.0);
+        } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
+          this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 45.0, 36.0);
         }
       } else if (hitTargetType === 'ship' && hitTargetObj) {
         this.spawnExplosion(hitPoint, 8, 0x00ffff);
@@ -801,17 +813,59 @@ export class WeaponsSystem {
   }
 
   spawnExplosion(pos, radius = 12, color = 0xff6600) {
-    const geom = new THREE.SphereGeometry(radius * 0.45, 12, 10);
-    const mat = new THREE.MeshBasicMaterial({
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    // 1. Expanding incandescent fireball core
+    const coreGeom = new THREE.SphereGeometry(radius * 0.40, 12, 10);
+    const coreMat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.95,
       blending: THREE.AdditiveBlending
     });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.position.copy(pos);
+    const fireball = new THREE.Mesh(coreGeom, coreMat);
+    group.add(fireball);
 
-    this.scene.add(mesh);
+    // 2. Planar expanding shockwave ring
+    const ringGeom = new THREE.TorusGeometry(radius * 0.35, radius * 0.04, 6, 28);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffeeaa,
+      transparent: true,
+      opacity: 0.90,
+      blending: THREE.AdditiveBlending
+    });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    ring.rotation.x = Math.random() * Math.PI;
+    ring.rotation.y = Math.random() * Math.PI;
+    group.add(ring);
+
+    // 3. Radial spark debris burst
+    const sparkGeom = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+    const sparkMat = new THREE.MeshBasicMaterial({
+      color: 0xffaa33,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending
+    });
+    const sparkCount = radius > 15 ? 12 : 6;
+    const sparks = [];
+    for (let s = 0; s < sparkCount; s++) {
+      const sparkMesh = new THREE.Mesh(sparkGeom, sparkMat);
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2.0 * Math.random() - 1.0);
+      const sDir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      );
+      const sSpeed = (radius * 1.5) + Math.random() * (radius * 1.8);
+      const sVel = sDir.multiplyScalar(sSpeed);
+      group.add(sparkMesh);
+      sparks.push({ mesh: sparkMesh, vel: sVel });
+    }
+
+    this.scene.add(group);
     audio.playExplosion(radius > 15 ? 1.6 : 0.85, pos);
 
     if (this.spaceEnv && typeof this.spaceEnv.triggerCombatFlash === 'function') {
@@ -819,9 +873,13 @@ export class WeaponsSystem {
     }
 
     this.explosions.push({
-      mesh,
-      maxLife: 0.45,
-      life: 0.45,
+      group,
+      mesh: group, // Backwards compatibility for tests and queries
+      fireball,
+      ring,
+      sparks,
+      maxLife: 0.55,
+      life: 0.55,
       maxRadius: radius
     });
   }
@@ -956,7 +1014,9 @@ export class WeaponsSystem {
       const hitAsteroid = this.spaceEnv.checkCollision(m.group.position, 1.8);
       if (hitAsteroid) {
         this.spawnExplosion(m.group.position, 22, 0xff5500);
-        if (typeof this.spaceEnv.carveAsteroid === 'function') {
+        if (typeof this.spaceEnv.damageAsteroid === 'function') {
+          this.spaceEnv.damageAsteroid(hitAsteroid, 50.0, m.group.position, m.dir, 55.0, 42.0);
+        } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
           this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 45.0, 35.0);
         }
         detonated = true;
@@ -1125,19 +1185,55 @@ export class WeaponsSystem {
       }
     }
 
-    // 6. Update Explosions
+    // 6. Update Multi-Stage Explosions (fireball, shockwave ring, spark plume)
     for (let i = this.explosions.length - 1; i >= 0; i--) {
       const exp = this.explosions[i];
       exp.life -= dt;
       if (exp.life <= 0) {
-        this.scene.remove(exp.mesh);
+        if (exp.group && exp.group.parent) {
+          exp.group.parent.remove(exp.group);
+        } else if (exp.mesh && exp.mesh.parent) {
+          exp.mesh.parent.remove(exp.mesh);
+        }
         this.explosions.splice(i, 1);
         continue;
       }
       const progress = 1.0 - (exp.life / exp.maxLife);
-      const scale = 1.0 + progress * 2.2;
-      exp.mesh.scale.set(scale, scale, scale);
-      exp.mesh.material.opacity = (exp.life / exp.maxLife) * 0.9;
+      const fade = exp.life / exp.maxLife;
+
+      // Stage 1: Expanding fireball
+      if (exp.fireball) {
+        const fbScale = 1.0 + progress * 2.4;
+        exp.fireball.scale.set(fbScale, fbScale, fbScale);
+        if (exp.fireball.material) {
+          exp.fireball.material.opacity = Math.max(0, fade * 0.95);
+        }
+      } else if (exp.mesh && exp.mesh.material) {
+        const scale = 1.0 + progress * 2.2;
+        exp.mesh.scale.set(scale, scale, scale);
+        exp.mesh.material.opacity = fade * 0.9;
+      }
+
+      // Stage 2: Rapid shockwave ring expansion
+      if (exp.ring) {
+        const ringScale = 1.0 + progress * 4.2;
+        exp.ring.scale.set(ringScale, ringScale, ringScale);
+        if (exp.ring.material) {
+          exp.ring.material.opacity = Math.max(0, (1.0 - progress) * 0.85);
+        }
+      }
+
+      // Stage 3: Radial spark plume dispersal
+      if (exp.sparks) {
+        for (let s = 0; s < exp.sparks.length; s++) {
+          const spark = exp.sparks[s];
+          spark.mesh.position.addScaledVector(spark.vel, dt);
+          spark.vel.multiplyScalar(Math.pow(0.90, dt * 60));
+          if (spark.mesh.material) {
+            spark.mesh.material.opacity = Math.max(0, (1.0 - progress) * 0.9);
+          }
+        }
+      }
     }
 
     // 7. Update Fire Trails
@@ -1166,7 +1262,10 @@ export class WeaponsSystem {
     for (const m of this.missiles) this.scene.remove(m.group);
     for (const d of this.decoys) this.scene.remove(d.group);
     for (const mine of this.mines) this.scene.remove(mine.mesh);
-    for (const e of this.explosions) this.scene.remove(e.mesh);
+    for (const e of this.explosions) {
+      if (e.group && e.group.parent) e.group.parent.remove(e.group);
+      else if (e.mesh && e.mesh.parent) e.mesh.parent.remove(e.mesh);
+    }
     this.fireTrails.cleanup();
   }
 }

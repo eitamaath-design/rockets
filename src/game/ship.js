@@ -50,6 +50,7 @@ export class PlayerShip {
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5; // seconds of shield protection on spawn
     this.asteroidImpactDebounceTimer = 0.0; // Debounce cooldown preventing multi-frame collision grinds
+    this.shipCollisionDebounceTimer = 0.0; // Debounce cooldown for ship-to-ship bumper collisions
     this.score = 0;
     this.kills = 0;
     this.deaths = 0;
@@ -96,6 +97,7 @@ export class PlayerShip {
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
     this.asteroidImpactDebounceTimer = 0.0;
+    this.shipCollisionDebounceTimer = 0.0;
 
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.quaternion);
@@ -233,6 +235,9 @@ export class PlayerShip {
     }
     if (this.asteroidImpactDebounceTimer > 0) {
       this.asteroidImpactDebounceTimer = Math.max(0, this.asteroidImpactDebounceTimer - dt);
+    }
+    if (this.shipCollisionDebounceTimer > 0) {
+      this.shipCollisionDebounceTimer = Math.max(0, this.shipCollisionDebounceTimer - dt);
     }
 
     if (this.boostCooldownTimer > 0) {

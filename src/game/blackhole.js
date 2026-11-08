@@ -285,11 +285,19 @@ export class BlackHoleSystem {
           a.velocity.addScaledVector(delta.normalize(), grav * dt);
         }
 
-        // Swallowed by event horizon
-        if (dist <= (this.eventHorizonRadius + a.radius * 0.3)) {
-          // Remove swallowed asteroid
-          this.spaceEnv.scene.remove(a.mesh);
-          this.spaceEnv.asteroids.splice(i, 1);
+        // Swallowed by event horizon when hull enters
+        if (dist <= (this.eventHorizonRadius + a.radius * 0.85)) {
+          // Safely remove swallowed asteroid from asteroidGroup and array
+          if (typeof this.spaceEnv.removeAsteroid === 'function') {
+            this.spaceEnv.removeAsteroid(a);
+          } else {
+            if (a.mesh && a.mesh.parent) {
+              a.mesh.parent.remove(a.mesh);
+            } else {
+              this.spaceEnv.scene.remove(a.mesh);
+            }
+            this.spaceEnv.asteroids.splice(i, 1);
+          }
           audio.playExplosion(2.2, this.position);
           logger.log('BLACK_HOLE', `Asteroid swallowed by singularity! (${this.spaceEnv.asteroids.length} remaining)`);
         }

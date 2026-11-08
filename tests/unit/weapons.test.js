@@ -204,5 +204,58 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(weapons.decoys.length).toBe(1);
       expect(weapons.decoys[0].speed).toBeGreaterThan(50);
     });
+
+    it('should configure FireTrailSystem with frustumCulled false and long-lived smoke particles', () => {
+      expect(weapons.fireTrails.points.frustumCulled).toBe(false);
+
+      weapons.fireTrails.emit(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 1), 4);
+      expect(weapons.fireTrails.particles.length).toBeGreaterThanOrEqual(4);
+      for (const p of weapons.fireTrails.particles) {
+        expect(p.maxLife).toBeGreaterThanOrEqual(0.8);
+        expect(p.maxLife).toBeLessThanOrEqual(1.45);
+      }
+    });
+
+    it('should spawn multi-stage explosion with fireball, expanding shockwave ring, and spark plume', () => {
+      const pos = new THREE.Vector3(50, 10, -20);
+      weapons.spawnExplosion(pos, 20, 0xff5500);
+
+      expect(weapons.explosions.length).toBe(1);
+      const exp = weapons.explosions[0];
+      expect(exp.fireball).toBeDefined();
+      expect(exp.ring).toBeDefined();
+      expect(exp.sparks).toBeDefined();
+      expect(exp.sparks.length).toBeGreaterThanOrEqual(6);
+
+      const initialRingScale = exp.ring.scale.x;
+      // Advance animation
+      weapons.update(0.15, ship, new Map(), () => {});
+      expect(exp.ring.scale.x).toBeGreaterThan(initialRingScale);
+    });
+
+    it('should invoke damageAsteroid when laser impacts an asteroid', () => {
+      let damaged = false;
+      let dmgAmount = 0;
+      let cRadius = 0;
+      let cDepth = 0;
+      const fakeAsteroid = { mesh: new THREE.Mesh(), radius: 30, hp: 20 };
+      mockSpaceEnv.checkRayCollision = () => ({
+        asteroid: fakeAsteroid,
+        distance: 100,
+        hitPoint: new THREE.Vector3(0, 0, -100)
+      });
+      mockSpaceEnv.damageAsteroid = (ast, dmg, pt, dir, r, d) => {
+        damaged = true;
+        dmgAmount = dmg;
+        cRadius = r;
+        cDepth = d;
+      };
+
+      weapons.triggerPrimary(true, ship, 1000);
+      expect(damaged).toBe(true);
+      expect(dmgAmount).toBe(5.0);
+      expect(cRadius).toBeGreaterThanOrEqual(42.0);
+      expect(cDepth).toBeGreaterThanOrEqual(32.0);
+    });
   });
 });

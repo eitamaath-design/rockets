@@ -429,6 +429,72 @@ export class GameEngine {
         }
       }
 
+      // 4b. Ship-to-Ship Elastic Bumper Collision Bounce
+      if (!this.playerShip.isDead) {
+        const shipRadius = 2.8;
+        const minShipDist = shipRadius * 2.0; // 5.6u
+        for (const remote of this.remoteShips.values()) {
+          if (!remote || remote.isDead) continue;
+          const p1 = this.playerShip.position;
+          const p2 = remote.position;
+          const dx = p1.x - p2.x;
+          const dy = p1.y - p2.y;
+          const dz = p1.z - p2.z;
+          const distSq = dx * dx + dy * dy + dz * dz;
+
+          if (distSq < minShipDist * minShipDist && distSq > 0.0001) {
+            const dist = Math.sqrt(distSq);
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const nz = dz / dist;
+
+            // Elastic separation push
+            const overlap = minShipDist - dist;
+            p1.x += nx * overlap * 0.55;
+            p1.y += ny * overlap * 0.55;
+            p1.z += nz * overlap * 0.55;
+
+            p2.x -= nx * overlap * 0.45;
+            p2.y -= ny * overlap * 0.45;
+            p2.z -= nz * overlap * 0.45;
+
+            // Velocity deflection along collision normal
+            const rVel = this.playerShip.velocity.clone().sub(remote.velocity || new THREE.Vector3());
+            const vNorm = rVel.x * nx + rVel.y * ny + rVel.z * nz;
+
+            if (vNorm < 0) {
+              const restitution = 0.85; // Bouncy energy shield bumper restitution
+              const impulse = -(1 + restitution) * vNorm * 0.5;
+
+              this.playerShip.velocity.x += nx * impulse;
+              this.playerShip.velocity.y += ny * impulse;
+              this.playerShip.velocity.z += nz * impulse;
+
+              if (remote.velocity) {
+                remote.velocity.x -= nx * impulse;
+                remote.velocity.y -= ny * impulse;
+                remote.velocity.z -= nz * impulse;
+              }
+
+              // Sound & Shield Flash
+              audio.playExplosion(0.65, p1);
+              if (typeof remote.triggerShieldFlash === 'function') {
+                remote.triggerShieldFlash();
+              }
+
+              // Debounced collision damage
+              if (this.playerShip.shipCollisionDebounceTimer <= 0) {
+                const impactSpeed = Math.abs(vNorm);
+                const bumpDamage = Math.round(Math.min(25, Math.max(8, impactSpeed * 0.6)));
+                this.playerShip.takeDamage(bumpDamage);
+                this.playerShip.shipCollisionDebounceTimer = 0.25;
+                this.cockpit.triggerDamageFlash();
+              }
+            }
+          }
+        }
+      }
+
       // 5. Inactivity Engagement Beacon (30s+ no combat between ships)
       this.timeSinceLastCombat += dt;
       if (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0) {

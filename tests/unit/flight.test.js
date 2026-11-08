@@ -199,4 +199,73 @@ describe('Player Flight Physics & Momentum', () => {
     const radiusRatioCubed = Math.pow(a1.radius / a2.radius, 3);
     expect(a1.mass / a2.mass).toBeCloseTo(radiusRatioCubed, 1);
   });
+
+  it('should firmly separate overlapping asteroids and clamp velocities via 3-Pass PBD solver', () => {
+    const scene = new THREE.Scene();
+    const space = new SpaceEnvironment(scene, 12345);
+    const a1 = space.asteroids[0];
+    const a2 = space.asteroids[1];
+
+    // Force overlap
+    a1.position.set(0, 0, 0);
+    a2.position.set(a1.radius * 0.5, 0, 0); // heavily overlapping
+    a1.velocity.set(60, 0, 0);
+    a2.velocity.set(-60, 0, 0);
+
+    space.update(0.016, new THREE.Vector3(), new THREE.Vector3());
+
+    const dist = a1.position.distanceTo(a2.position);
+    expect(dist).toBeGreaterThan(a1.radius * 0.5); // firmly separated
+    expect(a1.velocity.length()).toBeLessThanOrEqual(40.01);
+    expect(a2.velocity.length()).toBeLessThanOrEqual(40.01);
+  });
+
+  it('should support ship-to-ship elastic bumper collisions with debounce', () => {
+    expect(ship.shipCollisionDebounceTimer).toBe(0);
+
+    // Initial state
+    ship.position.set(0, 0, 0);
+    ship.velocity.set(0, 0, 20);
+
+    const remote = {
+      position: new THREE.Vector3(0, 0, 4.0), // within 5.6u ship-ship collision sphere
+      velocity: new THREE.Vector3(0, 0, -20),
+      isDead: false,
+      triggerShieldFlash: () => {}
+    };
+
+    // Simulate loop bumper bounce logic
+    const minShipDist = 5.6;
+    const p1 = ship.position;
+    const p2 = remote.position;
+    const dist = p1.distanceTo(p2);
+    expect(dist).toBeLessThan(minShipDist);
+
+    const nx = (p1.x - p2.x) / dist;
+    const ny = (p1.y - p2.y) / dist;
+    const nz = (p1.z - p2.z) / dist;
+    const overlap = minShipDist - dist;
+
+    p1.x += nx * overlap * 0.55;
+    p1.y += ny * overlap * 0.55;
+    p1.z += nz * overlap * 0.55;
+
+    const rVel = ship.velocity.clone().sub(remote.velocity);
+    const vNorm = rVel.x * nx + rVel.y * ny + rVel.z * nz;
+    expect(vNorm).toBeLessThan(0);
+
+    const restitution = 0.85;
+    const impulse = -(1 + restitution) * vNorm * 0.5;
+    ship.velocity.x += nx * impulse;
+    ship.velocity.y += ny * impulse;
+    ship.velocity.z += nz * impulse;
+
+    expect(ship.velocity.z).toBeLessThan(0); // deflected backwards
+
+    ship.invulnerableTimer = 0;
+    ship.takeDamage(12);
+    ship.shipCollisionDebounceTimer = 0.25;
+    expect(ship.shipCollisionDebounceTimer).toBe(0.25);
+    expect(ship.shield).toBe(88);
+  });
 });

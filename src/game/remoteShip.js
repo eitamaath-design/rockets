@@ -15,6 +15,7 @@ export class RemoteShip {
     this.targetPosition = new THREE.Vector3();
     this.targetQuaternion = new THREE.Quaternion();
     this.targetVelocity = new THREE.Vector3();
+    this.velocity = this.targetVelocity;
     this.lastPacketTime = performance.now();
 
     // Stats

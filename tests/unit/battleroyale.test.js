@@ -243,5 +243,59 @@ describe('Battle Royale Mechanics: Black Hole, Safe Zone & Tactical Power-Ups', 
       const hpAfterSecond = ship.hp + ship.shield;
       expect(hpAfterSecond).toBe(hpAfterFirst); // No duplicate damage!
     });
+
+    it('should generate at least 3 Colossal Asteroids with R=160-240 and Poisson-spaced non-overlap', () => {
+      const space = new SpaceEnvironment(scene, 12345);
+      const colossal = space.asteroids.filter(a => a.radius >= 160.0 && a.radius <= 245.0);
+      expect(colossal.length).toBeGreaterThanOrEqual(3);
+
+      // Verify pairwise non-overlap across all generated asteroids
+      for (let i = 0; i < space.asteroids.length; i++) {
+        const a1 = space.asteroids[i];
+        for (let j = i + 1; j < space.asteroids.length; j++) {
+          const a2 = space.asteroids[j];
+          const dist = a1.position.distanceTo(a2.position);
+          expect(dist).toBeGreaterThanOrEqual(a1.radius + a2.radius + 15.0);
+        }
+      }
+    });
+
+    it('should manage destructible HP for small asteroids and disintegrate them via damageAsteroid', () => {
+      const space = new SpaceEnvironment(scene, 42);
+      const smallAsteroids = space.asteroids.filter(a => a.radius <= 42.0);
+      expect(smallAsteroids.length).toBeGreaterThan(0);
+
+      const target = smallAsteroids[0];
+      expect(target.hp).toBe(20);
+
+      // Tick 1-3: deals damage without destroying
+      const hitPoint = target.position.clone();
+      const hitDir = new THREE.Vector3(0, 0, 1);
+      const res1 = space.damageAsteroid(target, 5, hitPoint, hitDir);
+      expect(res1.destroyed).toBe(false);
+      expect(target.hp).toBe(15);
+
+      // Finish off asteroid with remaining damage
+      const res2 = space.damageAsteroid(target, 15, hitPoint, hitDir);
+      expect(res2.destroyed).toBe(true);
+      expect(space.asteroids.includes(target)).toBe(false);
+      expect(space.asteroidGroup.children.includes(target.mesh)).toBe(false);
+    });
+
+    it('should safely detach swallowed asteroids from asteroidGroup in Black Hole devour', () => {
+      const space = new SpaceEnvironment(scene, 77);
+      const blackHole = new BlackHoleSystem(scene);
+      const a = space.asteroids[0];
+
+      // Position black hole directly at the asteroid
+      blackHole.startPosition.copy(a.position);
+      blackHole.targetPosition.copy(a.position);
+      blackHole.position.copy(a.position);
+      const initialCount = space.asteroids.length;
+
+      blackHole.update(0.016, ship, new Map(), space, null, () => {});
+      expect(space.asteroids.length).toBe(initialCount - 1);
+      expect(space.asteroidGroup.children.includes(a.mesh)).toBe(false);
+    });
   });
 });
