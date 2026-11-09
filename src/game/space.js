@@ -1521,11 +1521,11 @@ export class SpaceEnvironment {
    * Samples center, nose, tail, left/right wings, and belly using orientation quaternion (or velocity direction).
    * Ensures zero visual clipping with robust outward margin while maintaining insideCarving tunnel/cavern clearance.
    */
-  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200, orientation = null) {
+  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200, orientation = null, dt = 0.016) {
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
       const dist = position.distanceTo(a.position);
-      const boundCheck = a.radius * 1.12 + shipRadius;
+      const boundCheck = a.radius * 1.12 + shipRadius + (velocity ? velocity.length() * dt : 0);
 
       if (dist < boundCheck) {
         if (a.mesh && a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
@@ -1537,27 +1537,52 @@ export class SpaceEnvironment {
         if (right.lengthSq() < 0.001) right.set(1, 0, 0);
         const up = orientation ? new THREE.Vector3(0, 1, 0).applyQuaternion(orientation).normalize() : new THREE.Vector3(0, 1, 0);
 
-        const hullPoints = [
-          { name: 'center', pt: position.clone() },
-          { name: 'nose', pt: position.clone().addScaledVector(forward, shipRadius) },
-          { name: 'tail', pt: position.clone().addScaledVector(forward, -shipRadius * 0.7) },
-          { name: 'leftWing', pt: position.clone().addScaledVector(right, -shipRadius * 0.8) },
-          { name: 'rightWing', pt: position.clone().addScaledVector(right, shipRadius * 0.8) },
-          { name: 'belly', pt: position.clone().addScaledVector(up, -shipRadius * 0.6) }
-        ];
+        const iso = a.mc?.isolation || 40.0;
+
+        // Swept sub-stepping if velocity is significant and dt > 0.0001
+        const speed = velocity ? velocity.length() : 0;
+        const d = speed * dt;
+        const voxelSize = (2.0 * scaleR) / (a.mc?.resolution || 32);
+        const maxStep = Math.max(0.6, 0.5 * voxelSize);
+        const N_steps = (speed > 0.1 && dt > 0.0001) ? Math.max(1, Math.min(16, Math.ceil(d / maxStep))) : 1;
+        const subDt = dt / N_steps;
+
+        const startPos = position.clone().addScaledVector(velocity || new THREE.Vector3(), -dt);
 
         let colliding = false;
         let intersectingLocalPt = null;
-        const iso = a.mc?.isolation || 40.0;
+        let collisionPos = position.clone();
 
-        for (const hp of hullPoints) {
-          const localPt = hp.pt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-          const insideCarving = this.checkInsideCarvings(a, localPt);
-          const density = this.sampleDensity(a.mc || a.mesh, localPt.x, localPt.y, localPt.z, a.radius);
+        for (let s = 1; s <= N_steps; s++) {
+          const currPos = startPos.clone().addScaledVector(velocity || new THREE.Vector3(), subDt * s);
+          const hullPoints = [
+            { name: 'center', pt: currPos.clone() },
+            { name: 'nose', pt: currPos.clone().addScaledVector(forward, shipRadius) },
+            { name: 'tail', pt: currPos.clone().addScaledVector(forward, -shipRadius * 0.7) },
+            { name: 'leftWing', pt: currPos.clone().addScaledVector(right, -shipRadius * 0.8) },
+            { name: 'rightWing', pt: currPos.clone().addScaledVector(right, shipRadius * 0.8) },
+            { name: 'belly', pt: currPos.clone().addScaledVector(up, -shipRadius * 0.6) }
+          ];
 
-          if (!insideCarving && density > iso) {
+          let stepColliding = false;
+          let stepIntersectingLocal = null;
+
+          for (const hp of hullPoints) {
+            const localPt = hp.pt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+            const insideCarving = this.checkInsideCarvings(a, localPt);
+            const density = this.sampleDensity(a.mc || a.mesh, localPt.x, localPt.y, localPt.z, a.radius);
+
+            if (!insideCarving && density > iso) {
+              stepColliding = true;
+              stepIntersectingLocal = localPt;
+              break;
+            }
+          }
+
+          if (stepColliding) {
             colliding = true;
-            intersectingLocalPt = localPt;
+            intersectingLocalPt = stepIntersectingLocal;
+            collisionPos.copy(currPos);
             break;
           }
         }
@@ -1565,6 +1590,8 @@ export class SpaceEnvironment {
         if (!colliding) {
           continue;
         }
+
+        position.copy(collisionPos);
 
         // Intersecting solid rock! Calculate outward normal from continuous density gradient ∇D
         const normal = this.computeDensityGradientNormal(a, intersectingLocalPt || position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR));
@@ -1574,12 +1601,21 @@ export class SpaceEnvironment {
         const stepInc = 1.5;
         const safeMargin = shipRadius + 0.6;
 
+        const hullPointsAtCollision = [
+          { name: 'center', pt: position.clone() },
+          { name: 'nose', pt: position.clone().addScaledVector(forward, shipRadius) },
+          { name: 'tail', pt: position.clone().addScaledVector(forward, -shipRadius * 0.7) },
+          { name: 'leftWing', pt: position.clone().addScaledVector(right, -shipRadius * 0.8) },
+          { name: 'rightWing', pt: position.clone().addScaledVector(right, shipRadius * 0.8) },
+          { name: 'belly', pt: position.clone().addScaledVector(up, -shipRadius * 0.6) }
+        ];
+
         while (stepDist < maxPush) {
           position.addScaledVector(normal, stepInc);
           stepDist += stepInc;
 
           let allClear = true;
-          for (const hp of hullPoints) {
+          for (const hp of hullPointsAtCollision) {
             const testPt = hp.pt.clone().addScaledVector(normal, stepDist);
             const testLocal = testPt.applyMatrix4(invMatrix).multiplyScalar(scaleR);
             const insideCarving = this.checkInsideCarvings(a, testLocal);
@@ -1593,14 +1629,19 @@ export class SpaceEnvironment {
         }
         position.addScaledVector(normal, safeMargin);
 
-        const relVel = velocity.clone().sub(a.velocity);
+        const relVel = (velocity || new THREE.Vector3()).clone().sub(a.velocity);
         const vNorm = relVel.dot(normal);
 
         if (vNorm < 0) {
           const restitution = 0.85;
           const impulse = -(1 + restitution) * vNorm * shipMass;
 
-          velocity.addScaledVector(normal, (impulse / shipMass));
+          if (velocity) {
+            velocity.addScaledVector(normal, (impulse / shipMass));
+            // tangential friction damping
+            const tangentVel = velocity.clone().addScaledVector(normal, -velocity.dot(normal));
+            velocity.addScaledVector(tangentVel, -0.15);
+          }
 
           if (!a.isMegaAsteroid) {
             a.velocity.addScaledVector(normal, -(impulse / a.mass));

@@ -405,7 +405,7 @@ export class PlayerShip {
 
     this.handleRotation(dt);
     this.handleThrustAndMovement(dt);
-    this.handleAsteroidCollisions();
+    this.handleAsteroidCollisions(dt);
 
     // Sync camera to Pilot POV (desiredQuaternion)
     this.camera.position.copy(this.position);
@@ -523,12 +523,12 @@ export class PlayerShip {
     }
   }
 
-  handleAsteroidCollisions() {
+  handleAsteroidCollisions(dt = 0.016) {
     const shipRadius = 2.8;
 
     // Use full Newtonian momentum resolution if supported by space environment
     if (this.spaceEnv && typeof this.spaceEnv.resolveShipCollision === 'function') {
-      const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass, this.quaternion);
+      const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass, this.quaternion, dt);
       if (collisionResult) {
         if (this.asteroidImpactDebounceTimer <= 0) {
           this.takeDamage(collisionResult.impactDamage);

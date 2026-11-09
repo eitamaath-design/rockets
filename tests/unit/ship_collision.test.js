@@ -174,4 +174,45 @@ describe('Hull-Radius-Aware Multi-Point Ship Collision Resolution', () => {
     const result = spaceEnv.resolveShipCollision(ship.position, ship.velocity, ship.radius, ship.mass, ship.quaternion);
     expect(result).toBeNull();
   });
+
+  it('e) Continuous swept sub-stepping at high speed (420 u/s): trajectory is sub-stepped and collision detected without tunneling', () => {
+    const scaleR = 100 / 0.80;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.position.set(0, 0, 3000);
+    mesh.scale.set(scaleR, scaleR, scaleR);
+    mesh.updateMatrix();
+    mesh.updateMatrixWorld(true);
+
+    const testAsteroid = {
+      id: 'sweep_rock',
+      position: mesh.position,
+      radius: 100,
+      mass: 50000,
+      velocity: new THREE.Vector3(0, 0, 0),
+      mesh,
+      mc: {
+        resolution: 32,
+        halfsize: 16,
+        size: 32,
+        size2: 1024,
+        size3: 32768,
+        isolation: 40.0,
+        field: new Float32Array(32768).fill(100),
+        getCell(x, y, z) { return 100; },
+        setCell() {},
+        update() {}
+      }
+    };
+    spaceEnv.asteroids.push(testAsteroid);
+
+    // Start position outside asteroid bounds, moving towards rock at 420 u/s
+    ship.position.set(0, 0, 3110);
+    ship.velocity.set(0, 0, -420.0);
+    ship.quaternion.set(0, 0, 0, 1);
+
+    const dt = 0.016; // 16ms frame
+    const result = spaceEnv.resolveShipCollision(ship.position, ship.velocity, ship.radius, ship.mass, ship.quaternion, dt);
+    expect(result).not.toBeNull();
+    expect(result.impactDamage).toBeGreaterThan(0);
+  });
 });
