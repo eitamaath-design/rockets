@@ -147,51 +147,65 @@ export class MeteorSystem {
     const radius = radiusMin + Math.random() * (radiusMax - radiusMin);
     const mass = Math.round(1200000 * Math.pow(radius / 56.0, 3));
 
-    // 3. 3D Model: True craggy molten asteroid engulfed in turbulent fire mantles
+    // 3. 3D Model: True craggy molten asteroid core with see-through transparent fire shroud & mantle
     const group = new THREE.Group();
     group.position.copy(spawnPos);
 
     const coreGeom = new THREE.DodecahedronGeometry(radius, 2);
+    // Deterministic pseudo-random radial vertex perturbation for asteroid cragginess
+    const posAttr = coreGeom.attributes.position;
+    const vertex = new THREE.Vector3();
+    for (let i = 0; i < posAttr.count; i++) {
+      vertex.fromBufferAttribute(posAttr, i);
+      const noiseFactor = 1.0 + 0.15 * Math.sin(i * 12.9898 + radius) * Math.cos(i * 78.233);
+      vertex.multiplyScalar(noiseFactor);
+      posAttr.setXYZ(i, vertex.x, vertex.y, vertex.z);
+    }
+    coreGeom.computeVertexNormals();
+
     const coreMat = new THREE.MeshStandardMaterial({
-      color: 0x1a0802,
-      emissive: 0xff3300,
-      emissiveIntensity: 4.2,
-      roughness: 0.88,
-      metalness: 0.25
+      color: 0x1f1814,
+      emissive: 0xff4400,
+      emissiveIntensity: 3.5,
+      roughness: 0.90,
+      metalness: 0.20
     });
     const coreMesh = new THREE.Mesh(coreGeom, coreMat);
     group.add(coreMesh);
 
-    // Blazing white-hot incandescent inner core
-    const coronaGeom = new THREE.SphereGeometry(radius * 0.85, 16, 12);
-    const coronaMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+    // Inner glowing magma layer
+    const magmaGeom = new THREE.IcosahedronGeometry(radius * 0.92, 2);
+    const magmaMat = new THREE.MeshBasicMaterial({
+      color: 0xff6600,
       transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending
-    });
-    const coronaMesh = new THREE.Mesh(coronaGeom, coronaMat);
-    group.add(coronaMesh);
-
-    // Surrounding raging turbulent fire envelope (fire around the asteroid)
-    const fireEnvelopeGeom = new THREE.IcosahedronGeometry(radius * 1.25, 2);
-    const fireEnvelopeMat = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.65,
+      opacity: 0.50,
       blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const magmaMesh = new THREE.Mesh(magmaGeom, magmaMat);
+    group.add(magmaMesh);
+
+    // See-through transparent fire shroud / mantle
+    const fireShroudGeom = new THREE.IcosahedronGeometry(radius * 1.22, 2);
+    const fireShroudMat = new THREE.MeshBasicMaterial({
+      color: 0xff5511,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
       side: THREE.DoubleSide
     });
-    const fireEnvelopeMesh = new THREE.Mesh(fireEnvelopeGeom, fireEnvelopeMat);
-    group.add(fireEnvelopeMesh);
+    const fireShroudMesh = new THREE.Mesh(fireShroudGeom, fireShroudMat);
+    group.add(fireShroudMesh);
 
-    // Outer blazing yellow plasma halo
-    const haloGeom = new THREE.IcosahedronGeometry(radius * 1.45, 2);
+    // Outer flame/plasma halo
+    const haloGeom = new THREE.IcosahedronGeometry(radius * 1.42, 2);
     const haloMat = new THREE.MeshBasicMaterial({
       color: 0xffaa00,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.35,
       blending: THREE.AdditiveBlending,
+      depthWrite: false,
       side: THREE.DoubleSide
     });
     const haloMesh = new THREE.Mesh(haloGeom, haloMat);
@@ -202,8 +216,14 @@ export class MeteorSystem {
     this.activeMeteor = {
       group,
       coreMesh,
-      fireEnvelopeMesh,
+      magmaMesh,
+      fireShroudMesh,
       haloMesh,
+      // Backward-compatible aliases
+      coronaMesh: magmaMesh,
+      fireEnvelopeMesh: fireShroudMesh,
+      innerFlame: fireShroudMesh,
+      outerPlasma: haloMesh,
       position: group.position,
       velocity,
       dir,
@@ -243,13 +263,17 @@ export class MeteorSystem {
       m.position.addScaledVector(m.velocity, dt);
       m.coreMesh.rotation.x += dt * 1.8;
       m.coreMesh.rotation.y += dt * 2.2;
+      if (m.magmaMesh) {
+        m.magmaMesh.rotation.y -= dt * 2.0;
+        m.magmaMesh.rotation.x += dt * 1.5;
+      }
 
-      // Roaring fire envelopes counter-rotate with turbulent pulsing
-      if (m.fireEnvelopeMesh) {
-        m.fireEnvelopeMesh.rotation.x -= dt * 3.5;
-        m.fireEnvelopeMesh.rotation.z += dt * 4.0;
+      // Roaring fire shroud and halo counter-rotate with turbulent pulsing
+      if (m.fireShroudMesh) {
+        m.fireShroudMesh.rotation.x -= dt * 3.5;
+        m.fireShroudMesh.rotation.z += dt * 4.0;
         const pulse = 1.0 + Math.sin(m.age * 14.0) * 0.06;
-        m.fireEnvelopeMesh.scale.set(pulse, pulse, pulse);
+        m.fireShroudMesh.scale.set(pulse, pulse, pulse);
       }
       if (m.haloMesh) {
         m.haloMesh.rotation.y += dt * 2.8;
@@ -576,7 +600,20 @@ export class MeteorSystem {
 
   destroyMeteor() {
     if (!this.activeMeteor) return;
-    this.scene.remove(this.activeMeteor.group);
+    const m = this.activeMeteor;
+    if (m.group) {
+      this.scene.remove(m.group);
+      m.group.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => mat.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+    }
     if (this.spaceEnv && this.spaceEnv.meteorLight) {
       this.spaceEnv.meteorLight.intensity = 0.0;
       this.spaceEnv.meteorLight.visible = false;

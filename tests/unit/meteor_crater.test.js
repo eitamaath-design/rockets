@@ -77,24 +77,34 @@ describe('Task 3: Meteor, Mega-Asteroid Crater Excavation & Fire Laser Upgrade',
       expect(meteor4000.radius).toBeLessThanOrEqual(4000 * 0.10); // 400u
     });
 
-    it('should construct meteor core as a craggy asteroid geometry scaled to its dynamic radius', () => {
+    it('should construct meteor core as a craggy asteroid geometry with dark basaltic stony material and incandescent heat fissures', () => {
       meteorSystem.spawnMeteor();
       const m = meteorSystem.activeMeteor;
       expect(m.coreMesh).toBeDefined();
       expect(m.coreMesh.geometry.parameters.radius).toBeCloseTo(m.radius, 1);
-      expect(m.group.children.length).toBeGreaterThanOrEqual(4); // Core, Corona, Fire Envelope, Halo
+      expect(m.coreMesh.material.color.getHex()).toBe(0x1f1814);
+      expect(m.coreMesh.material.roughness).toBe(0.90);
+      expect(m.coreMesh.material.emissiveIntensity).toBe(3.5);
+      expect(m.group.children.length).toBeGreaterThanOrEqual(4); // Core, Magma, Fire Shroud, Halo
     });
   });
 
-  describe('Requirement 2: Engulfed with fire and leaves a billowing trail of fire', () => {
-    it('should equip meteor with scaled fire envelope, inner incandescent corona, and outer plasma halo', () => {
+  describe('Requirement 2: Engulfed with see-through transparent fire shroud & mantle and leaves a billowing trail of fire', () => {
+    it('should equip meteor with see-through transparent fire shroud, magma layer, and outer plasma halo with correct transparency flags', () => {
       meteorSystem.spawnMeteor();
       const m = meteorSystem.activeMeteor;
 
-      expect(m.fireEnvelopeMesh).toBeDefined();
+      expect(m.fireShroudMesh).toBeDefined();
+      expect(m.magmaMesh).toBeDefined();
       expect(m.haloMesh).toBeDefined();
-      expect(m.fireEnvelopeMesh.geometry.parameters.radius).toBeCloseTo(m.radius * 1.25, 1);
-      expect(m.haloMesh.geometry.parameters.radius).toBeCloseTo(m.radius * 1.45, 1);
+      expect(m.fireShroudMesh.geometry.parameters.radius).toBeCloseTo(m.radius * 1.22, 1);
+      expect(m.haloMesh.geometry.parameters.radius).toBeCloseTo(m.radius * 1.42, 1);
+
+      expect(m.fireShroudMesh.material.transparent).toBe(true);
+      expect(m.fireShroudMesh.material.depthWrite).toBe(false);
+      expect(m.fireShroudMesh.material.blending).toBe(THREE.AdditiveBlending);
+      expect(m.magmaMesh.material.transparent).toBe(true);
+      expect(m.haloMesh.material.transparent).toBe(true);
     });
 
     it('should emit instanced billboarding fire trail particles scaled proportionally to meteor radius', () => {
@@ -110,15 +120,15 @@ describe('Task 3: Meteor, Mega-Asteroid Crater Excavation & Fire Laser Upgrade',
       expect(latestParticle.baseScale).toBeGreaterThanOrEqual(m.radius * 0.60);
     });
 
-    it('should animate and counter-rotate fire envelopes during update without NaN errors', () => {
+    it('should animate and counter-rotate fire shroud and halo during update without NaN errors', () => {
       meteorSystem.spawnMeteor();
       const m = meteorSystem.activeMeteor;
-      const initialRotX = m.fireEnvelopeMesh.rotation.x;
+      const initialRotX = m.fireShroudMesh.rotation.x;
 
       meteorSystem.update(0.016, playerShip, new Map(), () => {}, camera);
-      expect(m.fireEnvelopeMesh.rotation.x).not.toBe(initialRotX);
+      expect(m.fireShroudMesh.rotation.x).not.toBe(initialRotX);
       expect(Number.isFinite(m.position.x)).toBe(true);
-      expect(Number.isFinite(m.fireEnvelopeMesh.scale.x)).toBe(true);
+      expect(Number.isFinite(m.fireShroudMesh.scale.x)).toBe(true);
     });
   });
 
