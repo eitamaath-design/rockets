@@ -750,8 +750,7 @@ export class GameEngine {
         inFront: true,
         isOffscreen: false,
         edgeAngle: 0,
-        angleError: 0,
-        isAligned: true
+        angleError: 0
       };
 
       if (this.playerShip && this.camera) {
@@ -759,7 +758,6 @@ export class GameEngine {
         const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
         const dot = Math.min(1.0, Math.max(-1.0, shipFwd.dot(camFwd)));
         const angleError = Math.acos(dot);
-        const isAligned = angleError < 0.035; // ~2.0 degrees threshold
         const inFront = dot > 0;
 
         let x = 50;
@@ -801,8 +799,7 @@ export class GameEngine {
           inFront,
           isOffscreen,
           edgeAngle: Math.round(edgeAngle),
-          angleError,
-          isAligned
+          angleError
         };
       }
 

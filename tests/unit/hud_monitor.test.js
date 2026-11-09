@@ -341,17 +341,17 @@ describe('Dual-Reticle HUD Bore-Sight Reticle', () => {
     vi.restoreAllMocks();
   });
 
-  it('should initialize #hud-ship-boresight in the DOM with default aligned state', () => {
+  it('should initialize #hud-ship-boresight in the DOM with default tracking state', () => {
     const boreEl = document.getElementById('hud-ship-boresight');
     expect(boreEl).not.toBeNull();
-    expect(boreEl.classList.contains('aligned')).toBe(true);
+    expect(boreEl.classList.contains('tracking')).toBe(true);
 
     const label = document.getElementById('hud-boresight-label');
     expect(label).not.toBeNull();
-    expect(label.textContent).toBe('LOCKED');
+    expect(label.textContent).toBe('0°');
   });
 
-  it('should render aligned state when ship hull is boresighted with pilot POV', () => {
+  it('should render tracking state with degree offset when ship hull is boresighted with pilot POV', () => {
     const boreEl = document.getElementById('hud-ship-boresight');
     const label = document.getElementById('hud-boresight-label');
 
@@ -362,17 +362,16 @@ describe('Dual-Reticle HUD Bore-Sight Reticle', () => {
         inFront: true,
         isOffscreen: false,
         edgeAngle: 0,
-        angleError: 0.015,
-        isAligned: true
+        angleError: 0.0
       }
     });
 
-    expect(boreEl.classList.contains('aligned')).toBe(true);
-    expect(boreEl.classList.contains('tracking')).toBe(false);
+    expect(boreEl.classList.contains('tracking')).toBe(true);
+    expect(boreEl.classList.contains('aligned')).toBe(false);
     expect(boreEl.classList.contains('offscreen')).toBe(false);
     expect(boreEl.style.left).toBe('50%');
     expect(boreEl.style.top).toBe('50%');
-    expect(label.textContent).toBe('LOCKED');
+    expect(label.textContent).toBe('0°');
   });
 
   it('should render tracking state with angular offset when ship hull lags behind pilot POV', () => {

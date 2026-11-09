@@ -174,14 +174,14 @@ export class GameHUD {
       </div>
 
       <!-- Dynamic Ship Bore-Sight Reticle (Actual Hull Orientation vs Pilot POV) -->
-      <div class="hud-ship-boresight aligned" id="hud-ship-boresight">
+      <div class="hud-ship-boresight tracking" id="hud-ship-boresight">
         <div class="boresight-reticle">
           <div class="boresight-cross-h"></div>
           <div class="boresight-cross-v"></div>
           <div class="boresight-ring"></div>
           <div class="boresight-pointer"></div>
         </div>
-        <span class="boresight-label" id="hud-boresight-label">LOCKED</span>
+        <span class="boresight-label" id="hud-boresight-label">0°</span>
       </div>
 
       <!-- 3D Target Lock Brackets -->
@@ -1201,11 +1201,6 @@ export class GameHUD {
         if (boreLabel) {
           const deg = Math.round((b.angleError || 0) * (180 / Math.PI));
           boreLabel.textContent = `${deg}°`;
-        }
-      } else if (b.isAligned) {
-        boreEl.className = 'hud-ship-boresight aligned';
-        if (boreLabel) {
-          boreLabel.textContent = 'LOCKED';
         }
       } else {
         boreEl.className = 'hud-ship-boresight tracking';
