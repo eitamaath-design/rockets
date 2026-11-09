@@ -305,7 +305,7 @@ export class GameEngine {
       audio.playBoost();
       this.cockpit.triggerBoostFlash();
       if (this.thrusterTrails) {
-        this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false);
+        this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false, 'local', true);
       }
       return true;
     }
@@ -600,7 +600,7 @@ export class GameEngine {
           remote.receiveNetworkState(peerData.lastState);
         }
         if (remote) {
-          remote.update(dt);
+          remote.update(dt, this.camera);
         }
       }
 

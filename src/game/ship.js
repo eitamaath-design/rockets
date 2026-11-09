@@ -567,4 +567,21 @@ export class PlayerShip {
   getSpeed() {
     return this.velocity.length();
   }
+
+  getNozzlePositions() {
+    // Dual rear thruster nozzles positioned symmetrically relative to ship hull
+    const leftNozzle = new THREE.Vector3(-0.48, 0, 2.35).applyQuaternion(this.quaternion).add(this.position);
+    const rightNozzle = new THREE.Vector3(0.48, 0, 2.35).applyQuaternion(this.quaternion).add(this.position);
+    return { left: leftNozzle, right: rightNozzle };
+  }
+
+  getEngineState() {
+    const isBoosting = this.boostCooldownTimer > (this.boostCooldown - 0.4);
+    return {
+      thrust: this.input.thrust,
+      brake: this.input.brake,
+      speed: this.getSpeed(),
+      isBoosting
+    };
+  }
 }

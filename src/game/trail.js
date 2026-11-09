@@ -115,7 +115,7 @@ export class ThrusterTrailSystem {
   /**
    * Internal puff spawner
    */
-  _spawnPuff(pos, isHostile, jitterScale = 1.0) {
+  _spawnPuff(pos, isHostile, jitterScale = 1.0, isBoost = false) {
     if (this.particles.length >= this.maxParticles) {
       this.particles.shift();
     }
@@ -123,6 +123,8 @@ export class ThrusterTrailSystem {
     const jitterX = (Math.random() - 0.5) * 0.45 * jitterScale;
     const jitterY = (Math.random() - 0.5) * 0.45 * jitterScale;
     const jitterZ = (Math.random() - 0.5) * 0.45 * jitterScale;
+
+    const baseSize = isBoost ? 4.6 : 3.0;
 
     this.particles.push({
       x: pos.x + jitterX,
@@ -134,14 +136,14 @@ export class ThrusterTrailSystem {
       age: 0,
       maxAge: this.maxAge,
       isHostile,
-      baseScale: 1.8 + Math.random() * 1.4
+      baseScale: baseSize + Math.random() * 1.6
     });
   }
 
   /**
    * Drops thruster trail puffs behind a ship nozzle with sub-frame distance interpolation.
    */
-  emit(shipPosition, forwardVector, isHostile = false, emitterId = 'default') {
+  emit(shipPosition, forwardVector, isHostile = false, emitterId = 'default', isBoost = false) {
     // Nozzle offset along -forward
     _scratchVecA.copy(shipPosition).addScaledVector(forwardVector, -2.4);
 
@@ -156,7 +158,7 @@ export class ThrusterTrailSystem {
         for (let s = 1; s <= steps; s++) {
           const alpha = s / (steps + 1);
           _scratchVecB.copy(lastPos).lerp(_scratchVecA, alpha);
-          this._spawnPuff(_scratchVecB, isHostile, 0.8);
+          this._spawnPuff(_scratchVecB, isHostile, 0.8, isBoost);
         }
       }
       lastPos.copy(_scratchVecA);
@@ -165,7 +167,7 @@ export class ThrusterTrailSystem {
     }
 
     // Dual-nozzle or central high-density puff at current position
-    this._spawnPuff(_scratchVecA, isHostile, 1.0);
+    this._spawnPuff(_scratchVecA, isHostile, 1.0, isBoost);
   }
 
   /**
@@ -174,8 +176,12 @@ export class ThrusterTrailSystem {
   update(dt, camera = null) {
     this.simTime += dt;
 
+    let camPos = null;
     if (camera && camera.quaternion) {
       _camQuat.copy(camera.quaternion);
+      if (camera.position) {
+        camPos = camera.position;
+      }
     } else {
       _camQuat.identity();
     }
@@ -203,7 +209,20 @@ export class ThrusterTrailSystem {
 
       // Dynamic scale expansion as plasma plume diffuses in space vacuum
       const normAge = p.age / p.maxAge;
-      const scale = p.baseScale * (1.0 + normAge * 3.8);
+
+      // Distance-adaptive scaling factor for visibility across standoff combat ranges (up to 3500u)
+      let distFactor = 1.0;
+      if (camPos) {
+        const dx = p.x - camPos.x;
+        const dy = p.y - camPos.y;
+        const dz = p.z - camPos.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist > 40) {
+          distFactor = Math.min(3.2, 1.0 + (dist - 40) * 0.0016);
+        }
+      }
+
+      const scale = p.baseScale * (1.0 + normAge * 3.8) * distFactor;
 
       _dummy.position.set(p.x, p.y, p.z);
       _dummy.quaternion.copy(_camQuat);
@@ -212,9 +231,12 @@ export class ThrusterTrailSystem {
 
       this.mesh.setMatrixAt(i, _dummy.matrix);
 
-      // 15-second non-linear dissipation curve
+      // 15-second non-linear dissipation curve with distance contrast boost
       const lifeRatio = 1.0 - normAge;
-      const intensity = Math.pow(lifeRatio, 1.6);
+      let intensity = Math.pow(lifeRatio, 1.6);
+      if (distFactor > 1.2) {
+        intensity = Math.min(1.0, intensity * 1.25);
+      }
 
       if (p.isHostile) {
         // Incandescent fiery orange core -> deep crimson smoke

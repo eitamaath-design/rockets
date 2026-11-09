@@ -26,6 +26,7 @@ export class RemoteShip {
     this.strafeState = 0; // -1, 0, 1
 
     // Visual meshes & effects
+    this.coreFlares = [];
     this.engineFlares = [];
     this.sideThrusterFlares = [];
     this.shieldMesh = null;
@@ -181,6 +182,25 @@ export class RemoteShip {
     this.group.add(rightFlare);
     this.engineFlares.push(rightFlare);
 
+    // Dedicated Bright Emissive Core Nozzle Flares (Long-distance engine visibility beacon)
+    const coreFlareGeom = new THREE.SphereGeometry(0.55, 8, 8);
+    const coreFlareMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending
+    });
+
+    const leftCoreFlare = new THREE.Mesh(coreFlareGeom, coreFlareMat);
+    leftCoreFlare.position.set(-0.48, 0, 2.35);
+    this.group.add(leftCoreFlare);
+    this.coreFlares.push(leftCoreFlare);
+
+    const rightCoreFlare = new THREE.Mesh(coreFlareGeom, coreFlareMat.clone());
+    rightCoreFlare.position.set(0.48, 0, 2.35);
+    this.group.add(rightCoreFlare);
+    this.coreFlares.push(rightCoreFlare);
+
     // 8. Shield Dome (flashes when taking hits)
     const shieldGeom = new THREE.SphereGeometry(3.4, 16, 12);
     const shieldMat = new THREE.MeshBasicMaterial({
@@ -274,9 +294,15 @@ export class RemoteShip {
     }
   }
 
-  update(dt) {
+  update(dt, camera = null) {
     if (this.isDead) {
       this.group.visible = false;
+      for (const flare of this.engineFlares) {
+        flare.visible = false;
+      }
+      for (const core of this.coreFlares) {
+        core.visible = false;
+      }
       return;
     }
     this.group.visible = true;
@@ -294,17 +320,49 @@ export class RemoteShip {
     this.position.lerp(extrapolatedPos, lerpFactor);
     this.quaternion.slerp(this.targetQuaternion, Math.min(1.0, dt * 10.0));
 
+    // Distance-adaptive scaling factor for engine visibility across standoff ranges (up to 3500u)
+    let distToCamera = 0;
+    if (camera && camera.position) {
+      distToCamera = this.position.distanceTo(camera.position);
+    }
+    const distScale = distToCamera > 30 
+      ? Math.min(8.0, 1.0 + (distToCamera - 30) * 0.0035) 
+      : 1.0;
+
     // Update engine flare visuals
-    const flareScale = this.isThrusting ? (0.8 + Math.random() * 0.4) : 0.001;
+    const plumeScale = this.isThrusting ? ((1.2 + Math.random() * 0.4) * distScale) : 0.001;
+    const coreScale = this.isThrusting 
+      ? ((1.0 + Math.random() * 0.25) * distScale) 
+      : (0.45 * distScale); // Soft idle glow when coasting
+    const coreOpacity = this.isThrusting ? 0.95 : 0.55;
+
     for (const flare of this.engineFlares) {
-      flare.scale.set(flareScale, flareScale, flareScale);
-      flare.visible = this.isThrusting;
+      flare.scale.set(plumeScale, plumeScale, plumeScale);
+      flare.visible = this.isThrusting && !this.isDead;
+    }
+
+    for (const core of this.coreFlares) {
+      core.scale.set(coreScale, coreScale, coreScale);
+      core.visible = !this.isDead;
+      if (core.material) {
+        core.material.opacity = coreOpacity;
+      }
     }
 
     // Fade shield hit flash
     if (this.shieldMesh && this.shieldMesh.material.opacity > 0) {
       this.shieldMesh.material.opacity = Math.max(0, this.shieldMesh.material.opacity - dt * 2.5);
     }
+  }
+
+  getEngineFlareState() {
+    return {
+      isThrusting: this.isThrusting,
+      coreFlaresCount: this.coreFlares.length,
+      engineFlaresCount: this.engineFlares.length,
+      coreScale: this.coreFlares[0] ? this.coreFlares[0].scale.x : 0,
+      plumeScale: this.engineFlares[0] ? this.engineFlares[0].scale.x : 0
+    };
   }
 
   destroy() {
