@@ -13,6 +13,14 @@ const _flashColor = new THREE.Color();
 const _debrisHideMat = new THREE.Matrix4().makeScale(0, 0, 0);
 const _spaceCamQuat = new THREE.Quaternion();
 
+// Module-level scratch math objects for zero-allocation carving & normal transforms (SME PoC 2/4 recommendation)
+const _scratchMat = new THREE.Matrix4();
+const _scratchInvMat = new THREE.Matrix4();
+const _scratchLocalHit = new THREE.Vector3();
+const _scratchLocalDir = new THREE.Vector3();
+const _scratchHitPoint = new THREE.Vector3();
+const _scratchHitDir = new THREE.Vector3();
+
 export const ISOSURFACE_SCALE = 0.80;
 
 /**
@@ -473,6 +481,11 @@ export class SpaceEnvironment {
     this.asteroidGroup = new THREE.Group();
     this.debrisList = [];
     this.rockMaterials = [];
+
+    // P2P Asteroid Carve Synchronization state
+    this.onCarve = null;
+    this.carveHistory = [];
+    this.isApplyingRemoteCarve = false;
 
     // Pre-allocated GPU InstancedMesh rock debris & explosion flash
     this.maxDebris = 400;
@@ -961,6 +974,8 @@ export class SpaceEnvironment {
       const mass = (4 / 3) * Math.PI * Math.pow(radius, 3) * 0.001;
 
       this.asteroids.push({
+        id: isMega ? 'mega' : `ast_${i}`,
+        index: i,
         mesh: mc,
         mc,
         radius,
@@ -1827,7 +1842,7 @@ export class SpaceEnvironment {
     return maxStage;
   }
 
-  damageAsteroid(asteroid, damage = 5, hitPoint = null, hitDir = null, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0) {
+  damageAsteroid(asteroid, damage = 5, hitPoint = null, hitDir = null, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false) {
     if (!asteroid) return { destroyed: false, carved: false, cracked: false, crackStage: 0, carveResult: null };
 
     // Small asteroids have finite HP (20 HP = 5 laser shots at 4.0 damage each) and fracture visibly on shots 1-4 before shattering on shot 5
@@ -1846,7 +1861,7 @@ export class SpaceEnvironment {
 
       let carveRes = null;
       if (hitPoint && hitDir) {
-        carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength);
+        carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
       }
       return {
         destroyed: false,
@@ -1862,7 +1877,7 @@ export class SpaceEnvironment {
     // Medium/large belt asteroids and Central Mega-Asteroid undergo 5-stage progressive fracture -> volumetric excavation
     let carveRes = null;
     if (hitPoint && hitDir) {
-      carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength);
+      carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
     }
     return {
       destroyed: false,
@@ -1883,7 +1898,7 @@ export class SpaceEnvironment {
    * - Shot 5 (stage >= 5) removes the fracture zone and triggers full volumetric excavation
    *   via carveAsteroid (isosurfaceCrossed: true).
    */
-  fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0) {
+  fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false) {
     if (!asteroid || !asteroid.mesh || !hitPoint || !hitDir) {
       return {
         voxelsModified: 0,
@@ -1932,12 +1947,11 @@ export class SpaceEnvironment {
     }
 
     if (asteroid.mesh.matrixWorld) asteroid.mesh.updateMatrixWorld(true);
-    const invMatrix = asteroid.mesh.matrixWorld
-      ? asteroid.mesh.matrixWorld.clone().invert()
-      : new THREE.Matrix4().copy(asteroid.mesh.matrix).invert();
+    const sourceMat = asteroid.mesh.matrixWorld || asteroid.mesh.matrix;
+    _scratchInvMat.copy(sourceMat).invert();
     const scaleR = asteroid.radius / ISOSURFACE_SCALE;
-    const localHit = hitPoint.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-    const localDir = hitDir.clone().transformDirection(invMatrix).normalize();
+    const localHit = _scratchLocalHit.copy(hitPoint).applyMatrix4(_scratchInvMat).multiplyScalar(scaleR);
+    const localDir = _scratchLocalDir.copy(hitDir).transformDirection(_scratchInvMat).normalize();
 
     const isMega = Boolean(asteroid.isMega || asteroid.isMegaAsteroid || asteroid.radius >= 1000);
     const half = mc.halfsize;
@@ -1980,7 +1994,7 @@ export class SpaceEnvironment {
       const zIdx = asteroid.crackZones.indexOf(zone);
       if (zIdx !== -1) asteroid.crackZones.splice(zIdx, 1);
 
-      const resCarve = this.carveAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength);
+      const resCarve = this.carveAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
       return {
         ...resCarve,
         crackStage: 5,
@@ -2171,6 +2185,26 @@ export class SpaceEnvironment {
 
     logger.log('CARVE', `asteroid=${asteroid.id || (isMega ? 'mega' : 'asteroid')} isMega=${isMega} crackStage=${zone.stage}/5 hit=(${hitPoint.x.toFixed(1)},${hitPoint.y.toFixed(1)},${hitPoint.z.toFixed(1)}) r=${carveResult.carveRadius} d=${carveResult.carveDepth} voxels=${carveResult.voxelsModified} crossed=0 delta=${carveResult.totalDensityDelta}`);
 
+    if (!isRemote && !this.isApplyingRemoteCarve) {
+      const targetIdx = this.asteroids.indexOf(asteroid);
+      const carvePayload = {
+        asteroidIndex: targetIdx >= 0 ? targetIdx : (asteroid.index !== undefined ? asteroid.index : 0),
+        isMega,
+        hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
+        hitDir: { x: hitDir.x, y: hitDir.y, z: hitDir.z },
+        carveRadius: Number(effectiveRadius.toFixed(1)),
+        carveDepth: Number(effectiveDepth.toFixed(1)),
+        strength,
+        isFracture: true,
+        stage: zone.stage,
+        timestamp: Date.now()
+      };
+      this.recordCarveHistory(carvePayload);
+      if (typeof this.onCarve === 'function') {
+        this.onCarve(carvePayload);
+      }
+    }
+
     return carveResult;
   }
 
@@ -2188,7 +2222,7 @@ export class SpaceEnvironment {
    * - Localized mc.update() to regenerate surface polygons
    * - Returns structured carveResult telemetry payload
    */
-  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0) {
+  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0, isRemote = false) {
     if (!asteroid || !asteroid.mesh) {
       return {
         voxelsModified: 0,
@@ -2218,10 +2252,11 @@ export class SpaceEnvironment {
     }
 
     if (asteroid.mesh.matrixWorld) asteroid.mesh.updateMatrixWorld(true);
-    const invMatrix = asteroid.mesh.matrixWorld ? asteroid.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(asteroid.mesh.matrix).invert();
+    const sourceMat = asteroid.mesh.matrixWorld || asteroid.mesh.matrix;
+    _scratchInvMat.copy(sourceMat).invert();
     const scaleR = asteroid.radius / ISOSURFACE_SCALE;
-    const localHit = hitPoint.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-    const localDir = hitDir.clone().transformDirection(invMatrix).normalize();
+    const localHit = _scratchLocalHit.copy(hitPoint).applyMatrix4(_scratchInvMat).multiplyScalar(scaleR);
+    const localDir = _scratchLocalDir.copy(hitDir).transformDirection(_scratchInvMat).normalize();
 
     const isMega = !!(asteroid.radius >= 2500 || asteroid.isMegaAsteroid || asteroid.isMega);
     const isMedium = (!isMega && asteroid.radius >= 38.0);
@@ -2459,7 +2494,99 @@ export class SpaceEnvironment {
     const debrisCount = tunnelRadius > 35 ? 16 : 8;
     this.spawnRockDebris(hitPoint, hitDir, debrisCount);
 
+    if (!isRemote && !this.isApplyingRemoteCarve) {
+      const targetIdx = this.asteroids.indexOf(asteroid);
+      const carvePayload = {
+        asteroidIndex: targetIdx >= 0 ? targetIdx : (asteroid.index !== undefined ? asteroid.index : 0),
+        isMega,
+        hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
+        hitDir: { x: hitDir.x, y: hitDir.y, z: hitDir.z },
+        carveRadius: Number(tunnelRadius.toFixed(1)),
+        carveDepth: Number(effectiveDepth.toFixed(1)),
+        strength,
+        isFracture: false,
+        timestamp: Date.now()
+      };
+      this.recordCarveHistory(carvePayload);
+      if (typeof this.onCarve === 'function') {
+        this.onCarve(carvePayload);
+      }
+    }
+
     return carveResult;
+  }
+
+  getAsteroid(target) {
+    if (!target) return null;
+    if (target.mesh && target.mc) return target;
+    if (target.isMega) {
+      return this.asteroids.find(a => a.isMega) || this.asteroids[0];
+    }
+    if (typeof target.asteroidIndex === 'number' && target.asteroidIndex >= 0 && target.asteroidIndex < this.asteroids.length) {
+      return this.asteroids[target.asteroidIndex];
+    }
+    if (typeof target === 'number' && target >= 0 && target < this.asteroids.length) {
+      return this.asteroids[target];
+    }
+    if (typeof target.asteroidId === 'string') {
+      return this.asteroids.find(a => a.id === target.asteroidId) || null;
+    }
+    return this.asteroids[0] || null;
+  }
+
+  applyRemoteCarve(carveData) {
+    if (!carveData) return null;
+    const ast = this.getAsteroid(carveData);
+    if (!ast) return null;
+    const hp = carveData.hitPoint;
+    const hd = carveData.hitDir;
+    if (!hp || !hd) return null;
+    const hitPoint = _scratchHitPoint.set(hp.x, hp.y, hp.z);
+    const hitDir = _scratchHitDir.set(hd.x, hd.y, hd.z);
+    const carveRadius = carveData.carveRadius !== undefined ? carveData.carveRadius : 32.0;
+    const carveDepth = carveData.carveDepth !== undefined ? carveData.carveDepth : 36.0;
+    const strength = carveData.strength !== undefined ? carveData.strength : 80.0;
+
+    this.isApplyingRemoteCarve = true;
+    try {
+      this.recordCarveHistory(carveData);
+      if (carveData.isFracture) {
+        return this.fractureAsteroid(ast, hitPoint, hitDir, carveRadius, carveDepth, strength, true);
+      } else {
+        return this.carveAsteroid(ast, hitPoint, hitDir, carveRadius, carveDepth, strength, true);
+      }
+    } finally {
+      this.isApplyingRemoteCarve = false;
+    }
+  }
+
+  recordCarveHistory(carveData) {
+    if (!carveData || !carveData.hitPoint || !carveData.hitDir) return;
+    if (this.carveHistory.length >= 500) {
+      this.carveHistory.shift();
+    }
+    this.carveHistory.push({
+      asteroidIndex: carveData.asteroidIndex !== undefined ? carveData.asteroidIndex : 0,
+      isMega: !!carveData.isMega,
+      hitPoint: { x: carveData.hitPoint.x, y: carveData.hitPoint.y, z: carveData.hitPoint.z },
+      hitDir: { x: carveData.hitDir.x, y: carveData.hitDir.y, z: carveData.hitDir.z },
+      carveRadius: carveData.carveRadius,
+      carveDepth: carveData.carveDepth,
+      strength: carveData.strength,
+      isFracture: !!carveData.isFracture,
+      timestamp: carveData.timestamp || Date.now()
+    });
+  }
+
+  getCarveHistory() {
+    return this.carveHistory.slice();
+  }
+
+  applyCarveHistory(history) {
+    if (!Array.isArray(history) || history.length === 0) return;
+    for (const item of history) {
+      this.applyRemoteCarve(item);
+    }
   }
 
   cleanup() {

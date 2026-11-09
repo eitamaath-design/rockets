@@ -109,7 +109,7 @@ export class GameEngine {
     this.container.appendChild(this.renderer.domElement);
 
     // Initialize subsystems
-    this.spaceEnv = new SpaceEnvironment(this.scene, this.mapSeed, this.config);
+    this.initSpaceEnv(this.mapSeed);
     this.playerShip = new PlayerShip(this.camera, this.spaceEnv);
     this.playerShip.resetSpawn();
 
@@ -242,19 +242,44 @@ export class GameEngine {
       this.resetMap(seed);
     });
 
+    // Synchronized Asteroid Carving across peers
+    if (this.network && typeof this.network.onAsteroidCarve === 'function') {
+      this.network.onAsteroidCarve((data, peerId) => {
+        if (this.spaceEnv && typeof this.spaceEnv.applyRemoteCarve === 'function') {
+          this.spaceEnv.applyRemoteCarve(data);
+        }
+      });
+    }
+
+    // Synchronized World Sync (Asteroid Carve History) for newly joined peers
+    if (this.network && typeof this.network.onAsteroidWorldSync === 'function') {
+      this.network.onAsteroidWorldSync((data, peerId) => {
+        const history = (data && Array.isArray(data.carveHistory)) ? data.carveHistory : (Array.isArray(data) ? data : (data?.history));
+        if (this.spaceEnv && typeof this.spaceEnv.applyCarveHistory === 'function' && history) {
+          this.spaceEnv.applyCarveHistory(history);
+        }
+      });
+    }
+
+    // When a peer connects to the mesh room, send historical carves
+    if (this.network) {
+      this.network.onPeerNeedWorldSync = (peerId) => {
+        if (this.spaceEnv && typeof this.spaceEnv.getCarveHistory === 'function') {
+          const history = this.spaceEnv.getCarveHistory();
+          if (history && history.length > 0 && typeof this.network.broadcastAsteroidWorldSync === 'function') {
+            this.network.broadcastAsteroidWorldSync({ carveHistory: history }, peerId);
+          }
+        }
+      };
+    }
+
     // Synchronized Room Configuration Handshake
     if (this.network && typeof this.network.onConfig === 'function') {
       this.network.onConfig((newConfig) => {
         if (!newConfig) return;
         this.config = { ...this.config, ...newConfig };
         logger.log('CONFIG', `Received room config update: ${JSON.stringify(this.config)}`);
-        if (this.spaceEnv) {
-          this.spaceEnv.destroy();
-          this.spaceEnv = new SpaceEnvironment(this.scene, this.mapSeed, this.config);
-          if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
-          if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
-          if (this.playerShip) this.playerShip.spaceEnv = this.spaceEnv;
-        }
+        this.initSpaceEnv(this.mapSeed);
         if (this.meteorSystem) {
           this.meteorSystem.spawnInterval = this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10;
           this.meteorSystem.enabled = this.meteorSystem.spawnInterval > 0;
@@ -264,15 +289,28 @@ export class GameEngine {
     }
   }
 
+  initSpaceEnv(seed) {
+    if (this.spaceEnv) {
+      this.spaceEnv.destroy();
+    }
+    this.spaceEnv = new SpaceEnvironment(this.scene, seed, this.config);
+    this.spaceEnv.onCarve = (carveData) => {
+      if (this.network && typeof this.network.broadcastAsteroidCarve === 'function') {
+        this.network.broadcastAsteroidCarve(carveData);
+      }
+    };
+    if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
+    if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
+    if (this.playerShip) this.playerShip.spaceEnv = this.spaceEnv;
+    return this.spaceEnv;
+  }
+
   resetMap(newSeed, newConfig = null) {
     this.mapSeed = newSeed;
     if (newConfig) {
       this.config = { ...this.config, ...newConfig };
     }
-    if (this.spaceEnv) {
-      this.spaceEnv.destroy();
-    }
-    this.spaceEnv = new SpaceEnvironment(this.scene, newSeed, this.config);
+    this.initSpaceEnv(newSeed);
     if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
     if (this.meteorSystem) {
       this.meteorSystem.spaceEnv = this.spaceEnv;

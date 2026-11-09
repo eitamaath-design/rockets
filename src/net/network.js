@@ -58,6 +58,9 @@ export class GameNetwork {
     this.mapResetVoteListeners = new Set();
     this.mapResetListeners = new Set();
     this.configListeners = new Set();
+    this.asteroidCarveListeners = new Set();
+    this.asteroidWorldSyncListeners = new Set();
+    this.onPeerNeedWorldSync = null;
 
     this.currentMapResetVote = null;
     this.voteTimeoutTimer = null;
@@ -86,6 +89,8 @@ export class GameNetwork {
     const mapResetVoteChannel = createActionChannel(this.room, 'map_reset_vote');
     const mapResetChannel = createActionChannel(this.room, 'map_reset');
     const configChannel = createActionChannel(this.room, 'config');
+    const asteroidCarveChannel = createActionChannel(this.room, 'asteroid_carve');
+    const asteroidWorldSyncChannel = createActionChannel(this.room, 'asteroid_world_sync');
 
     this.sendState = stateChannel.send;
     this.sendCannon = cannonChannel.send;
@@ -100,6 +105,24 @@ export class GameNetwork {
     this.sendMapResetVote = mapResetVoteChannel.send;
     this.sendMapReset = mapResetChannel.send;
     this.sendConfig = configChannel.send;
+    this.sendAsteroidCarve = asteroidCarveChannel.send;
+    this.sendAsteroidWorldSync = asteroidWorldSyncChannel.send;
+
+    // Incoming synchronized asteroid carve actions
+    asteroidCarveChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string' || !data) return;
+      for (const cb of this.asteroidCarveListeners) {
+        cb(data, peerId);
+      }
+    });
+
+    // Incoming synchronized asteroid world sync (history) actions
+    asteroidWorldSyncChannel.onReceive((data, peerId) => {
+      if (!peerId || typeof peerId !== 'string' || !data) return;
+      for (const cb of this.asteroidWorldSyncListeners) {
+        cb(data, peerId);
+      }
+    });
 
     // Incoming synchronized room configuration from host
     configChannel.onReceive((data, peerId) => {
@@ -219,6 +242,9 @@ export class GameNetwork {
       this.updateMasterElection();
       if (this.isMaster && this.sendConfig) {
         this.sendConfig({ config: this.config, mapSeed: this.mapSeed }, peerId);
+      }
+      if (typeof this.onPeerNeedWorldSync === 'function') {
+        this.onPeerNeedWorldSync(peerId);
       }
       this.onPeerJoined(peerId);
       this.onCombatLog(`🛰️ Pilot joined the mesh: ${peerId.slice(0, 5)}`);
@@ -359,6 +385,28 @@ export class GameNetwork {
     if (this.sendDecoy) {
       this.sendDecoy(decoyData);
     }
+  }
+
+  broadcastAsteroidCarve(carveData) {
+    if (this.sendAsteroidCarve) {
+      this.sendAsteroidCarve(carveData);
+    }
+  }
+
+  broadcastAsteroidWorldSync(syncData, targetPeerId) {
+    if (this.sendAsteroidWorldSync) {
+      this.sendAsteroidWorldSync(syncData, targetPeerId);
+    }
+  }
+
+  onAsteroidCarve(cb) {
+    this.asteroidCarveListeners.add(cb);
+    return () => this.asteroidCarveListeners.delete(cb);
+  }
+
+  onAsteroidWorldSync(cb) {
+    this.asteroidWorldSyncListeners.add(cb);
+    return () => this.asteroidWorldSyncListeners.delete(cb);
   }
 
   onLaser(cb) {

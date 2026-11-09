@@ -1471,11 +1471,13 @@ export class WeaponsSystem {
       if (hitAsteroid) {
         this.spawnExplosion(m.group.position, 22, 0xff5500);
         let dmgResult = null;
-        if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          dmgResult = this.spaceEnv.damageAsteroid(hitAsteroid, 50.0, m.group.position, m.dir, 55.0, 45.0, 160.0);
-        } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          const carveResult = this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 55.0, 45.0, 160.0);
-          dmgResult = { carveResult };
+        if (m.isLocal) {
+          if (typeof this.spaceEnv.damageAsteroid === 'function') {
+            dmgResult = this.spaceEnv.damageAsteroid(hitAsteroid, 50.0, m.group.position, m.dir, 55.0, 45.0, 160.0);
+          } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
+            const carveResult = this.spaceEnv.carveAsteroid(hitAsteroid, m.group.position, m.dir, 55.0, 45.0, 160.0);
+            dmgResult = { carveResult };
+          }
         }
         const cRes = dmgResult?.carveResult;
         logger.log('WEAPON_HIT', JSON.stringify({
@@ -1585,7 +1587,7 @@ export class WeaponsSystem {
       const hitAsteroid = this.spaceEnv.checkCollision(p.mesh.position, 1.2);
       if (hitAsteroid) {
         this.spawnExplosion(p.mesh.position, 5, 0xff7700);
-        if (typeof this.spaceEnv.carveAsteroid === 'function') {
+        if (p.isLocal && typeof this.spaceEnv.carveAsteroid === 'function') {
           this.spaceEnv.carveAsteroid(hitAsteroid, p.mesh.position, p.dir);
         }
         destroyed = true;
