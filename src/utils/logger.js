@@ -156,6 +156,20 @@ class DiagnosticLogger {
     }
     lines.push('');
 
+    // Collision & Clipping Telemetry
+    lines.push('--- Recent Collision & Clipping Telemetry (Last 30 Events) ---');
+    const collisionLogs = this.logs.filter(entry =>
+      entry.includes('[COLLISION') || entry.includes('[SHIP_CLIPPED')
+    ).slice(-30);
+    if (collisionLogs.length > 0) {
+      for (const log of collisionLogs) {
+        lines.push(log);
+      }
+    } else {
+      lines.push('No collision events recorded yet.');
+    }
+    lines.push('');
+
     // Console logs
     lines.push('--- Recent Event Stream (Last 50 Logs) ---');
     const recent = this.logs.slice(-50);

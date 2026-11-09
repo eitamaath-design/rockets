@@ -1522,6 +1522,10 @@ export class SpaceEnvironment {
    * Ensures zero visual clipping with robust outward margin while maintaining insideCarving tunnel/cavern clearance.
    */
   resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200, orientation = null, dt = 0.016) {
+    this.lastCollisionLogTime = this.lastCollisionLogTime || 0;
+    this.lastClipWarnTime = this.lastClipWarnTime || 0;
+    const now = Date.now();
+
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
       const dist = position.distanceTo(a.position);
@@ -1552,6 +1556,11 @@ export class SpaceEnvironment {
         let colliding = false;
         let intersectingLocalPt = null;
         let collisionPos = position.clone();
+        let hitPointName = 'center';
+        let maxHullDensity = -999;
+        let densityCenter = 0;
+        let insideCarvingAny = false;
+        let subStepInfo = `1/${N_steps}`;
 
         for (let s = 1; s <= N_steps; s++) {
           const currPos = startPos.clone().addScaledVector(velocity || new THREE.Vector3(), subDt * s);
@@ -1570,7 +1579,14 @@ export class SpaceEnvironment {
           for (const hp of hullPoints) {
             const localPt = hp.pt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
             const insideCarving = this.checkInsideCarvings(a, localPt);
+            if (insideCarving) insideCarvingAny = true;
             const density = this.sampleDensity(a.mc || a.mesh, localPt.x, localPt.y, localPt.z, a.radius);
+
+            if (hp.name === 'center') densityCenter = density;
+            if (density > maxHullDensity) {
+              maxHullDensity = density;
+              hitPointName = hp.name;
+            }
 
             if (!insideCarving && density > iso) {
               stepColliding = true;
@@ -1583,11 +1599,22 @@ export class SpaceEnvironment {
             colliding = true;
             intersectingLocalPt = stepIntersectingLocal;
             collisionPos.copy(currPos);
+            subStepInfo = `${s}/${N_steps}`;
             break;
           }
         }
 
         if (!colliding) {
+          // Check for clipping warning even if no collision resolution returned
+          const localCenter = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+          const postDensity = this.sampleDensity(a.mc || a.mesh, localCenter.x, localCenter.y, localCenter.z, a.radius);
+          if (postDensity > iso) {
+            if (now - this.lastClipWarnTime >= 300) {
+              this.lastClipWarnTime = now;
+              const astId = a.id || (a.isMegaAsteroid ? 'mega' : 'asteroid');
+              logger.log('COLLISION_CLIP_WARN', `UNRESOLVED_DENSITY asteroid=${astId} density=${postDensity.toFixed(1)} iso=40 pt=(${position.x.toFixed(1)},${position.y.toFixed(1)},${position.z.toFixed(1)})`);
+            }
+          }
           continue;
         }
 
@@ -1631,6 +1658,31 @@ export class SpaceEnvironment {
 
         const relVel = (velocity || new THREE.Vector3()).clone().sub(a.velocity);
         const vNorm = relVel.dot(normal);
+
+        const localResolved = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+        const postDensity = this.sampleDensity(a.mc || a.mesh, localResolved.x, localResolved.y, localResolved.z, a.radius);
+
+        if (now - this.lastCollisionLogTime >= 350) {
+          this.lastCollisionLogTime = now;
+          const astId = a.id || (a.isMegaAsteroid ? 'mega' : 'asteroid');
+          const isMega = !!a.isMegaAsteroid;
+          const vNormStr = vNorm !== undefined ? vNorm.toFixed(1) : 'N/A';
+          logger.log('COLLISION', `asteroid=${astId} isMega=${isMega} dist=${dist.toFixed(1)} speed=${speed.toFixed(1)} pt=(${position.x.toFixed(1)},${position.y.toFixed(1)},${position.z.toFixed(1)}) density=${densityCenter.toFixed(1)}/${maxHullDensity.toFixed(1)} iso=40 subStep=${subStepInfo} hitPt=${hitPointName} stepDist=${stepDist.toFixed(1)} vNorm=${vNormStr} insideCarve=${insideCarvingAny} postDensity=${postDensity.toFixed(1)}`);
+        }
+
+        if (postDensity > iso) {
+          if (now - this.lastClipWarnTime >= 300) {
+            this.lastClipWarnTime = now;
+            const astId = a.id || (a.isMegaAsteroid ? 'mega' : 'asteroid');
+            logger.log('COLLISION_CLIP_WARN', `UNRESOLVED_DENSITY asteroid=${astId} density=${postDensity.toFixed(1)} iso=40 pt=(${position.x.toFixed(1)},${position.y.toFixed(1)},${position.z.toFixed(1)})`);
+          }
+        } else if (insideCarvingAny) {
+          if (now - this.lastClipWarnTime >= 300) {
+            this.lastClipWarnTime = now;
+            const astId = a.id || (a.isMegaAsteroid ? 'mega' : 'asteroid');
+            logger.log('COLLISION_CARVE_EXEMPTION', `asteroid=${astId} density=${maxHullDensity.toFixed(1)} insideCarve=true pt=(${position.x.toFixed(1)},${position.y.toFixed(1)},${position.z.toFixed(1)})`);
+          }
+        }
 
         if (vNorm < 0) {
           const restitution = 0.85;
