@@ -1248,111 +1248,154 @@ export class SpaceEnvironment {
       }
     }
 
-    // 2. Asteroid-Asteroid Pairwise Collision & 3-Pass PBD Separation Solver with Fast Radial/Axis Pre-Filter
-    const pbdPasses = this.physicsQuality === 'eco' ? 1 : 3;
+    // 2. Asteroid-Asteroid Pairwise Collision & Angular Sector-Pruned PBD Separation Solver
+    // Belt asteroids orbit in an annular disc between R=3300 and 5500.
+    // Asteroid 0 is the stationary Central Mega-Asteroid at (0,0,0) with R=megaRadius.
+    // Using 24 angular sectors prunes >90% of pairwise checks without missing potential overlaps.
+    const pbdPasses = this.physicsQuality === 'eco' ? 1 : 2;
+    const sectorBins = new Array(24);
+    for (let s = 0; s < 24; s++) sectorBins[s] = [];
+
+    for (let i = 1; i < numAsteroids; i++) {
+      const a = this.asteroids[i];
+      if (!a) continue;
+      const angle = Math.atan2(a.position.z, a.position.x);
+      const bin = Math.floor(((angle + Math.PI) / (Math.PI * 2)) * 24) % 24;
+      sectorBins[bin].push(i);
+    }
+
+    const aMega = this.asteroids[0];
+    const megaRadius = aMega ? aMega.radius : 2800;
+
     for (let pass = 0; pass < pbdPasses; pass++) {
-      for (let i = 0; i < numAsteroids; i++) {
-        const a1 = this.asteroids[i];
-        if (!a1) continue;
-        const p1 = a1.position;
-
-        for (let j = i + 1; j < numAsteroids; j++) {
-          const a2 = this.asteroids[j];
+      // Mega-Asteroid vs Belt Asteroids (only if asteroid encroaches into mega zone)
+      if (aMega) {
+        for (let i = 1; i < numAsteroids; i++) {
+          const a2 = this.asteroids[i];
           if (!a2) continue;
+          const minDist = megaRadius + a2.radius;
           const p2 = a2.position;
-          const minDist = a1.radius + a2.radius;
-
-          const dx = p1.x - p2.x;
-          if (Math.abs(dx) >= minDist) continue;
-          const dz = p1.z - p2.z;
-          if (Math.abs(dz) >= minDist) continue;
-          const dy = p1.y - p2.y;
-          if (Math.abs(dy) >= minDist) continue;
-
-          const distSq = dx * dx + dy * dy + dz * dz;
-
+          const distSq = p2.x * p2.x + p2.y * p2.y + p2.z * p2.z;
           if (distSq < minDist * minDist && distSq > 0.0001) {
             const dist = Math.sqrt(distSq);
-            const nx = dx / dist;
-            const ny = dy / dist;
-            const nz = dz / dist;
+            const nx = p2.x / dist;
+            const ny = p2.y / dist;
+            const nz = p2.z / dist;
             const overlap = minDist - dist;
             const push = Math.min(overlap * 0.55, 20.0);
-
-            if (a1.isMegaAsteroid) {
-              // Mega-asteroid stays stationary; a2 gets pushed away completely
-              p2.x -= nx * push;
-              p2.y -= ny * push;
-              p2.z -= nz * push;
-              if (a2.boundingSphere) a2.boundingSphere.center.copy(p2);
-              if (pass === 0) {
-                const velAlong = a2.velocity.x * nx + a2.velocity.y * ny + a2.velocity.z * nz;
-                if (velAlong > 0) {
-                  a2.velocity.x -= (1 + 0.5) * velAlong * nx;
-                  a2.velocity.y -= (1 + 0.5) * velAlong * ny;
-                  a2.velocity.z -= (1 + 0.5) * velAlong * nz;
-                }
-              }
-            } else if (a2.isMegaAsteroid) {
-              // Mega-asteroid stays stationary; a1 gets pushed away completely
-              p1.x += nx * push;
-              p1.y += ny * push;
-              p1.z += nz * push;
-              if (a1.boundingSphere) a1.boundingSphere.center.copy(p1);
-              if (pass === 0) {
-                const velAlong = a1.velocity.x * (-nx) + a1.velocity.y * (-ny) + a1.velocity.z * (-nz);
-                if (velAlong > 0) {
-                  a1.velocity.x -= (1 + 0.5) * velAlong * (-nx);
-                  a1.velocity.y -= (1 + 0.5) * velAlong * (-ny);
-                  a1.velocity.z -= (1 + 0.5) * velAlong * (-nz);
-                }
-              }
-            } else {
-              const totalMass = a1.mass + a2.mass;
-              const ratio1 = a2.mass / totalMass;
-              const ratio2 = a1.mass / totalMass;
-
-              p1.x += nx * push * ratio1;
-              p1.y += ny * push * ratio1;
-              p1.z += nz * push * ratio1;
-
-              p2.x -= nx * push * ratio2;
-              p2.y -= ny * push * ratio2;
-              p2.z -= nz * push * ratio2;
-
-              if (a1.boundingSphere) a1.boundingSphere.center.copy(p1);
-              if (a2.boundingSphere) a2.boundingSphere.center.copy(p2);
-
-              if (pass === 0) {
-                const rvx = a1.velocity.x - a2.velocity.x;
-                const rvy = a1.velocity.y - a2.velocity.y;
-                const rvz = a1.velocity.z - a2.velocity.z;
-                const velAlongNormal = rvx * nx + rvy * ny + rvz * nz;
-
-                if (velAlongNormal < 0) {
-                  const restitution = 0.55;
-                  const impulse = -(1 + restitution) * velAlongNormal / (1 / a1.mass + 1 / a2.mass);
-
-                  const dv1 = Math.min(25.0, impulse / a1.mass);
-                  const dv2 = Math.min(25.0, impulse / a2.mass);
-
-                  a1.velocity.x += dv1 * nx;
-                  a1.velocity.y += dv1 * ny;
-                  a1.velocity.z += dv1 * nz;
-
-                  a2.velocity.x -= dv2 * nx;
-                  a2.velocity.y -= dv2 * ny;
-                  a2.velocity.z -= dv2 * nz;
-                }
+            p2.x += nx * push;
+            p2.y += ny * push;
+            p2.z += nz * push;
+            if (a2.boundingSphere) a2.boundingSphere.center.copy(p2);
+            if (pass === 0) {
+              const velAlong = a2.velocity.x * (-nx) + a2.velocity.y * (-ny) + a2.velocity.z * (-nz);
+              if (velAlong > 0) {
+                a2.velocity.x -= (1 + 0.5) * velAlong * (-nx);
+                a2.velocity.y -= (1 + 0.5) * velAlong * (-ny);
+                a2.velocity.z -= (1 + 0.5) * velAlong * (-nz);
               }
             }
+          }
+        }
+      }
 
-            if (a1.velocity.length() > 40.0) a1.velocity.setLength(40.0);
-            if (a2.velocity.length() > 40.0) a2.velocity.setLength(40.0);
+      // Belt Asteroids vs Belt Asteroids within same or adjacent angular sectors
+      for (let s = 0; s < 24; s++) {
+        const binA = sectorBins[s];
+        const nextSector = (s + 1) % 24;
+        const binB = sectorBins[nextSector];
+
+        for (let idx1 = 0; idx1 < binA.length; idx1++) {
+          const i = binA[idx1];
+          const a1 = this.asteroids[i];
+          const p1 = a1.position;
+
+          // Same sector
+          for (let idx2 = idx1 + 1; idx2 < binA.length; idx2++) {
+            const j = binA[idx2];
+            const a2 = this.asteroids[j];
+            const minDist = a1.radius + a2.radius;
+            const dx = p1.x - a2.position.x;
+            if (Math.abs(dx) >= minDist) continue;
+            const dz = p1.z - a2.position.z;
+            if (Math.abs(dz) >= minDist) continue;
+            const dy = p1.y - a2.position.y;
+            if (Math.abs(dy) >= minDist) continue;
+
+            const distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < minDist * minDist && distSq > 0.0001) {
+              this._resolvePairwiseAsteroidCollision(a1, a2, dx, dy, dz, minDist, Math.sqrt(distSq), pass);
+            }
+          }
+
+          // Adjacent sector
+          for (let idx2 = 0; idx2 < binB.length; idx2++) {
+            const j = binB[idx2];
+            const a2 = this.asteroids[j];
+            const minDist = a1.radius + a2.radius;
+            const dx = p1.x - a2.position.x;
+            if (Math.abs(dx) >= minDist) continue;
+            const dz = p1.z - a2.position.z;
+            if (Math.abs(dz) >= minDist) continue;
+            const dy = p1.y - a2.position.y;
+            if (Math.abs(dy) >= minDist) continue;
+
+            const distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < minDist * minDist && distSq > 0.0001) {
+              this._resolvePairwiseAsteroidCollision(a1, a2, dx, dy, dz, minDist, Math.sqrt(distSq), pass);
+            }
           }
         }
       }
     }
+  }
+
+  _resolvePairwiseAsteroidCollision(a1, a2, dx, dy, dz, minDist, dist, pass) {
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const nz = dz / dist;
+    const overlap = minDist - dist;
+    const push = Math.min(overlap * 0.55, 20.0);
+
+    const totalMass = a1.mass + a2.mass;
+    const ratio1 = a2.mass / totalMass;
+    const ratio2 = a1.mass / totalMass;
+
+    a1.position.x += nx * push * ratio1;
+    a1.position.y += ny * push * ratio1;
+    a1.position.z += nz * push * ratio1;
+
+    a2.position.x -= nx * push * ratio2;
+    a2.position.y -= ny * push * ratio2;
+    a2.position.z -= nz * push * ratio2;
+
+    if (a1.boundingSphere) a1.boundingSphere.center.copy(a1.position);
+    if (a2.boundingSphere) a2.boundingSphere.center.copy(a2.position);
+
+    if (pass === 0) {
+      const rvx = a1.velocity.x - a2.velocity.x;
+      const rvy = a1.velocity.y - a2.velocity.y;
+      const rvz = a1.velocity.z - a2.velocity.z;
+      const velAlongNormal = rvx * nx + rvy * ny + rvz * nz;
+
+      if (velAlongNormal < 0) {
+        const restitution = 0.55;
+        const impulse = -(1 + restitution) * velAlongNormal / (1 / a1.mass + 1 / a2.mass);
+        const dv1 = Math.min(25.0, impulse / a1.mass);
+        const dv2 = Math.min(25.0, impulse / a2.mass);
+
+        a1.velocity.x += dv1 * nx;
+        a1.velocity.y += dv1 * ny;
+        a1.velocity.z += dv1 * nz;
+
+        a2.velocity.x -= dv2 * nx;
+        a2.velocity.y -= dv2 * ny;
+        a2.velocity.z -= dv2 * nz;
+      }
+    }
+
+    if (a1.velocity.length() > 40.0) a1.velocity.setLength(40.0);
+    if (a2.velocity.length() > 40.0) a2.velocity.setLength(40.0);
   }
 
   /**

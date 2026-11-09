@@ -178,6 +178,50 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       hud.destroy();
     });
 
+    it('should display FPS: MAX when maxFps is 0 (Unlimited) and FPS: 240 for ultra high refresh', () => {
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount = document.getElementById('hud-mount');
+      const mockEngineUncapped = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          renderScale: 1.0,
+          maxFps: 0,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
+        },
+        network: { roomName: 'Uncapped-Sector', roomId: 'uncapped-sector' },
+        playerShip: { input: { analogPitch: 0, analogYaw: 0 } }
+      };
+      const hud1 = new GameHUD(mount, mockEngineUncapped);
+      const pill1 = document.getElementById('hud-config-pill');
+      expect(pill1.textContent).toContain('FPS: MAX');
+      hud1.destroy();
+
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount2 = document.getElementById('hud-mount');
+      const mockEngine240 = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          renderScale: 1.0,
+          maxFps: 240,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
+        },
+        network: { roomName: '240-Sector', roomId: '240-sector' },
+        playerShip: { input: { analogPitch: 0, analogYaw: 0 } }
+      };
+      const hud2 = new GameHUD(mount2, mockEngine240);
+      const pill2 = document.getElementById('hud-config-pill');
+      expect(pill2.textContent).toContain('FPS: 240');
+      hud2.destroy();
+    });
+
     it('should synchronize showStats configuration option across GameHUD and room config', () => {
       document.body.innerHTML = '<div id="hud-mount"></div>';
       const mount = document.getElementById('hud-mount');

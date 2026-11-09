@@ -50,7 +50,7 @@ class AppRouter {
       megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
       meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10,
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
-      maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 60,
+      maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
       shaderQuality: params.get('shader') || 'balanced',
       particleDensity: params.get('particles') || 'balanced',
       showStats: params.get('stats') !== null ? (params.get('stats') !== 'false' && params.get('stats') !== '0') : true
@@ -157,10 +157,11 @@ class AppRouter {
                 <div class="config-field">
                   <label for="max-fps-select">Frame Rate Cap</label>
                   <select id="max-fps-select" class="lobby-select">
-                    <option value="60" selected>60 FPS (Smooth)</option>
-                    <option value="90">90 FPS (High)</option>
+                    <option value="0" selected>Unlimited (200+ FPS)</option>
+                    <option value="240">240 FPS (Ultra)</option>
                     <option value="120">120 FPS (Pro)</option>
-                    <option value="0">Unlimited</option>
+                    <option value="90">90 FPS (High)</option>
+                    <option value="60">60 FPS (Eco)</option>
                   </select>
                 </div>
                 <div class="config-field">

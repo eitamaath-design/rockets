@@ -11,6 +11,7 @@ export class GameHUD {
     this.monitorThrottleMs = 100; // 10Hz throttle (100ms)
     this.isMonitorMinimized = false;
     this._windowListeners = [];
+    this._lastValues = {};
 
     this.createDom();
     this.bindJoystick();
@@ -1051,58 +1052,63 @@ export class GameHUD {
       configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
     }
 
-    // Shield Bar (recharges over 15s)
-    const shieldBar = document.getElementById('hud-shield-bar');
-    const shieldNum = document.getElementById('hud-shield-num');
+    // Shield Bar (recharges over 15s) with dirty-checking
     const shieldPct = Math.round(((state.shield !== undefined ? state.shield : 100) / (state.maxShield || 100)) * 100);
-    if (shieldBar) {
-      shieldBar.style.width = `${shieldPct}%`;
+    if (shieldPct !== this._lastValues.shieldPct) {
+      this._lastValues.shieldPct = shieldPct;
+      const shieldBar = document.getElementById('hud-shield-bar');
+      const shieldNum = document.getElementById('hud-shield-num');
+      if (shieldBar) shieldBar.style.width = `${shieldPct}%`;
+      if (shieldNum) shieldNum.textContent = `${shieldPct}%`;
     }
-    if (shieldNum) shieldNum.textContent = `${shieldPct}%`;
 
-    // Health Bar
-    const hpBar = document.getElementById('hud-hp-bar');
-    const hpNum = document.getElementById('hud-hp-num');
+    // Health Bar with dirty-checking
     const hpPct = Math.round((state.hp / state.maxHp) * 100);
-    if (hpBar) {
-      hpBar.style.width = `${hpPct}%`;
-      hpBar.className = hpPct > 35 ? 'gauge-bar-fill bar-hp' : 'gauge-bar-fill bar-hp bar-hp-critical';
+    if (hpPct !== this._lastValues.hpPct) {
+      this._lastValues.hpPct = hpPct;
+      const hpBar = document.getElementById('hud-hp-bar');
+      const hpNum = document.getElementById('hud-hp-num');
+      if (hpBar) {
+        hpBar.style.width = `${hpPct}%`;
+        hpBar.className = hpPct > 35 ? 'gauge-bar-fill bar-hp' : 'gauge-bar-fill bar-hp bar-hp-critical';
+      }
+      if (hpNum) hpNum.textContent = `${hpPct}%`;
     }
-    if (hpNum) hpNum.textContent = `${hpPct}%`;
 
     // 30s Inactivity Beacon Indicator
-    const beaconPill = document.getElementById('hud-beacon-pill');
-    if (beaconPill) {
-      beaconPill.style.display = state.inactivityBeacon ? 'inline-flex' : 'none';
-    }
-
-    const shieldStatus = document.getElementById('hud-shield-status');
-    if (shieldStatus) {
-      if (state.invulnerable) {
-        shieldStatus.textContent = '🛡️ INVULNERABLE';
-        shieldStatus.style.color = '#00ffff';
-      } else if (state.hp <= 35) {
-        shieldStatus.textContent = 'CRITICAL';
-        shieldStatus.style.color = '#ff3344';
-      } else {
-        shieldStatus.textContent = 'ACTIVE';
-        shieldStatus.style.color = '#00ff88';
+    if (state.inactivityBeacon !== this._lastValues.inactivityBeacon) {
+      this._lastValues.inactivityBeacon = state.inactivityBeacon;
+      const beaconPill = document.getElementById('hud-beacon-pill');
+      if (beaconPill) {
+        beaconPill.style.display = state.inactivityBeacon ? 'inline-flex' : 'none';
       }
     }
 
-    // Scoreboard
-    const scoreVal = document.getElementById('hud-score-val');
-    if (scoreVal) scoreVal.textContent = state.score;
+    // Scoreboard with dirty-checking
+    if (state.score !== this._lastValues.score) {
+      this._lastValues.score = state.score;
+      const scoreVal = document.getElementById('hud-score-val');
+      if (scoreVal) scoreVal.textContent = state.score;
+    }
 
-    const killsVal = document.getElementById('hud-kills-val');
-    if (killsVal) killsVal.textContent = state.kills;
+    if (state.kills !== this._lastValues.kills) {
+      this._lastValues.kills = state.kills;
+      const killsVal = document.getElementById('hud-kills-val');
+      if (killsVal) killsVal.textContent = state.kills;
+    }
 
-    const deathsVal = document.getElementById('hud-deaths-val');
-    if (deathsVal) deathsVal.textContent = state.deaths;
+    if (state.deaths !== this._lastValues.deaths) {
+      this._lastValues.deaths = state.deaths;
+      const deathsVal = document.getElementById('hud-deaths-val');
+      if (deathsVal) deathsVal.textContent = state.deaths;
+    }
 
-    // Speedometer
-    const speedVal = document.getElementById('hud-speed-val');
-    if (speedVal) speedVal.textContent = state.speed;
+    // Speedometer with dirty-checking
+    if (state.speed !== this._lastValues.speed) {
+      this._lastValues.speed = state.speed;
+      const speedVal = document.getElementById('hud-speed-val');
+      if (speedVal) speedVal.textContent = state.speed;
+    }
 
     // Warp Badge (Double-tap & hold thrust warp drive)
     const boostBadge = document.getElementById('hud-boost-badge');

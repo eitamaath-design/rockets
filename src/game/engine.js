@@ -22,7 +22,7 @@ export class GameEngine {
       megaRadius: 2800,
       meteorFrequency: 10,
       renderScale: 1.0,
-      maxFps: 60,
+      maxFps: 0,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
       showStats: true,
