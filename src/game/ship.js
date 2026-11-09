@@ -528,7 +528,7 @@ export class PlayerShip {
 
     // Use full Newtonian momentum resolution if supported by space environment
     if (this.spaceEnv && typeof this.spaceEnv.resolveShipCollision === 'function') {
-      const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass);
+      const collisionResult = this.spaceEnv.resolveShipCollision(this.position, this.velocity, shipRadius, this.mass, this.quaternion);
       if (collisionResult) {
         if (this.asteroidImpactDebounceTimer <= 0) {
           this.takeDamage(collisionResult.impactDamage);

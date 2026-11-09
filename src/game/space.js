@@ -1517,13 +1517,11 @@ export class SpaceEnvironment {
   }
 
   /**
-   * Resolves physical collision between ship and asteroid.
-   * Narrowphase samples MarchingCubes volumetric density field and continuous capsule corridor.
-   * If D <= mc.isolation (or inside carved tunnel corridor), free flight clearance is granted!
-   * If D > mc.isolation, calculates outward surface normal from density gradient ∇D,
-   * steps position outward along normal until clear, and deflects velocity.
+   * Resolves physical collision between ship and asteroid with hull-radius-aware multi-point sampling & swept density gradient.
+   * Samples center, nose, tail, left/right wings, and belly using orientation quaternion (or velocity direction).
+   * Ensures zero visual clipping with robust outward margin while maintaining insideCarving tunnel/cavern clearance.
    */
-  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200) {
+  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200, orientation = null) {
     for (let i = 0; i < this.asteroids.length; i++) {
       const a = this.asteroids[i];
       const dist = position.distanceTo(a.position);
@@ -1533,34 +1531,67 @@ export class SpaceEnvironment {
         if (a.mesh && a.mesh.matrixWorld) a.mesh.updateMatrixWorld(true);
         const invMatrix = a.mesh?.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
         const scaleR = a.radius / ISOSURFACE_SCALE;
-        const localShip = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
 
-        // Narrowphase: Check volumetric density & carved corridor clearance
-        const insideCarving = this.checkInsideCarvings(a, localShip);
-        const density = this.sampleDensity(a.mc || a.mesh, localShip.x, localShip.y, localShip.z, a.radius);
+        const forward = orientation ? new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize() : (velocity.lengthSq() > 0.001 ? velocity.clone().normalize() : new THREE.Vector3(0, 0, -1));
+        const right = orientation ? new THREE.Vector3(1, 0, 0).applyQuaternion(orientation).normalize() : new THREE.Vector3(1, 0, 0).cross(forward).normalize();
+        if (right.lengthSq() < 0.001) right.set(1, 0, 0);
+        const up = orientation ? new THREE.Vector3(0, 1, 0).applyQuaternion(orientation).normalize() : new THREE.Vector3(0, 1, 0);
+
+        const hullPoints = [
+          { name: 'center', pt: position.clone() },
+          { name: 'nose', pt: position.clone().addScaledVector(forward, shipRadius) },
+          { name: 'tail', pt: position.clone().addScaledVector(forward, -shipRadius * 0.7) },
+          { name: 'leftWing', pt: position.clone().addScaledVector(right, -shipRadius * 0.8) },
+          { name: 'rightWing', pt: position.clone().addScaledVector(right, shipRadius * 0.8) },
+          { name: 'belly', pt: position.clone().addScaledVector(up, -shipRadius * 0.6) }
+        ];
+
+        let colliding = false;
+        let intersectingLocalPt = null;
         const iso = a.mc?.isolation || 40.0;
 
-        if (insideCarving || density <= iso) {
-          // Free flight clearance through space, excavated cavern, or through-tunnel!
+        for (const hp of hullPoints) {
+          const localPt = hp.pt.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+          const insideCarving = this.checkInsideCarvings(a, localPt);
+          const density = this.sampleDensity(a.mc || a.mesh, localPt.x, localPt.y, localPt.z, a.radius);
+
+          if (!insideCarving && density > iso) {
+            colliding = true;
+            intersectingLocalPt = localPt;
+            break;
+          }
+        }
+
+        if (!colliding) {
           continue;
         }
 
         // Intersecting solid rock! Calculate outward normal from continuous density gradient ∇D
-        const normal = this.computeDensityGradientNormal(a, localShip);
+        const normal = this.computeDensityGradientNormal(a, intersectingLocalPt || position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR));
 
-        // Instead of teleporting to outer bounding sphere, step outward along normal until density <= iso
         let stepDist = 0;
-        const maxPush = a.isMegaAsteroid ? 40.0 : (shipRadius + 18.0);
-        const stepInc = 2.0;
+        const maxPush = a.isMegaAsteroid ? 50.0 : (shipRadius * 2.0 + 20.0);
+        const stepInc = 1.5;
+        const safeMargin = shipRadius + 0.6;
+
         while (stepDist < maxPush) {
           position.addScaledVector(normal, stepInc);
           stepDist += stepInc;
-          const testLocal = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-          if (this.sampleDensity(a.mc || a.mesh, testLocal.x, testLocal.y, testLocal.z, a.radius) <= iso) {
-            break;
+
+          let allClear = true;
+          for (const hp of hullPoints) {
+            const testPt = hp.pt.clone().addScaledVector(normal, stepDist);
+            const testLocal = testPt.applyMatrix4(invMatrix).multiplyScalar(scaleR);
+            const insideCarving = this.checkInsideCarvings(a, testLocal);
+            const density = this.sampleDensity(a.mc || a.mesh, testLocal.x, testLocal.y, testLocal.z, a.radius);
+            if (!insideCarving && density > iso) {
+              allClear = false;
+              break;
+            }
           }
+          if (allClear) break;
         }
-        position.addScaledVector(normal, shipRadius * 0.5);
+        position.addScaledVector(normal, safeMargin);
 
         const relVel = velocity.clone().sub(a.velocity);
         const vNorm = relVel.dot(normal);
