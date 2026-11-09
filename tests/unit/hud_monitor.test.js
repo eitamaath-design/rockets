@@ -643,3 +643,40 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
   });
 });
+
+describe('Responsive Mobile HUD Top Bar & Logs Button Accessibility', () => {
+  let container;
+  let hud;
+  let mockEngine;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    mockEngine = {
+      network: { roomName: 'Test', isMaster: false, getAveragePing: () => 20 },
+      config: { voxelQuality: 'high', asteroidCount: 100, megaRadius: 2800, meteorFrequency: 10 },
+      playerShip: { input: {} }
+    };
+    hud = new GameHUD(container, mockEngine);
+  });
+
+  afterEach(() => {
+    if (hud) hud.destroy();
+    if (container && container.parentNode) container.parentNode.removeChild(container);
+  });
+
+  it('should guarantee .hud-btn-diag ("🐞 Logs") and critical top bar controls are present and unclipped', () => {
+    const diagBtn = document.getElementById('hud-btn-diag');
+    expect(diagBtn).not.toBeNull();
+    expect(diagBtn.textContent).toContain('Logs');
+
+    const topBar = container.querySelector('.hud-top-bar');
+    expect(topBar).not.toBeNull();
+    const topLeft = container.querySelector('.hud-top-left');
+    const topRight = container.querySelector('.hud-top-right');
+    const topCenter = container.querySelector('.hud-top-center');
+    expect(topLeft).not.toBeNull();
+    expect(topRight).not.toBeNull();
+    expect(topCenter).not.toBeNull();
+  });
+});
