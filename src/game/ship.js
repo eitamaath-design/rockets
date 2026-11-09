@@ -90,6 +90,8 @@ export class PlayerShip {
       analogRoll: 0
     };
 
+    this.currentRollInput = 0.0;
+
     // Camera initial orientation
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.desiredQuaternion);
@@ -208,6 +210,7 @@ export class PlayerShip {
     this.invulnerableTimer = 2.5;
     this.asteroidImpactDebounceTimer = 0.0;
     this.shipCollisionDebounceTimer = 0.0;
+    this.currentRollInput = 0.0;
 
     this.camera.position.copy(this.position);
     this.camera.quaternion.copy(this.desiredQuaternion);
@@ -478,11 +481,19 @@ export class PlayerShip {
     if (this.input.yawRight) yawInput -= 1;
     yawInput = clamp(yawInput, -1, 1) + (this.input.analogYaw || 0);
 
-    // 3. Calculate roll rate (local Z axis)
-    let rollInput = 0;
-    if (this.input.rollLeft) rollInput += 1;
-    if (this.input.rollRight) rollInput -= 1;
-    rollInput = clamp(rollInput, -1.0, 1.0) + (this.input.analogRoll || 0);
+    // 3. Calculate roll rate (local Z axis) with ease-in / ease-out smoothing
+    let targetRollInput = 0;
+    if (this.input.rollLeft) targetRollInput += 1;
+    if (this.input.rollRight) targetRollInput -= 1;
+    targetRollInput = clamp(targetRollInput, -1.0, 1.0) + (this.input.analogRoll || 0);
+    targetRollInput = clamp(targetRollInput, -1.0, 1.0);
+
+    const rampRate = 6.0; // units per second
+    if (this.currentRollInput < targetRollInput) {
+      this.currentRollInput = Math.min(targetRollInput, this.currentRollInput + rampRate * dt);
+    } else if (this.currentRollInput > targetRollInput) {
+      this.currentRollInput = Math.max(targetRollInput, this.currentRollInput - rampRate * dt);
+    }
 
     // Local rotation axes
     const pitchAxis = new THREE.Vector3(1, 0, 0);
@@ -502,8 +513,8 @@ export class PlayerShip {
 
     // Manual roll inputs directly rotate both quaternion and desiredQuaternion
     // so automated alignment controller does not fight or unwind manual banking
-    if (rollInput !== 0) {
-      const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxis, rollInput * this.rollSpeed * dt);
+    if (this.currentRollInput !== 0) {
+      const qRoll = new THREE.Quaternion().setFromAxisAngle(rollAxis, this.currentRollInput * this.rollSpeed * dt);
       this.quaternion.multiply(qRoll);
       this.desiredQuaternion.multiply(qRoll);
     }

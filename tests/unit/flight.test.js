@@ -546,5 +546,31 @@ describe('Player Flight Physics & Momentum', () => {
       expect(GameEngine.prototype.isInteractiveTarget(touchBtnEl)).toBe(true);
       expect(GameEngine.prototype.isInteractiveTarget(plainCanvas)).toBe(false);
     });
+
+    it('should smooth roll input with ease-in and ease-out ramp rate of 6.0 units/s', () => {
+      expect(ship.currentRollInput).toBe(0.0);
+
+      // Press rollLeft (targetRollInput = 1.0)
+      ship.input.rollLeft = true;
+
+      // Simulate 0.1s update -> currentRollInput should ramp by 6.0 * 0.1 = 0.6
+      ship.update(0.1);
+      expect(ship.currentRollInput).toBeCloseTo(0.6, 2);
+
+      // Simulate another 0.1s -> should reach target 1.0 (capped at 1.0)
+      ship.update(0.1);
+      expect(ship.currentRollInput).toBe(1.0);
+
+      // Release rollLeft, press nothing (targetRollInput = 0.0)
+      ship.input.rollLeft = false;
+
+      // Simulate 0.1s update -> currentRollInput should ramp down from 1.0 by 0.6 -> 0.4
+      ship.update(0.1);
+      expect(ship.currentRollInput).toBeCloseTo(0.4, 2);
+
+      // Simulate another 0.1s -> should ramp down to 0.0
+      ship.update(0.1);
+      expect(ship.currentRollInput).toBe(0.0);
+    });
   });
 });
