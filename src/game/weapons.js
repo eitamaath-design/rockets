@@ -731,8 +731,16 @@ export class WeaponsSystem {
       const isFireLaser = !!ship.hasFireLaser;
       const dmgMultiplier = isFireLaser ? 1.75 : 1.0;
       const effectiveLaserDamage = this.laserDamage * dmgMultiplier;
-      const carveRadius = isFireLaser ? 84.0 : 60.0;
-      const carveDepth = isFireLaser ? 70.0 : 50.0;
+      // Derive laser carving dimensions dynamically from ship radius so carving volume
+      // is just a little bit bigger than ship size regardless of asteroid size (~3.5u for r=2.8,
+      // scaling automatically for future larger ships), replacing legacy hardcoded 60u/84u values.
+      const shipRadius = (ship && typeof ship.radius === 'number') ? ship.radius : 2.8;
+      const carveRadius = (ship && typeof ship.getLaserCarveRadius === 'function')
+        ? ship.getLaserCarveRadius(isFireLaser)
+        : (shipRadius * (isFireLaser ? 1.4 : 1.25));
+      const carveDepth = (ship && typeof ship.getLaserCarveDepth === 'function')
+        ? ship.getLaserCarveDepth(isFireLaser)
+        : (shipRadius * (isFireLaser ? 1.25 : 1.1));
       const beamSparkColor = isFireLaser ? 0xff5500 : 0x00d4ff;
 
       const shotId = `laser-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;

@@ -11,6 +11,7 @@ export class PlayerShip {
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.quaternion = new THREE.Quaternion();
     this.desiredQuaternion = new THREE.Quaternion();
+    this.radius = 2.8; // Standard fighter collision/bounding radius
     // Upgradeable ship capability ceiling (rotational rate limit in rad/s)
     this.capabilities = {
       maxTurnRate: 0.75
@@ -97,6 +98,21 @@ export class PlayerShip {
 
   set maxTurnRate(val) {
     this.capabilities.maxTurnRate = val;
+  }
+
+  /**
+   * Helper methods returning laser carving dimensions scaled with ship radius
+   * so carving volume is just a little bit bigger than ship size regardless of asteroid size,
+   * enabling automatic scaling for future larger ships.
+   */
+  getLaserCarveRadius(isFireLaser = false) {
+    const scaleFactor = isFireLaser ? 1.4 : 1.25;
+    return this.radius * scaleFactor;
+  }
+
+  getLaserCarveDepth(isFireLaser = false) {
+    const scaleFactor = isFireLaser ? 1.25 : 1.1;
+    return this.radius * scaleFactor;
   }
 
   /**

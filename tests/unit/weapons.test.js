@@ -89,7 +89,9 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
 
       weapons.triggerPrimary(true, ship, 1000);
       expect(carved).toBe(true);
-      expect(carveRadius).toBeGreaterThanOrEqual(30.0);
+      // Laser carving volume is now dynamically scaled from ship size (~3.5u for r=2.8),
+      // just a little bit bigger than ship size regardless of asteroid size.
+      expect(carveRadius).toBeCloseTo(3.5, 1);
     });
 
     it('should recharge laser energy after cooldown period', () => {
@@ -255,8 +257,9 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       weapons.triggerPrimary(true, ship, 1000);
       expect(damaged).toBe(true);
       expect(dmgAmount).toBe(4.0);
-      expect(cRadius).toBeGreaterThanOrEqual(42.0);
-      expect(cDepth).toBeGreaterThanOrEqual(32.0);
+      // Laser carving volume scaled with ship radius (r=2.8 * 1.25 ≈ 3.5u)
+      expect(cRadius).toBeCloseTo(3.5, 1);
+      expect(cDepth).toBeCloseTo(3.08, 1);
     });
 
     it('should require 5 laser shots (4.0 damage each) to destroy a 20 HP small asteroid', () => {
