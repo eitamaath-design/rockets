@@ -1356,7 +1356,6 @@ export class SpaceEnvironment {
           const invMatrix = a.mesh?.matrixWorld ? a.mesh.matrixWorld.clone().invert() : new THREE.Matrix4().copy(a.mesh.matrix).invert();
           const scaleR = a.radius / ISOSURFACE_SCALE;
           const localPt = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
-          if (this.checkInsideCarvings(a, localPt)) continue;
           const density = this.sampleDensity(a.mc, localPt.x, localPt.y, localPt.z, a.radius);
           const iso = a.mc.isolation || 40.0;
           if (density > iso) {
@@ -1553,6 +1552,7 @@ export class SpaceEnvironment {
 
         const startPos = position.clone().addScaledVector(velocity || new THREE.Vector3(), -dt);
 
+        const hasMC = !!(a.mc && a.mc.field);
         let colliding = false;
         let intersectingLocalPt = null;
         let collisionPos = position.clone();
@@ -1570,7 +1570,10 @@ export class SpaceEnvironment {
             { name: 'tail', pt: currPos.clone().addScaledVector(forward, -shipRadius * 0.7) },
             { name: 'leftWing', pt: currPos.clone().addScaledVector(right, -shipRadius * 0.8) },
             { name: 'rightWing', pt: currPos.clone().addScaledVector(right, shipRadius * 0.8) },
-            { name: 'belly', pt: currPos.clone().addScaledVector(up, -shipRadius * 0.6) }
+            { name: 'belly', pt: currPos.clone().addScaledVector(up, -shipRadius * 0.6) },
+            { name: 'canopy', pt: currPos.clone().addScaledVector(up, shipRadius * 0.6) },
+            { name: 'noseLeft', pt: currPos.clone().addScaledVector(forward, shipRadius * 0.7).addScaledVector(right, -shipRadius * 0.5) },
+            { name: 'noseRight', pt: currPos.clone().addScaledVector(forward, shipRadius * 0.7).addScaledVector(right, shipRadius * 0.5) }
           ];
 
           let stepColliding = false;
@@ -1588,7 +1591,8 @@ export class SpaceEnvironment {
               hitPointName = hp.name;
             }
 
-            if (!insideCarving && density > iso) {
+            const isSolidRock = hasMC ? (density > iso) : (!insideCarving && density > iso);
+            if (isSolidRock) {
               stepColliding = true;
               stepIntersectingLocal = localPt;
               break;
@@ -1634,7 +1638,10 @@ export class SpaceEnvironment {
           { name: 'tail', pt: position.clone().addScaledVector(forward, -shipRadius * 0.7) },
           { name: 'leftWing', pt: position.clone().addScaledVector(right, -shipRadius * 0.8) },
           { name: 'rightWing', pt: position.clone().addScaledVector(right, shipRadius * 0.8) },
-          { name: 'belly', pt: position.clone().addScaledVector(up, -shipRadius * 0.6) }
+          { name: 'belly', pt: position.clone().addScaledVector(up, -shipRadius * 0.6) },
+          { name: 'canopy', pt: position.clone().addScaledVector(up, shipRadius * 0.6) },
+          { name: 'noseLeft', pt: position.clone().addScaledVector(forward, shipRadius * 0.7).addScaledVector(right, -shipRadius * 0.5) },
+          { name: 'noseRight', pt: position.clone().addScaledVector(forward, shipRadius * 0.7).addScaledVector(right, shipRadius * 0.5) }
         ];
 
         while (stepDist < maxPush) {
@@ -1645,9 +1652,9 @@ export class SpaceEnvironment {
           for (const hp of hullPointsAtCollision) {
             const testPt = hp.pt.clone().addScaledVector(normal, stepDist);
             const testLocal = testPt.applyMatrix4(invMatrix).multiplyScalar(scaleR);
-            const insideCarving = this.checkInsideCarvings(a, testLocal);
             const density = this.sampleDensity(a.mc || a.mesh, testLocal.x, testLocal.y, testLocal.z, a.radius);
-            if (!insideCarving && density > iso) {
+            const isPointSolid = hasMC ? (density > iso) : (!this.checkInsideCarvings(a, testLocal) && density > iso);
+            if (isPointSolid) {
               allClear = false;
               break;
             }
@@ -1655,6 +1662,18 @@ export class SpaceEnvironment {
           if (allClear) break;
         }
         position.addScaledVector(normal, safeMargin);
+
+        // Fail-safe post-resolution guarantee loop to ensure density <= iso
+        if (hasMC) {
+          let emergencySteps = 0;
+          while (emergencySteps < 20) {
+            const localCenter = position.clone().applyMatrix4(invMatrix).multiplyScalar(scaleR);
+            const dCenter = this.sampleDensity(a.mc || a.mesh, localCenter.x, localCenter.y, localCenter.z, a.radius);
+            if (dCenter <= iso) break;
+            position.addScaledVector(normal, 1.5);
+            emergencySteps++;
+          }
+        }
 
         const relVel = (velocity || new THREE.Vector3()).clone().sub(a.velocity);
         const vNorm = relVel.dot(normal);
