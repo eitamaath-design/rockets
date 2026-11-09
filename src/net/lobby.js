@@ -144,10 +144,14 @@ class LobbyService {
         playerCount: count,
         mapSeed: match.mapSeed || 42,
         config: match.config || {
-          voxelQuality: 'low',
+          voxelQuality: 'high',
           asteroidCount: 100,
           megaRadius: 2800,
-          meteorFrequency: 10
+          meteorFrequency: 10,
+          renderScale: 1.0,
+          maxFps: 60,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
         },
         timestamp: Date.now(),
         ttlMs: ROOM_TTL_MS

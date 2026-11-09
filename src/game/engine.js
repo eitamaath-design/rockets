@@ -16,12 +16,18 @@ export class GameEngine {
     this.container = container;
     this.network = network;
     this.mapSeed = mapSeed;
-    this.config = config || {
+    this.config = {
       voxelQuality: 'high',
       asteroidCount: 100,
       megaRadius: 2800,
-      meteorFrequency: 10
+      meteorFrequency: 10,
+      renderScale: 1.0,
+      maxFps: 60,
+      shaderQuality: 'balanced',
+      particleDensity: 'balanced',
+      ...(config || {})
     };
+    this._lastRenderTime = 0;
     this.onHudUpdate = onHudUpdate || (() => {});
     this.onDeathNotice = onDeathNotice || (() => {});
 
@@ -117,6 +123,8 @@ export class GameEngine {
     });
     this.powerUpSystem = new PowerUpSystem(this.scene);
 
+    this.applyPerformanceConfig(this.config);
+
     // Pre-warm and compile all WebGL materials and shaders upfront
     // This completely eliminates in-game shader compilation freezes when shots are fired!
     try {
@@ -128,6 +136,39 @@ export class GameEngine {
     }
 
     window.addEventListener('resize', this.onWindowResize.bind(this));
+  }
+
+  applyPerformanceConfig(newConfig = {}) {
+    if (newConfig && typeof newConfig === 'object') {
+      this.config = { ...this.config, ...newConfig };
+    }
+    const scale = Number(this.config.renderScale) || 1.0;
+    if (this.renderer && typeof this.renderer.setPixelRatio === 'function') {
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+      const effectivePixelRatio = Math.min(2.0, Math.max(0.5, scale * Math.min(dpr, 1.5)));
+      this.renderer.setPixelRatio(effectivePixelRatio);
+      if (this.container) {
+        const w = this.container.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1280);
+        const h = this.container.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 720);
+        if (w > 0 && h > 0) {
+          this.renderer.setSize(w, h, false);
+        }
+      }
+    }
+    const pDensity = this.config.particleDensity || 'balanced';
+    const sQuality = this.config.shaderQuality || 'balanced';
+    if (this.spaceEnv && typeof this.spaceEnv.setPerformanceConfig === 'function') {
+      this.spaceEnv.setPerformanceConfig({ shaderQuality: sQuality, particleDensity: pDensity });
+    }
+    if (this.thrusterTrails && typeof this.thrusterTrails.setParticleDensity === 'function') {
+      this.thrusterTrails.setParticleDensity(pDensity);
+    }
+    if (this.weaponsSystem && typeof this.weaponsSystem.setParticleDensity === 'function') {
+      this.weaponsSystem.setParticleDensity(pDensity);
+    }
+    if (this.meteorSystem && typeof this.meteorSystem.setParticleDensity === 'function') {
+      this.meteorSystem.setParticleDensity(pDensity);
+    }
   }
 
   setupNetworkHandlers() {
@@ -208,6 +249,7 @@ export class GameEngine {
           this.meteorSystem.spawnInterval = this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10;
           this.meteorSystem.enabled = this.meteorSystem.spawnInterval > 0;
         }
+        this.applyPerformanceConfig(this.config);
       });
     }
   }
@@ -233,6 +275,7 @@ export class GameEngine {
       this.playerShip.velocity.set(0, 0, 0);
       this.playerShip.quaternion.set(0, 0, 0, 1);
     }
+    this.applyPerformanceConfig(this.config);
     logger.log('MAP', `Map reseeded with ${newSeed}`);
     this.onDeathNotice(`🔄 Sector reseeded! Map reset complete.`);
   }
@@ -434,12 +477,19 @@ export class GameEngine {
     const height = this.container.clientHeight;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    const scale = Number(this.config?.renderScale) || 1.0;
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const effectivePixelRatio = Math.min(2.0, Math.max(0.5, scale * Math.min(dpr, 1.5)));
+    if (typeof this.renderer.setPixelRatio === 'function') {
+      this.renderer.setPixelRatio(effectivePixelRatio);
+    }
     this.renderer.setSize(width, height);
   }
 
   start() {
     this.isRunning = true;
     this.lastTime = performance.now();
+    this._lastRenderTime = 0;
     this.loop();
   }
 
@@ -450,9 +500,20 @@ export class GameEngine {
     }
   }
 
-  loop() {
+  loop(rafTimestamp) {
     if (!this.isRunning) return;
     this.animFrameId = requestAnimationFrame(this.loop.bind(this));
+
+    const nowFrame = typeof rafTimestamp === 'number' ? rafTimestamp : performance.now();
+    const maxFps = Number(this.config?.maxFps) || 0;
+    if (maxFps > 0 && this._lastRenderTime > 0) {
+      const elapsedMs = nowFrame - this._lastRenderTime;
+      const minFrameIntervalMs = (1000 / maxFps) - 0.75;
+      if (elapsedMs > 0.5 && elapsedMs < minFrameIntervalMs) {
+        return;
+      }
+    }
+    this._lastRenderTime = nowFrame;
 
     try {
       logger.recordFrame();

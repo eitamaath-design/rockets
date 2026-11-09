@@ -7,11 +7,16 @@ export class GameNetwork {
     this.roomId = roomId;
     this.roomName = roomName || roomId;
     this.mapSeed = mapSeed || 42;
-    this.config = config || {
-      voxelQuality: 'low',
+    this.config = {
+      voxelQuality: 'high',
       asteroidCount: 100,
       megaRadius: 2800,
-      meteorFrequency: 10
+      meteorFrequency: 10,
+      renderScale: 1.0,
+      maxFps: 60,
+      shaderQuality: 'balanced',
+      particleDensity: 'balanced',
+      ...(config || {})
     };
     this.playerName = playerName || `Pilot-${(selfId || 'Host').slice(0, 4)}`;
     this.selfId = selfId;

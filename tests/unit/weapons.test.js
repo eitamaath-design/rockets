@@ -254,9 +254,41 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
 
       weapons.triggerPrimary(true, ship, 1000);
       expect(damaged).toBe(true);
-      expect(dmgAmount).toBe(5.0);
+      expect(dmgAmount).toBe(4.0);
       expect(cRadius).toBeGreaterThanOrEqual(42.0);
       expect(cDepth).toBeGreaterThanOrEqual(32.0);
+    });
+
+    it('should require 5 laser shots (4.0 damage each) to destroy a 20 HP small asteroid', () => {
+      const smallAsteroid = { mesh: new THREE.Mesh(), radius: 28, hp: 20 };
+      let hitCount = 0;
+      let destroyed = false;
+      mockSpaceEnv.checkRayCollision = () => ({
+        asteroid: smallAsteroid,
+        distance: 80,
+        hitPoint: new THREE.Vector3(0, 0, -80)
+      });
+      mockSpaceEnv.damageAsteroid = (ast, dmg) => {
+        hitCount++;
+        ast.hp -= dmg;
+        if (ast.hp <= 0) {
+          destroyed = true;
+          return { destroyed: true, crackStage: 5, hp: 0 };
+        }
+        return { destroyed: false, cracked: true, crackStage: hitCount, hp: ast.hp };
+      };
+
+      for (let shot = 1; shot <= 4; shot++) {
+        weapons.triggerPrimary(true, ship, 1000 + shot * 200);
+        expect(destroyed).toBe(false);
+        expect(smallAsteroid.hp).toBe(20 - shot * 4.0);
+      }
+
+      // 5th shot destroys the small asteroid
+      weapons.triggerPrimary(true, ship, 2000);
+      expect(hitCount).toBe(5);
+      expect(smallAsteroid.hp).toBe(0);
+      expect(destroyed).toBe(true);
     });
   });
 

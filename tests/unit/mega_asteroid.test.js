@@ -485,5 +485,64 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
         expect(postHit).toBeNull();
       }
     });
+
+    it('should require 5 progressive fracture hits (stages 1 -> 2 -> 3 -> 4 -> 5) via damageAsteroid / fractureAsteroid before excavating a rock part', () => {
+      const space = new SpaceEnvironment(scene, 9090, { voxelQuality: 'low', asteroidCount: 10 });
+      const mega = space.asteroids[0];
+      expect(mega.mc.crackField).toBeInstanceOf(Float32Array);
+      expect(mega.mc.basePalette).toBeInstanceOf(Float32Array);
+      expect(Array.isArray(mega.crackZones)).toBe(true);
+
+      const rayOrigin = new THREE.Vector3(0, 0, 4000);
+      const rayDir = new THREE.Vector3(0, 0, -1);
+      const hit = space.checkRayCollision(rayOrigin, rayDir, 6000.0);
+      expect(hit).not.toBeNull();
+      const impactPt = hit.hitPoint.clone();
+
+      // Track average palette luminance in modified voxels across stages 1 to 4
+      const getZonePaletteLuma = () => {
+        let sum = 0;
+        let count = 0;
+        for (let i = 0; i < mega.mc.crackField.length; i++) {
+          if (mega.mc.crackField[i] > 0) {
+            const pIdx = i * 3;
+            sum += mega.mc.palette[pIdx] * 0.299 + mega.mc.palette[pIdx + 1] * 0.587 + mega.mc.palette[pIdx + 2] * 0.114;
+            count++;
+          }
+        }
+        return count > 0 ? sum / count : 1.0;
+      };
+
+      let prevLuma = 1.0;
+      for (let stage = 1; stage <= 4; stage++) {
+        const dmgRes = space.damageAsteroid(mega, 45.0, impactPt, rayDir, 60.0, 50.0, 160.0);
+        expect(dmgRes.destroyed).toBe(false);
+        expect(dmgRes.cracked).toBe(true);
+        expect(dmgRes.carved).toBe(false);
+        expect(dmgRes.crackStage).toBe(stage);
+        expect(dmgRes.carveResult.crackStage).toBe(stage);
+        expect(dmgRes.carveResult.maxCrackStage).toBe(5);
+        expect(dmgRes.carveResult.isosurfaceCrossed).toBe(false);
+        expect(dmgRes.carveResult.excavated).toBe(false);
+        expect(dmgRes.carveResult.voxelsModified).toBeGreaterThan(0);
+
+        expect(space.getCrackStageAt(mega, impactPt)).toBe(stage);
+
+        const curLuma = getZonePaletteLuma();
+        expect(curLuma).toBeLessThan(prevLuma);
+        prevLuma = curLuma;
+      }
+
+      // 5th shot at the same zone excavates the rock volume and removes the crack zone!
+      const shot5Res = space.damageAsteroid(mega, 45.0, impactPt, rayDir, 60.0, 50.0, 160.0);
+      expect(shot5Res.destroyed).toBe(false);
+      expect(shot5Res.cracked).toBe(false);
+      expect(shot5Res.carved).toBe(true);
+      expect(shot5Res.crackStage).toBe(5);
+      expect(shot5Res.carveResult.crackStage).toBe(5);
+      expect(shot5Res.carveResult.excavated).toBe(true);
+      expect(shot5Res.carveResult.isosurfaceCrossed).toBe(true);
+      expect(mega.crackZones.length).toBe(0);
+    });
   });
 });

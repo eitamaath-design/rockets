@@ -32,7 +32,9 @@ export class GameHUD {
       const res = resMap[cfg.voxelQuality] || '32³';
       const belt = cfg.asteroidCount !== undefined ? cfg.asteroidCount : 100;
       const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
-      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor}`;
+      const fpsLabel = cfg.maxFps ? cfg.maxFps : 'MAX';
+      const scaleLabel = cfg.renderScale || 1.0;
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
     }
   }
 
@@ -665,7 +667,9 @@ export class GameHUD {
       const res = resMap[cfg.voxelQuality] || '32³';
       const belt = cfg.asteroidCount !== undefined ? cfg.asteroidCount : 100;
       const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
-      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor}`;
+      const fpsLabel = cfg.maxFps ? cfg.maxFps : 'MAX';
+      const scaleLabel = cfg.renderScale || 1.0;
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
     }
 
     // Shield Bar (recharges over 15s)

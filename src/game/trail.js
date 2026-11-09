@@ -95,11 +95,21 @@ export class ThrusterTrailSystem {
       this.mesh.setMatrixAt(i, _hideMatrix);
     }
     this.mesh.instanceMatrix.needsUpdate = true;
+    this._prevActiveCount = 0;
+    this.particleDensity = 'balanced';
+    this.particleDensityMultiplier = 1.0;
 
     this.scene.add(this.mesh);
 
     // Per-emitter last position for sub-frame distance interpolation
     this.lastEmitPos = new Map();
+  }
+
+  setParticleDensity(density = 'balanced') {
+    if (['low', 'balanced', 'high'].includes(density)) {
+      this.particleDensity = density;
+      this.particleDensityMultiplier = density === 'low' ? 0.5 : (density === 'high' ? 1.5 : 1.0);
+    }
   }
 
   /**
@@ -141,7 +151,8 @@ export class ThrusterTrailSystem {
       if (dist > 0.6 && dist < 40.0) {
         // Interpolate intermediate sub-frame puffs so fast turns & high-speed flight
         // create a continuous, dense glowing ribbon without discrete dot gaps
-        const steps = Math.min(10, Math.floor(dist / 0.7));
+        const densityMult = this.particleDensity === 'balanced' ? 1.0 : (this.particleDensityMultiplier || 1.0);
+        const steps = Math.min(10, Math.floor((dist / 0.7) * densityMult));
         for (let s = 1; s <= steps; s++) {
           const alpha = s / (steps + 1);
           _scratchVecB.copy(lastPos).lerp(_scratchVecA, alpha);
@@ -169,9 +180,7 @@ export class ThrusterTrailSystem {
       _camQuat.identity();
     }
 
-    const activeCount = this.particles.length;
-
-    for (let i = activeCount - 1; i >= 0; i--) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.age += dt;
 
@@ -184,6 +193,13 @@ export class ThrusterTrailSystem {
       p.x += (p.vx + Math.sin(p.y * 0.25 + this.simTime * 2.2) * 0.28) * dt;
       p.y += (p.vy + Math.cos(p.x * 0.25 + this.simTime * 2.2) * 0.28) * dt;
       p.z += (p.vz + Math.sin(p.z * 0.25 + this.simTime * 2.2) * 0.28) * dt;
+    }
+
+    const activeCount = this.particles.length;
+    const prevCount = this._prevActiveCount || 0;
+
+    for (let i = 0; i < activeCount; i++) {
+      const p = this.particles[i];
 
       // Dynamic scale expansion as plasma plume diffuses in space vacuum
       const normAge = p.age / p.maxAge;
@@ -219,15 +235,18 @@ export class ThrusterTrailSystem {
       this.mesh.setColorAt(i, _color);
     }
 
-    // Hide inactive instances beyond active particle count
-    for (let i = this.particles.length; i < this.maxParticles; i++) {
+    // Hide newly expired instances only in dirty range [activeCount .. prevCount - 1]
+    for (let i = activeCount; i < prevCount; i++) {
       this.mesh.setMatrixAt(i, _hideMatrix);
     }
 
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) {
-      this.mesh.instanceColor.needsUpdate = true;
+    if (activeCount > 0 || prevCount > 0) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+      if (this.mesh.instanceColor) {
+        this.mesh.instanceColor.needsUpdate = true;
+      }
     }
+    this._prevActiveCount = activeCount;
   }
 
   cleanup() {

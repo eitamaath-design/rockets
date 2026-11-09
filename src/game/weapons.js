@@ -49,8 +49,15 @@ class FireTrailSystem {
 
     for (let i = 0; i < this.maxParticles; i++) {
       this.mesh.setMatrixAt(i, _hideMatrix);
+      const idx = i * 3;
+      this.positions[idx] = 99999;
+      this.positions[idx + 1] = 99999;
+      this.positions[idx + 2] = 99999;
     }
     this.mesh.instanceMatrix.needsUpdate = true;
+    this._prevActiveCount = 0;
+    this.particleDensity = 'balanced';
+    this.particleDensityMultiplier = 1.0;
 
     this.scene.add(this.mesh);
 
@@ -59,7 +66,10 @@ class FireTrailSystem {
   }
 
   _spawnPuff(pos, dir, count = 2) {
-    for (let i = 0; i < count; i++) {
+    const scaledCount = this.particleDensity === 'balanced'
+      ? count
+      : Math.max(1, Math.round(count * (this.particleDensityMultiplier || 1.0)));
+    for (let i = 0; i < scaledCount; i++) {
       if (this.particles.length >= this.maxParticles) {
         this.particles.shift();
       }
@@ -173,7 +183,8 @@ class FireTrailSystem {
       this.colors[idx + 2] = _color.b;
     }
 
-    for (let i = activeCount; i < this.maxParticles; i++) {
+    const prevCount = this._prevActiveCount || 0;
+    for (let i = activeCount; i < prevCount; i++) {
       this.mesh.setMatrixAt(i, _hideMatrix);
       const idx = i * 3;
       this.positions[idx] = 99999;
@@ -184,10 +195,13 @@ class FireTrailSystem {
       this.colors[idx + 2] = 0;
     }
 
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) {
-      this.mesh.instanceColor.needsUpdate = true;
+    if (activeCount > 0 || prevCount > 0) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+      if (this.mesh.instanceColor) {
+        this.mesh.instanceColor.needsUpdate = true;
+      }
     }
+    this._prevActiveCount = activeCount;
   }
 
   cleanup() {
@@ -475,10 +489,24 @@ export class WeaponsSystem {
       this.explosionMesh.setMatrixAt(i, _hideMatrix);
     }
     this.explosionMesh.instanceMatrix.needsUpdate = true;
+    this._prevExplosionQuadCount = 0;
+    this.particleDensity = 'balanced';
+    this.particleDensityMultiplier = 1.0;
     this.scene.add(this.explosionMesh);
 
     this.initGeometriesAndMaterials();
     this.listenToNetworkEvents();
+  }
+
+  setParticleDensity(density = 'balanced') {
+    if (['low', 'balanced', 'high'].includes(density)) {
+      this.particleDensity = density;
+      this.particleDensityMultiplier = density === 'low' ? 0.5 : (density === 'high' ? 1.5 : 1.0);
+      if (this.fireTrails) {
+        this.fireTrails.particleDensity = density;
+        this.fireTrails.particleDensityMultiplier = this.particleDensityMultiplier;
+      }
+    }
   }
 
   initGeometriesAndMaterials() {
@@ -692,8 +720,8 @@ export class WeaponsSystem {
         this.spawnLaserImpactSparks(hitPoint, null, 0x00d4ff);
         let dmgResult = null;
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          // Primary laser damages small asteroids (disintegrating after 3-5 ticks) and carves deep mega-tunnels in colossal/large ones
-          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? 5.0 : 45.0;
+          // Primary laser requires 5 shots (20 HP / 4.0 damage = 5 shots) to destroy small asteroids or excavate rock volumes
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? 4.0 : 45.0;
           dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, 60.0, 50.0, 160.0);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
           const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 60.0, 50.0, 160.0);
@@ -706,6 +734,7 @@ export class WeaponsSystem {
           isMega: !!hitTargetObj.isMegaAsteroid,
           dist: Number(hitDistance.toFixed(1)),
           point: [Number(hitPoint.x.toFixed(1)), Number(hitPoint.y.toFixed(1)), Number(hitPoint.z.toFixed(1))],
+          crackStage: dmgResult?.crackStage ?? cRes?.crackStage ?? 0,
           voxelsModified: cRes?.voxelsModified ?? 0,
           isosurfaceCrossed: cRes?.isosurfaceCrossed ?? false,
           totalDensityDelta: cRes?.totalDensityDelta ?? 0
@@ -1076,10 +1105,11 @@ export class WeaponsSystem {
   _spawnInstancedExplosionBurst(pos, radius, colorHex) {
     if (!this.explosionQuads) this.explosionQuads = [];
     const baseColor = new THREE.Color(colorHex);
+    const mult = this.particleDensity === 'balanced' ? 1.0 : (this.particleDensityMultiplier || 1.0);
 
     // Multi-stage InstancedMesh particle allocations
     // Stage 1: Blinding white-yellow incandescent core quads expanding rapidly
-    const coreCount = radius > 15 ? 26 : 14;
+    const coreCount = Math.max(1, Math.round((radius > 15 ? 26 : 14) * mult));
     for (let i = 0; i < coreCount; i++) {
       if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
       const dir = new THREE.Vector3(
@@ -1101,7 +1131,7 @@ export class WeaponsSystem {
     }
 
     // Stage 2A: Expanding shockwave ring quads (arranged planar with random normal tilt)
-    const ringCount = radius > 15 ? 36 : 20;
+    const ringCount = Math.max(1, Math.round((radius > 15 ? 36 : 20) * mult));
     const ringNormal = new THREE.Vector3(
       Math.random() - 0.5,
       Math.random() - 0.5,
@@ -1133,7 +1163,7 @@ export class WeaponsSystem {
     }
 
     // Stage 2B: Volumetric fireball plasma puffs
-    const fireballCount = radius > 15 ? 42 : 22;
+    const fireballCount = Math.max(1, Math.round((radius > 15 ? 42 : 22) * mult));
     for (let i = 0; i < fireballCount; i++) {
       if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
       const theta = Math.random() * Math.PI * 2;
@@ -1157,7 +1187,7 @@ export class WeaponsSystem {
     }
 
     // Stage 3A: High-velocity radial incandescent sparks
-    const sparkCount = radius > 15 ? 35 : 18;
+    const sparkCount = Math.max(1, Math.round((radius > 15 ? 35 : 18) * mult));
     for (let i = 0; i < sparkCount; i++) {
       if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
       const theta = Math.random() * Math.PI * 2;
@@ -1181,7 +1211,7 @@ export class WeaponsSystem {
     }
 
     // Stage 3B: Dark smoke outer puffs
-    const smokeCount = radius > 15 ? 20 : 10;
+    const smokeCount = Math.max(1, Math.round((radius > 15 ? 20 : 10) * mult));
     for (let i = 0; i < smokeCount; i++) {
       if (this.explosionQuads.length >= this.maxExplosionQuads) this.explosionQuads.shift();
       const theta = Math.random() * Math.PI * 2;
@@ -1207,7 +1237,8 @@ export class WeaponsSystem {
 
   spawnLaserImpactSparks(pos, normal = null, colorHex = 0x00d4ff) {
     if (!this.explosionQuads) this.explosionQuads = [];
-    const count = 14;
+    const mult = this.particleDensity === 'balanced' ? 1.0 : (this.particleDensityMultiplier || 1.0);
+    const count = Math.max(1, Math.round(14 * mult));
     const baseColor = new THREE.Color(colorHex);
     for (let i = 0; i < count; i++) {
       if (this.explosionQuads.length >= this.maxExplosionQuads) {
@@ -1633,7 +1664,8 @@ export class WeaponsSystem {
     }
 
     // 7. Update GPU Instanced Explosions & Laser Sparks
-    if (this.explosionQuads && this.explosionQuads.length > 0) {
+    const prevQuadCount = this._prevExplosionQuadCount || 0;
+    if ((this.explosionQuads && this.explosionQuads.length > 0) || prevQuadCount > 0) {
       const expCamQuat = (camera && camera.quaternion) ? camera.quaternion : _camQuat.identity();
       for (let i = this.explosionQuads.length - 1; i >= 0; i--) {
         const q = this.explosionQuads[i];
@@ -1690,14 +1722,17 @@ export class WeaponsSystem {
         this.explosionMesh.setColorAt(i, _color);
       }
 
-      for (let i = activeQuadCount; i < this.maxExplosionQuads; i++) {
+      for (let i = activeQuadCount; i < prevQuadCount; i++) {
         this.explosionMesh.setMatrixAt(i, _hideMatrix);
       }
 
-      this.explosionMesh.instanceMatrix.needsUpdate = true;
-      if (this.explosionMesh.instanceColor) {
-        this.explosionMesh.instanceColor.needsUpdate = true;
+      if (activeQuadCount > 0 || prevQuadCount > 0) {
+        this.explosionMesh.instanceMatrix.needsUpdate = true;
+        if (this.explosionMesh.instanceColor) {
+          this.explosionMesh.instanceColor.needsUpdate = true;
+        }
       }
+      this._prevExplosionQuadCount = activeQuadCount;
     }
 
     // 8. Update Fire Trails

@@ -48,7 +48,11 @@ class AppRouter {
       voxelQuality: params.get('quality') || 'high',
       asteroidCount: params.get('density') ? parseInt(params.get('density'), 10) : 100,
       megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
-      meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10
+      meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10,
+      renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
+      maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 60,
+      shaderQuality: params.get('shader') || 'balanced',
+      particleDensity: params.get('particles') || 'balanced'
     };
 
     if (roomParam) {
@@ -105,7 +109,7 @@ class AppRouter {
 
             <!-- Room Configuration Drawer -->
             <div class="room-config-drawer" id="room-config-drawer">
-              <div class="drawer-header">⚙️ Sector Physics & Voxel Parameters</div>
+              <div class="drawer-header">⚙️ Sector Physics & Performance Parameters</div>
               <div class="config-grid">
                 <div class="config-field">
                   <label for="voxel-quality-select">Voxel Quality</label>
@@ -138,6 +142,40 @@ class AppRouter {
                     <option value="20">20s (Mild)</option>
                     <option value="10" selected>10s (Standard)</option>
                     <option value="5">5s (Chaos)</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="render-scale-select">Render Scale (DPI)</label>
+                  <select id="render-scale-select" class="lobby-select">
+                    <option value="0.75">0.75x (Ultra Fast)</option>
+                    <option value="1.0" selected>1.0x (Native 1x)</option>
+                    <option value="1.5">1.5x (Sharp)</option>
+                    <option value="2.0">2.0x (Retina Max)</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="max-fps-select">Frame Rate Cap</label>
+                  <select id="max-fps-select" class="lobby-select">
+                    <option value="60" selected>60 FPS (Smooth)</option>
+                    <option value="90">90 FPS (High)</option>
+                    <option value="120">120 FPS (Pro)</option>
+                    <option value="0">Unlimited</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="shader-quality-select">Rock Shader Detail</label>
+                  <select id="shader-quality-select" class="lobby-select">
+                    <option value="low">Low (Fast Grain)</option>
+                    <option value="balanced" selected>Balanced (dFdx Bump)</option>
+                    <option value="high">Ultra (Full Triplanar)</option>
+                  </select>
+                </div>
+                <div class="config-field">
+                  <label for="particle-density-select">Particle Density</label>
+                  <select id="particle-density-select" class="lobby-select">
+                    <option value="low">Low (50%)</option>
+                    <option value="balanced" selected>Balanced (100%)</option>
+                    <option value="high">High (150%)</option>
                   </select>
                 </div>
               </div>
@@ -245,7 +283,11 @@ class AppRouter {
           voxelQuality: document.getElementById('voxel-quality-select')?.value || 'high',
           asteroidCount: parseInt(document.getElementById('asteroid-count-select')?.value, 10) || 100,
           megaRadius: parseInt(document.getElementById('mega-radius-select')?.value, 10) || 2800,
-          meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10
+          meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10,
+          renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
+          maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
+          shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
+          particleDensity: document.getElementById('particle-density-select')?.value || 'balanced'
         };
         this.startMatch({
           roomId,
@@ -340,11 +382,16 @@ class AppRouter {
   startMatch({ roomId, roomName, mapSeed, config }) {
     this.currentMode = 'game';
 
-    const activeConfig = config || {
+    const activeConfig = {
       voxelQuality: 'high',
       asteroidCount: 100,
       megaRadius: 2800,
-      meteorFrequency: 10
+      meteorFrequency: 10,
+      renderScale: 1.0,
+      maxFps: 60,
+      shaderQuality: 'balanced',
+      particleDensity: 'balanced',
+      ...(config || {})
     };
 
     // Clear DOM
@@ -358,7 +405,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh
