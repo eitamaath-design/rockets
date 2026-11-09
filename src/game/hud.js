@@ -301,14 +301,47 @@ export class GameHUD {
     const maxRadius = 45; // max drag radius in pixels
     let activeTouchId = null;
     let pointerDragging = false;
+    let originX = 0;
+    let originY = 0;
 
-    const handleCoord = (clientX, clientY) => {
+    const getRestingCenter = () => {
+      const prevTransform = base.style.transform;
+      base.style.transform = 'none';
       const rect = base.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
+      base.style.transform = prevTransform;
+      let cx = rect.left + (rect.width || 120) / 2;
+      let cy = rect.top + (rect.height || 120) / 2;
+      if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+        cx = 100;
+        cy = 100;
+      }
+      return { x: cx, y: cy };
+    };
 
-      let dx = clientX - centerX;
-      let dy = clientY - centerY;
+    const startJoystick = (clientX, clientY, identifier = null) => {
+      activeTouchId = identifier;
+      originX = clientX;
+      originY = clientY;
+
+      const resting = getRestingCenter();
+      const baseDx = originX - resting.x;
+      const baseDy = originY - resting.y;
+
+      base.style.transition = 'none';
+      knob.style.transition = 'none';
+      base.style.transform = `translate(${baseDx}px, ${baseDy}px)`;
+      knob.style.transform = `translate(0px, 0px)`;
+      base.classList.add('active');
+
+      shipInput.analogPitch = 0;
+      shipInput.analogYaw = 0;
+
+      logger.log('TOUCH', `Dynamic D-Pad centered at (${Math.round(originX)}, ${Math.round(originY)}) id=${identifier}`);
+    };
+
+    const moveJoystick = (clientX, clientY) => {
+      let dx = clientX - originX;
+      let dy = clientY - originY;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist > maxRadius) {
@@ -325,10 +358,17 @@ export class GameHUD {
       shipInput.analogYaw = -(dx / maxRadius);
     };
 
-    const resetKnob = () => {
+    const resetJoystick = () => {
       activeTouchId = null;
       pointerDragging = false;
+      base.classList.remove('active');
+
+      knob.style.transition = 'transform 0.15s ease-out';
       knob.style.transform = `translate(0px, 0px)`;
+
+      base.style.transition = 'transform 0.2s ease-out';
+      base.style.transform = `translate(0px, 0px)`;
+
       shipInput.analogPitch = 0;
       shipInput.analogYaw = 0;
     };
@@ -345,14 +385,16 @@ export class GameHUD {
     container.addEventListener('touchstart', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (activeTouchId !== null) return;
+
       const touches = (e.changedTouches && e.changedTouches.length > 0)
         ? e.changedTouches
         : ((e.targetTouches && e.targetTouches.length > 0) ? e.targetTouches : e.touches);
-      if (activeTouchId === null && touches && touches.length > 0) {
+
+      if (touches && touches.length > 0) {
         const touch = touches[0];
-        activeTouchId = touch.identifier !== undefined ? touch.identifier : 0;
-        handleCoord(touch.clientX, touch.clientY);
-        logger.log('TOUCH', `Joystick touchstart (id=${activeTouchId}) at (${Math.round(touch.clientX)}, ${Math.round(touch.clientY)})`);
+        const id = touch.identifier !== undefined ? touch.identifier : 0;
+        startJoystick(touch.clientX, touch.clientY, id);
       }
     }, { passive: false });
 
@@ -361,7 +403,7 @@ export class GameHUD {
       const touch = findTouchById(e.touches, activeTouchId) || findTouchById(e.changedTouches, activeTouchId);
       if (touch) {
         if (e.cancelable) e.preventDefault();
-        handleCoord(touch.clientX, touch.clientY);
+        moveJoystick(touch.clientX, touch.clientY);
       }
     };
 
@@ -371,11 +413,11 @@ export class GameHUD {
         const endedTouch = findTouchById(e.changedTouches, activeTouchId);
         if (endedTouch) {
           if (e.cancelable) e.preventDefault();
-          resetKnob();
+          resetJoystick();
         }
       } else if (!e.touches || !findTouchById(e.touches, activeTouchId)) {
         if (e.cancelable) e.preventDefault();
-        resetKnob();
+        resetJoystick();
       }
     };
 
@@ -394,7 +436,37 @@ export class GameHUD {
       onTouchEnd(e);
     }, { passive: false });
 
-    // Window fallback so finger dragging outside joystick container continues steering smoothly
+    // Floating Joystick Screen Fallback:
+    // When pilot touches anywhere on left navigation zone (outside interactive buttons/HUD),
+    // center the D-pad at that touch position.
+    const onWindowTouchStart = (e) => {
+      if (activeTouchId !== null) return;
+      const touches = e.changedTouches || e.touches;
+      if (!touches || touches.length === 0) return;
+
+      for (let i = 0; i < touches.length; i++) {
+        const touch = touches[i];
+        const target = e.target;
+        if (container.contains(target)) return;
+
+        if (target && typeof target.closest === 'function') {
+          if (target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .action-touch-btn, .touch-btn, button, input')) {
+            continue;
+          }
+        }
+
+        const vpWidth = window.innerWidth || (document.documentElement ? document.documentElement.clientWidth : 800);
+        const vpHeight = window.innerHeight || (document.documentElement ? document.documentElement.clientHeight : 600);
+        if (touch.clientX < vpWidth * 0.45 && touch.clientY > vpHeight * 0.15) {
+          if (e.cancelable) e.preventDefault();
+          const id = touch.identifier !== undefined ? touch.identifier : 0;
+          startJoystick(touch.clientX, touch.clientY, id);
+          break;
+        }
+      }
+    };
+
+    this._addWindowListener('touchstart', onWindowTouchStart, { passive: false });
     this._addWindowListener('touchmove', onTouchMove, { passive: false });
     this._addWindowListener('touchend', onTouchEnd, { passive: false });
     this._addWindowListener('touchcancel', onTouchEnd, { passive: false });
@@ -404,18 +476,18 @@ export class GameHUD {
       if (e.pointerType === 'touch') return;
       e.preventDefault();
       pointerDragging = true;
-      handleCoord(e.clientX, e.clientY);
+      startJoystick(e.clientX, e.clientY, null);
     });
 
     this._addWindowListener('pointermove', (e) => {
       if (pointerDragging && e.pointerType !== 'touch') {
-        handleCoord(e.clientX, e.clientY);
+        moveJoystick(e.clientX, e.clientY);
       }
     });
 
     this._addWindowListener('pointerup', (e) => {
       if (pointerDragging && e.pointerType !== 'touch') {
-        resetKnob();
+        resetJoystick();
       }
     });
   }

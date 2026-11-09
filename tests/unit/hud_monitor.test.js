@@ -525,23 +525,38 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     expect(thrustBtn.classList.contains('active')).toBe(true);
 
     // 2. While Finger 1 is STILL held in e.touches[0], Finger 2 (identifier = 2) touches #touch-joystick-container!
-    // Previously, e.touches[0] grabbed Finger 1 at (800, 500) instead of Finger 2 in e.changedTouches[0]!
+    // Floating D-pad dynamically centers at Finger 2 touch coordinates (100, 100)
     const t2Start = new Event('touchstart', { bubbles: true, cancelable: true });
     t2Start.touches = [
       { identifier: 1, clientX: 800, clientY: 500 },
-      { identifier: 2, clientX: 100, clientY: 55 } // 45px above center (100, 100) -> full pitch up (+1.0)
+      { identifier: 2, clientX: 100, clientY: 100 }
     ];
     t2Start.changedTouches = [
-      { identifier: 2, clientX: 100, clientY: 55 }
+      { identifier: 2, clientX: 100, clientY: 100 }
     ];
     joyContainer.dispatchEvent(t2Start);
 
-    // Thrust remains active AND joystick accurately tracks Finger 2 (pitch = +1, yaw = 0)
+    // Thrust remains active AND joystick base dynamically centered, starting at 0 displacement
+    expect(mockEngine.playerShip.input.thrust).toBe(true);
+    expect(mockEngine.playerShip.input.analogPitch).toBe(0);
+    expect(mockEngine.playerShip.input.analogYaw).toBe(0);
+
+    // 3. Finger 2 drags 45px upward to (100, 55) relative to touch center (100, 100)
+    const t2MoveUp = new Event('touchmove', { bubbles: true, cancelable: true });
+    t2MoveUp.touches = [
+      { identifier: 1, clientX: 800, clientY: 500 },
+      { identifier: 2, clientX: 100, clientY: 55 }
+    ];
+    t2MoveUp.changedTouches = [
+      { identifier: 2, clientX: 100, clientY: 55 }
+    ];
+    joyContainer.dispatchEvent(t2MoveUp);
+
     expect(mockEngine.playerShip.input.thrust).toBe(true);
     expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
     expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(0.0, 2);
 
-    // 3. Finger 2 drags right to (145, 100) while Finger 1 stays on Thrust
+    // 4. Finger 2 drags right to (145, 100) while Finger 1 stays on Thrust
     const t2Move = new Event('touchmove', { bubbles: true, cancelable: true });
     t2Move.touches = [
       { identifier: 1, clientX: 800, clientY: 500 },
@@ -556,7 +571,7 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(0.0, 2);
     expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(-1.0, 2);
 
-    // 4. Unrelated Finger 3 (identifier = 3) lifts elsewhere -> neither Joystick nor Thrust should reset!
+    // 5. Unrelated Finger 3 (identifier = 3) lifts elsewhere -> neither Joystick nor Thrust should reset!
     const t3End = new Event('touchend', { bubbles: true, cancelable: true });
     t3End.touches = [
       { identifier: 1, clientX: 800, clientY: 500 },
@@ -570,7 +585,7 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     expect(mockEngine.playerShip.input.thrust).toBe(true);
     expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(-1.0, 2);
 
-    // 5. Finger 1 releases Thrust while Finger 2 keeps steering Joystick
+    // 6. Finger 1 releases Thrust while Finger 2 keeps steering Joystick
     const t1End = new Event('touchend', { bubbles: true, cancelable: true });
     t1End.touches = [
       { identifier: 2, clientX: 145, clientY: 100 }
@@ -585,7 +600,7 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     // Joystick is still steering!
     expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(-1.0, 2);
 
-    // 6. Finger 2 releases Joystick
+    // 7. Finger 2 releases Joystick
     const t2End = new Event('touchend', { bubbles: true, cancelable: true });
     t2End.touches = [];
     t2End.changedTouches = [
@@ -610,11 +625,16 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
       height: 120
     });
 
-    // 1. Finger 1 starts steering Joystick
+    // 1. Finger 1 starts steering Joystick at (100, 100) and drags up 45px to (100, 55)
     const jStart = new Event('touchstart', { bubbles: true, cancelable: true });
-    jStart.changedTouches = [{ identifier: 10, clientX: 100, clientY: 55 }];
+    jStart.changedTouches = [{ identifier: 10, clientX: 100, clientY: 100 }];
     jStart.touches = jStart.changedTouches;
     joyContainer.dispatchEvent(jStart);
+
+    const jMove = new Event('touchmove', { bubbles: true, cancelable: true });
+    jMove.changedTouches = [{ identifier: 10, clientX: 100, clientY: 55 }];
+    jMove.touches = jMove.changedTouches;
+    joyContainer.dispatchEvent(jMove);
     expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
 
     // 2. Finger 2 holds Thrust
@@ -640,6 +660,207 @@ describe('Mobile Multi-Touch Navigation & Circular Touch Controls', () => {
     expect(mockEngine.isFiringLaser).toBe(true);
     expect(mockEngine.playerShip.input.thrust).toBe(true);
     expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
+  });
+
+  describe('Dynamic Floating D-Pad / Virtual Joystick UX', () => {
+    it('should dynamically center joystick base at touch coordinates on touchstart', () => {
+      const joyContainer = document.getElementById('touch-joystick-container');
+      const joyBase = document.getElementById('joystick-base');
+      const joyKnob = document.getElementById('joystick-knob');
+
+      vi.spyOn(joyBase, 'getBoundingClientRect').mockReturnValue({
+        left: 40,
+        top: 40,
+        width: 120,
+        height: 120
+      });
+
+      // Touch down at (180, 220)
+      const touchStart = new Event('touchstart', { bubbles: true, cancelable: true });
+      touchStart.changedTouches = [{ identifier: 42, clientX: 180, clientY: 220 }];
+      touchStart.touches = touchStart.changedTouches;
+      joyContainer.dispatchEvent(touchStart);
+
+      // Resting center is (40 + 60, 40 + 60) = (100, 100)
+      // Delta to center base at (180, 220) is (180 - 100, 220 - 100) = (80, 120)
+      expect(joyBase.style.transform).toBe('translate(80px, 120px)');
+      expect(joyKnob.style.transform).toMatch(/^translate\(0px(?:,\s*0px)?\)$/);
+      expect(joyBase.classList.contains('active')).toBe(true);
+      expect(mockEngine.playerShip.input.analogPitch).toBe(0);
+      expect(mockEngine.playerShip.input.analogYaw).toBe(0);
+    });
+
+    it('should compute movements relative to dynamic touch-down origin until released', () => {
+      const joyContainer = document.getElementById('touch-joystick-container');
+      const joyBase = document.getElementById('joystick-base');
+      const joyKnob = document.getElementById('joystick-knob');
+
+      vi.spyOn(joyBase, 'getBoundingClientRect').mockReturnValue({
+        left: 40,
+        top: 40,
+        width: 120,
+        height: 120
+      });
+
+      // 1. Touch down at origin (200, 300)
+      const touchStart = new Event('touchstart', { bubbles: true, cancelable: true });
+      touchStart.changedTouches = [{ identifier: 55, clientX: 200, clientY: 300 }];
+      touchStart.touches = touchStart.changedTouches;
+      joyContainer.dispatchEvent(touchStart);
+
+      // 2. Drag 45px UP relative to origin (200, 255) -> pitch up (+1.0)
+      const moveUp = new Event('touchmove', { bubbles: true, cancelable: true });
+      moveUp.changedTouches = [{ identifier: 55, clientX: 200, clientY: 255 }];
+      moveUp.touches = moveUp.changedTouches;
+      joyContainer.dispatchEvent(moveUp);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
+      expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(0.0, 2);
+      expect(joyKnob.style.transform).toBe('translate(0px, -45px)');
+
+      // 3. Drag 45px RIGHT relative to origin (245, 300) -> turn right (-1.0)
+      const moveRight = new Event('touchmove', { bubbles: true, cancelable: true });
+      moveRight.changedTouches = [{ identifier: 55, clientX: 245, clientY: 300 }];
+      moveRight.touches = moveRight.changedTouches;
+      joyContainer.dispatchEvent(moveRight);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(0.0, 2);
+      expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(-1.0, 2);
+      expect(joyKnob.style.transform).toMatch(/^translate\(45px(?:,\s*0px)?\)$/);
+
+      // 4. Drag 45px LEFT relative to origin (155, 300) -> turn left (+1.0)
+      const moveLeft = new Event('touchmove', { bubbles: true, cancelable: true });
+      moveLeft.changedTouches = [{ identifier: 55, clientX: 155, clientY: 300 }];
+      moveLeft.touches = moveLeft.changedTouches;
+      joyContainer.dispatchEvent(moveLeft);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(0.0, 2);
+      expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(1.0, 2);
+      expect(joyKnob.style.transform).toMatch(/^translate\(-45px(?:,\s*0px)?\)$/);
+
+      // 5. Drag 45px DOWN relative to origin (200, 345) -> pitch down (-1.0)
+      const moveDown = new Event('touchmove', { bubbles: true, cancelable: true });
+      moveDown.changedTouches = [{ identifier: 55, clientX: 200, clientY: 345 }];
+      moveDown.touches = moveDown.changedTouches;
+      joyContainer.dispatchEvent(moveDown);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(-1.0, 2);
+      expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(0.0, 2);
+      expect(joyKnob.style.transform).toBe('translate(0px, 45px)');
+    });
+
+    it('should clamp displacement beyond maxRadius (45px) to maximum analog input magnitude of 1.0', () => {
+      const joyContainer = document.getElementById('touch-joystick-container');
+      const joyBase = document.getElementById('joystick-base');
+      const joyKnob = document.getElementById('joystick-knob');
+
+      vi.spyOn(joyBase, 'getBoundingClientRect').mockReturnValue({
+        left: 40,
+        top: 40,
+        width: 120,
+        height: 120
+      });
+
+      // Touch down at (200, 200)
+      const touchStart = new Event('touchstart', { bubbles: true, cancelable: true });
+      touchStart.changedTouches = [{ identifier: 77, clientX: 200, clientY: 200 }];
+      touchStart.touches = touchStart.changedTouches;
+      joyContainer.dispatchEvent(touchStart);
+
+      // Drag 120px UP (exceeding 45px maxRadius)
+      const moveFar = new Event('touchmove', { bubbles: true, cancelable: true });
+      moveFar.changedTouches = [{ identifier: 77, clientX: 200, clientY: 80 }];
+      moveFar.touches = moveFar.changedTouches;
+      joyContainer.dispatchEvent(moveFar);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
+      expect(mockEngine.playerShip.input.analogYaw).toBeCloseTo(0.0, 2);
+      expect(joyKnob.style.transform).toBe('translate(0px, -45px)');
+    });
+
+    it('should smoothly reset base and knob transforms and return analog inputs to 0 on touchend', () => {
+      const joyContainer = document.getElementById('touch-joystick-container');
+      const joyBase = document.getElementById('joystick-base');
+      const joyKnob = document.getElementById('joystick-knob');
+
+      vi.spyOn(joyBase, 'getBoundingClientRect').mockReturnValue({
+        left: 40,
+        top: 40,
+        width: 120,
+        height: 120
+      });
+
+      const touchStart = new Event('touchstart', { bubbles: true, cancelable: true });
+      touchStart.changedTouches = [{ identifier: 88, clientX: 150, clientY: 150 }];
+      touchStart.touches = touchStart.changedTouches;
+      joyContainer.dispatchEvent(touchStart);
+
+      const move = new Event('touchmove', { bubbles: true, cancelable: true });
+      move.changedTouches = [{ identifier: 88, clientX: 150, clientY: 105 }];
+      move.touches = move.changedTouches;
+      joyContainer.dispatchEvent(move);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
+
+      // Release touch
+      const touchEnd = new Event('touchend', { bubbles: true, cancelable: true });
+      touchEnd.changedTouches = [{ identifier: 88, clientX: 150, clientY: 105 }];
+      touchEnd.touches = [];
+      joyContainer.dispatchEvent(touchEnd);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBe(0);
+      expect(mockEngine.playerShip.input.analogYaw).toBe(0);
+      expect(joyBase.classList.contains('active')).toBe(false);
+      expect(joyKnob.style.transform).toMatch(/^translate\(0px(?:,\s*0px)?\)$/);
+      expect(joyBase.style.transform).toMatch(/^translate\(0px(?:,\s*0px)?\)$/);
+    });
+
+    it('should support floating joystick activation across left steering region on window touchstart', () => {
+      const joyBase = document.getElementById('joystick-base');
+      const joyKnob = document.getElementById('joystick-knob');
+
+      vi.spyOn(joyBase, 'getBoundingClientRect').mockReturnValue({
+        left: 40,
+        top: 40,
+        width: 120,
+        height: 120
+      });
+
+      // Mock viewport dimensions
+      window.innerWidth = 1000;
+      window.innerHeight = 600;
+
+      // Touch down at clientX: 200 (left 45%), clientY: 300 (lower 85%) on neutral element
+      const div = document.createElement('div');
+      document.body.appendChild(div);
+
+      const touchStart = new Event('touchstart', { bubbles: true, cancelable: true });
+      touchStart.changedTouches = [{ identifier: 99, clientX: 200, clientY: 300 }];
+      touchStart.touches = touchStart.changedTouches;
+      div.dispatchEvent(touchStart);
+
+      expect(joyBase.classList.contains('active')).toBe(true);
+      expect(joyBase.style.transform).toBe('translate(100px, 200px)');
+
+      // Move relative to origin
+      const move = new Event('touchmove', { bubbles: true, cancelable: true });
+      move.changedTouches = [{ identifier: 99, clientX: 200, clientY: 255 }];
+      move.touches = move.changedTouches;
+      window.dispatchEvent(move);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBeCloseTo(1.0, 2);
+
+      // Release
+      const touchEnd = new Event('touchend', { bubbles: true, cancelable: true });
+      touchEnd.changedTouches = [{ identifier: 99, clientX: 200, clientY: 255 }];
+      touchEnd.touches = [];
+      window.dispatchEvent(touchEnd);
+
+      expect(mockEngine.playerShip.input.analogPitch).toBe(0);
+      expect(joyBase.style.transform).toMatch(/^translate\(0px(?:,\s*0px)?\)$/);
+
+      document.body.removeChild(div);
+    });
   });
 });
 

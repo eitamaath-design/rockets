@@ -1190,6 +1190,8 @@ html, body {
   align-items: center;
   gap: 4px;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .joystick-base {
@@ -1206,11 +1208,15 @@ html, body {
   touch-action: none;
   cursor: grab;
   backdrop-filter: blur(6px);
+  will-change: transform;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.joystick-base:active {
+.joystick-base:active,
+.joystick-base.active {
   cursor: grabbing;
   border-color: var(--hud-cyan);
+  box-shadow: inset 0 0 20px rgba(0, 212, 255, 0.35), 0 0 20px rgba(0, 212, 255, 0.4);
 }
 
 .joystick-axis-h {
