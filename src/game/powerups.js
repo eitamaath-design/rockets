@@ -5,7 +5,8 @@ import { logger } from '../utils/logger.js';
 export const POWERUP_TYPES = {
   SHIELD_REPAIR: 'shield_repair',
   INVISIBILITY: 'invisibility',
-  HOLOGRAM_CLONE: 'hologram_clone'
+  HOLOGRAM_CLONE: 'hologram_clone',
+  FIRE_LASER: 'fire_laser'
 };
 
 /**
@@ -114,6 +115,65 @@ export class PowerUpSystem {
     logger.log('POWERUP', `Spawned [${name}] at (${Math.round(pos.x)}, ${Math.round(pos.y)}, ${Math.round(pos.z)})`);
   }
 
+  /**
+   * Spawns a collectible Fire Laser upgrade inside a newly blasted Mega-Asteroid crater basin.
+   */
+  spawnCraterPowerUp(pos, options = {}) {
+    const lifetime = options.lifetime || 120.0; // 2 minutes in crater
+    const group = new THREE.Group();
+    group.position.copy(pos);
+
+    // Glowing blazing core orb
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xff3300,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending
+    });
+    const coreMesh = new THREE.Mesh(this.orbGeom, coreMat);
+    group.add(coreMesh);
+
+    // Fiery golden spinning ring
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffaa00,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending
+    });
+    const ringMesh = new THREE.Mesh(this.ringGeom, ringMat);
+    group.add(ringMesh);
+
+    // Inner floating fire glyph
+    const iconMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      wireframe: true
+    });
+    const iconMesh = new THREE.Mesh(this.iconGeom, iconMat);
+    group.add(iconMesh);
+
+    this.scene.add(group);
+
+    const powerupObj = {
+      group,
+      coreMesh,
+      ringMesh,
+      iconMesh,
+      type: POWERUP_TYPES.FIRE_LASER,
+      name: 'Fire Laser',
+      pos: pos.clone(),
+      life: lifetime,
+      maxLife: lifetime,
+      initialY: pos.y,
+      seed: Math.random() * 10.0,
+      isCraterPowerUp: true
+    };
+    this.powerups.push(powerupObj);
+
+    logger.log('POWERUP', `Spawned [Fire Laser] in crater basin at (${Math.round(pos.x)}, ${Math.round(pos.y)}, ${Math.round(pos.z)})`);
+    return powerupObj;
+  }
+
   update(dt, playerShip, onPowerUpCollected) {
     // 1. Spawn timer
     this.spawnTimer += dt;
@@ -166,6 +226,15 @@ export class PowerUpSystem {
   }
 
   applyPowerUp(type, ship, callback) {
+    if (type === POWERUP_TYPES.FIRE_LASER) {
+      if (typeof ship.activateFireLaser === 'function') {
+        ship.activateFireLaser(75.0);
+      }
+      logger.log('POWERUP', 'Collected Fire Laser! Upgraded lasers with 1.75x damage, flame beams, and enhanced crater excavation');
+      if (callback) callback('🔥 FIRE LASER UPGRADE ARMED! 1.75x DAMAGE & FLAME EXCAVATION');
+      return;
+    }
+
     let name = 'Special';
     let icon = '✨';
     let color = '#00ffff';

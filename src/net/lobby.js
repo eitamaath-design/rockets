@@ -151,7 +151,8 @@ class LobbyService {
           renderScale: 1.0,
           maxFps: 60,
           shaderQuality: 'balanced',
-          particleDensity: 'balanced'
+          particleDensity: 'balanced',
+          showStats: true
         },
         timestamp: Date.now(),
         ttlMs: ROOM_TTL_MS
@@ -193,7 +194,8 @@ class LobbyService {
           voxelQuality: 'low',
           asteroidCount: 100,
           megaRadius: 2800,
-          meteorFrequency: 10
+          meteorFrequency: 10,
+          showStats: true
         },
         ttlSecondsRemaining: remainingTTL
       });

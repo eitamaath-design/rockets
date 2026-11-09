@@ -9,6 +9,8 @@ export class GameHUD {
     this.isVoteActive = false;
     this.lastMonitorUpdateTime = 0;
     this.monitorThrottleMs = 100; // 10Hz throttle (100ms)
+    this.isMonitorMinimized = false;
+    this._windowListeners = [];
 
     this.createDom();
     this.bindJoystick();
@@ -16,6 +18,7 @@ export class GameHUD {
     this.bindFullscreen();
     this.bindDiagnostics();
     this.bindMapResetVoting();
+    this.bindMasterMonitorControls();
 
     // Initialize room title immediately
     const roomTitle = document.getElementById('hud-room-title');
@@ -83,7 +86,7 @@ export class GameHUD {
             </div>
 
             <div class="hud-compact-meter meter-laser">
-              <span class="meter-label">LASER [SHIELD/DIG]</span>
+              <span class="meter-label" id="hud-laser-label">LASER [SHIELD/DIG]</span>
               <div class="meter-track">
                 <div class="gauge-bar-fill bar-laser" id="hud-laser-bar" style="width: 100%;"></div>
               </div>
@@ -118,12 +121,17 @@ export class GameHUD {
 
       <!-- Room Master Real-Time Debug & Diagnostics Monitor -->
       <div class="hud-master-monitor" id="hud-master-monitor" style="display: none;">
-        <div class="master-monitor-header">
+        <div class="master-monitor-header" id="master-monitor-header">
           <span class="master-pulse-dot">●</span>
           <span class="master-monitor-title">ROOM MASTER DIAGNOSTICS</span>
           <span class="master-monitor-freq">10Hz</span>
+          <button class="master-monitor-min-btn" id="btn-minimize-monitor" title="Minimize Statistics View">_</button>
         </div>
-        <div class="master-monitor-grid">
+        <button class="master-monitor-dock-tab" id="btn-restore-monitor" title="Restore Statistics View">
+          <span class="dock-tab-icon">📊</span>
+          <span class="dock-tab-label">STATS</span>
+        </button>
+        <div class="master-monitor-grid" id="master-monitor-grid">
           <div class="monitor-metric" id="metric-fps">
             <span class="metric-key">FPS</span>
             <span class="metric-badge nominal" id="mon-fps-badge">--</span>
@@ -223,8 +231,8 @@ export class GameHUD {
 
           <!-- Manual Roll Buttons -->
           <div class="touch-roll-cluster">
-            <button class="action-touch-btn btn-roll" id="btn-roll-left" title="Roll Left (Q)">↺ Roll L</button>
-            <button class="action-touch-btn btn-roll" id="btn-roll-right" title="Roll Right (E)">Roll R ↻</button>
+            <button class="action-touch-btn touch-btn btn-roll" id="btn-roll-left" title="Roll Left (Q)">↺ Roll L</button>
+            <button class="action-touch-btn touch-btn btn-roll" id="btn-roll-right" title="Roll Right (E)">Roll R ↻</button>
           </div>
         </div>
 
@@ -232,30 +240,30 @@ export class GameHUD {
         <div class="touch-controls-right">
           <!-- Side Thrusters (Strafing) -->
           <div class="touch-strafe-cluster">
-            <button class="action-touch-btn btn-strafe" id="btn-strafe-left" title="Strafe Left Side Thruster (A)">⬅ Strafe L</button>
-            <button class="action-touch-btn btn-strafe" id="btn-strafe-right" title="Strafe Right Side Thruster (D)">Strafe R ➡</button>
+            <button class="action-touch-btn touch-btn btn-strafe" id="btn-strafe-left" title="Strafe Left Side Thruster (A)">⬅ Strafe L</button>
+            <button class="action-touch-btn touch-btn btn-strafe" id="btn-strafe-right" title="Strafe Right Side Thruster (D)">Strafe R ➡</button>
           </div>
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap to BOOST">
+            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap to BOOST">
               🚀 <strong>THRUST</strong>
               <span class="hud-boost-badge" id="hud-boost-badge">⚡ BOOST</span>
             </button>
-            <button class="action-touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
+            <button class="action-touch-btn touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
 
           <!-- Dual Forward Arsenals & Dedicated Special Powerup -->
           <div class="touch-weapon-cluster">
-            <button class="action-touch-btn btn-laser" id="btn-laser" title="Hold to Fire Laser Beam & Dig Asteroids (Space / LMB)">
-              ⚡ <strong>LASER</strong>
-              <small class="weapon-subtext">[SHIELD/DIG]</small>
+            <button class="action-touch-btn touch-btn btn-laser" id="btn-laser" title="Hold to Fire Laser Beam & Dig Asteroids (Space / LMB)">
+              <span id="btn-laser-icon">⚡</span> <strong id="btn-laser-text">LASER</strong>
+              <small class="weapon-subtext" id="btn-laser-subtext">[SHIELD/DIG]</small>
             </button>
-            <button class="action-touch-btn btn-missile" id="btn-missile" title="Homing Missile (F / RMB) - Aim at target for 3s to lock">
+            <button class="action-touch-btn touch-btn btn-missile" id="btn-missile" title="Homing Missile (F / RMB) - Aim at target for 3s to lock">
               <span id="btn-missile-icon">🚀</span> <strong id="btn-missile-text">MISSILE</strong>
               <small class="weapon-subtext" id="btn-missile-status">[AIM TO LOCK]</small>
             </button>
-            <button class="action-touch-btn btn-special disabled" id="btn-special" title="Activate Special Power-Up (Key R)">
+            <button class="action-touch-btn touch-btn btn-special disabled" id="btn-special" title="Activate Special Power-Up (Key R)">
               <span id="btn-special-icon">✨</span> <strong id="btn-special-text">SPECIAL</strong>
               <small class="weapon-subtext" id="btn-special-desc">[EMPTY]</small>
             </button>
@@ -325,39 +333,71 @@ export class GameHUD {
       shipInput.analogYaw = 0;
     };
 
-    // 1. Direct Touch Events (iOS & Android)
+    const findTouchById = (touchList, id) => {
+      if (!touchList) return null;
+      for (let i = 0; i < touchList.length; i++) {
+        if (touchList[i].identifier === id) return touchList[i];
+      }
+      return null;
+    };
+
+    // 1. Direct Touch Events (iOS & Android Multi-Touch Aware)
     container.addEventListener('touchstart', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (activeTouchId === null && e.touches.length > 0) {
-        const touch = e.touches[0];
-        activeTouchId = touch.identifier;
+      const touches = (e.changedTouches && e.changedTouches.length > 0)
+        ? e.changedTouches
+        : ((e.targetTouches && e.targetTouches.length > 0) ? e.targetTouches : e.touches);
+      if (activeTouchId === null && touches && touches.length > 0) {
+        const touch = touches[0];
+        activeTouchId = touch.identifier !== undefined ? touch.identifier : 0;
         handleCoord(touch.clientX, touch.clientY);
-        logger.log('TOUCH', `Joystick touchstart at (${Math.round(touch.clientX)}, ${Math.round(touch.clientY)})`);
+        logger.log('TOUCH', `Joystick touchstart (id=${activeTouchId}) at (${Math.round(touch.clientX)}, ${Math.round(touch.clientY)})`);
       }
     }, { passive: false });
 
-    container.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (activeTouchId !== null) {
-        for (let i = 0; i < e.touches.length; i++) {
-          if (e.touches[i].identifier === activeTouchId) {
-            handleCoord(e.touches[i].clientX, e.touches[i].clientY);
-            break;
-          }
-        }
+    const onTouchMove = (e) => {
+      if (activeTouchId === null) return;
+      const touch = findTouchById(e.touches, activeTouchId) || findTouchById(e.changedTouches, activeTouchId);
+      if (touch) {
+        if (e.cancelable) e.preventDefault();
+        handleCoord(touch.clientX, touch.clientY);
       }
+    };
+
+    const onTouchEnd = (e) => {
+      if (activeTouchId === null) return;
+      if (e.changedTouches && e.changedTouches.length > 0) {
+        const endedTouch = findTouchById(e.changedTouches, activeTouchId);
+        if (endedTouch) {
+          if (e.cancelable) e.preventDefault();
+          resetKnob();
+        }
+      } else if (!e.touches || !findTouchById(e.touches, activeTouchId)) {
+        if (e.cancelable) e.preventDefault();
+        resetKnob();
+      }
+    };
+
+    container.addEventListener('touchmove', (e) => {
+      e.stopPropagation();
+      onTouchMove(e);
     }, { passive: false });
 
     container.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      resetKnob();
+      e.stopPropagation();
+      onTouchEnd(e);
     }, { passive: false });
 
     container.addEventListener('touchcancel', (e) => {
-      resetKnob();
+      e.stopPropagation();
+      onTouchEnd(e);
     }, { passive: false });
+
+    // Window fallback so finger dragging outside joystick container continues steering smoothly
+    this._addWindowListener('touchmove', onTouchMove, { passive: false });
+    this._addWindowListener('touchend', onTouchEnd, { passive: false });
+    this._addWindowListener('touchcancel', onTouchEnd, { passive: false });
 
     // 2. Pointer / Mouse Events (Desktop)
     container.addEventListener('pointerdown', (e) => {
@@ -367,17 +407,24 @@ export class GameHUD {
       handleCoord(e.clientX, e.clientY);
     });
 
-    window.addEventListener('pointermove', (e) => {
-      if (pointerDragging) {
+    this._addWindowListener('pointermove', (e) => {
+      if (pointerDragging && e.pointerType !== 'touch') {
         handleCoord(e.clientX, e.clientY);
       }
     });
 
-    window.addEventListener('pointerup', () => {
-      if (pointerDragging) {
+    this._addWindowListener('pointerup', (e) => {
+      if (pointerDragging && e.pointerType !== 'touch') {
         resetKnob();
       }
     });
+  }
+
+  _addWindowListener(type, handler, options) {
+    if (typeof window !== 'undefined') {
+      window.addEventListener(type, handler, options);
+      this._windowListeners.push({ type, handler, options });
+    }
   }
 
   bindTouchControls() {
@@ -388,12 +435,10 @@ export class GameHUD {
       if (!el) return;
 
       let isHeld = false;
+      const activeTouchIds = new Set();
+      let isPointerDown = false;
 
-      const triggerStart = (e) => {
-        if (e) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
+      const activate = () => {
         if (isHeld) return;
         isHeld = true;
         onActive();
@@ -401,27 +446,68 @@ export class GameHUD {
         logger.log('INPUT', `Button [${elementId}] ACTIVATED`);
       };
 
-      const triggerStop = (e) => {
+      const deactivateIfNoInputs = () => {
         if (!isHeld) return;
+        if (activeTouchIds.size > 0 || isPointerDown) return;
         isHeld = false;
         onInactive();
         el.classList.remove('active');
         logger.log('INPUT', `Button [${elementId}] RELEASED`);
       };
 
-      // Native Touch Handlers
-      el.addEventListener('touchstart', triggerStart, { passive: false });
-      el.addEventListener('touchend', triggerStop, { passive: false });
-      el.addEventListener('touchcancel', triggerStop, { passive: false });
+      // Native Touch Handlers (Multi-Touch Identifier Aware)
+      el.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.changedTouches && e.changedTouches.length > 0) {
+          for (let i = 0; i < e.changedTouches.length; i++) {
+            const id = e.changedTouches[i].identifier !== undefined ? e.changedTouches[i].identifier : 0;
+            activeTouchIds.add(id);
+          }
+        } else {
+          activeTouchIds.add(0);
+        }
+        activate();
+      }, { passive: false });
+
+      const handleTouchEnd = (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        if (e && e.changedTouches && e.changedTouches.length > 0) {
+          for (let i = 0; i < e.changedTouches.length; i++) {
+            const id = e.changedTouches[i].identifier !== undefined ? e.changedTouches[i].identifier : 0;
+            activeTouchIds.delete(id);
+          }
+        } else {
+          activeTouchIds.clear();
+        }
+        deactivateIfNoInputs();
+      };
+
+      el.addEventListener('touchend', handleTouchEnd, { passive: false });
+      el.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
       // Pointer / Mouse Handlers
       el.addEventListener('pointerdown', (e) => {
         if (e.pointerType === 'touch') return;
-        triggerStart(e);
+        e.preventDefault();
+        e.stopPropagation();
+        isPointerDown = true;
+        activate();
       });
-      el.addEventListener('pointerup', triggerStop);
-      el.addEventListener('pointerleave', triggerStop);
-      window.addEventListener('pointerup', triggerStop);
+
+      const handlePointerStop = (e) => {
+        if (e && e.pointerType === 'touch') return;
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        deactivateIfNoInputs();
+      };
+
+      el.addEventListener('pointerup', handlePointerStop);
+      el.addEventListener('pointerleave', handlePointerStop);
+      this._addWindowListener('pointerup', handlePointerStop);
     };
 
     // Manual Roll
@@ -604,7 +690,7 @@ export class GameHUD {
       });
     }
 
-    window.addEventListener('keydown', (e) => {
+    this._addWindowListener('keydown', (e) => {
       if (this.isVoteActive) {
         if (e.code === 'KeyY') {
           if (this.engine) this.engine.castMapResetVote(true);
@@ -631,6 +717,218 @@ export class GameHUD {
         }
       });
     }
+  }
+
+  bindMasterMonitorControls() {
+    const monitorEl = document.getElementById('hud-master-monitor');
+    const headerEl = document.getElementById('master-monitor-header');
+    const minBtn = document.getElementById('btn-minimize-monitor');
+    const restoreBtn = document.getElementById('btn-restore-monitor');
+    if (!monitorEl || !headerEl) return;
+
+    const getViewportSize = () => {
+      const vw = (this.container && this.container.clientWidth > 0)
+        ? this.container.clientWidth
+        : ((typeof window !== 'undefined' && window.innerWidth > 0) ? window.innerWidth : 1280);
+      const vh = (this.container && this.container.clientHeight > 0)
+        ? this.container.clientHeight
+        : ((typeof window !== 'undefined' && window.innerHeight > 0) ? window.innerHeight : 720);
+      return { vw, vh };
+    };
+
+    const getMonitorBounds = () => {
+      const rect = monitorEl.getBoundingClientRect ? monitorEl.getBoundingClientRect() : { left: 12, top: 58, width: 220, height: 140 };
+      const parsedLeft = parseFloat(monitorEl.style.left);
+      const parsedTop = parseFloat(monitorEl.style.top);
+      const left = !Number.isNaN(parsedLeft) ? parsedLeft : (rect.left || 12);
+      const top = !Number.isNaN(parsedTop) ? parsedTop : (rect.top || 58);
+      const width = rect.width > 0 ? rect.width : (monitorEl.offsetWidth > 0 ? monitorEl.offsetWidth : 220);
+      const height = rect.height > 0 ? rect.height : (monitorEl.offsetHeight > 0 ? monitorEl.offsetHeight : 140);
+      return { left, top, width, height };
+    };
+
+    const setMinimized = (minimized) => {
+      this.isMonitorMinimized = minimized;
+      if (minimized) {
+        const { vw, vh } = getViewportSize();
+        const bounds = getMonitorBounds();
+        this._savedMonitorPos = { left: bounds.left, top: bounds.top };
+        const centerX = bounds.left + bounds.width / 2;
+        const dockRight = centerX > vw / 2;
+        monitorEl.classList.add('minimized');
+        const clampedTop = Math.max(8, Math.min(vh - 48, bounds.top));
+        monitorEl.style.top = `${Math.round(clampedTop)}px`;
+        if (dockRight) {
+          monitorEl.classList.add('docked-right');
+          monitorEl.style.left = 'auto';
+          monitorEl.style.right = '0px';
+        } else {
+          monitorEl.classList.remove('docked-right');
+          monitorEl.style.right = 'auto';
+          monitorEl.style.left = '0px';
+        }
+      } else {
+        monitorEl.classList.remove('minimized');
+        monitorEl.classList.remove('docked-right');
+        monitorEl.style.right = 'auto';
+        const { vw, vh } = getViewportSize();
+        const bounds = getMonitorBounds();
+        const restoreLeft = this._savedMonitorPos ? this._savedMonitorPos.left : 12;
+        const restoreTop = this._savedMonitorPos ? this._savedMonitorPos.top : 58;
+        const clampedLeft = Math.max(0, Math.min(Math.max(0, vw - bounds.width), restoreLeft));
+        const clampedTop = Math.max(0, Math.min(Math.max(0, vh - bounds.height), restoreTop));
+        monitorEl.style.left = `${Math.round(clampedLeft)}px`;
+        monitorEl.style.top = `${Math.round(clampedTop)}px`;
+      }
+    };
+
+    if (minBtn) {
+      minBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMinimized(true);
+      });
+      minBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMinimized(true);
+      }, { passive: false });
+    }
+
+    if (restoreBtn) {
+      restoreBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMinimized(false);
+      });
+      restoreBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMinimized(false);
+      }, { passive: false });
+    }
+
+    // Floating window drag state (Mouse & Multi-Touch)
+    let isDraggingMouse = false;
+    let activeDragTouchId = null;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let startLeft = 12;
+    let startTop = 58;
+
+    const beginDrag = (clientX, clientY) => {
+      const bounds = getMonitorBounds();
+      dragStartX = clientX;
+      dragStartY = clientY;
+      startLeft = bounds.left;
+      startTop = bounds.top;
+      monitorEl.classList.add('dragging');
+      monitorEl.style.right = 'auto';
+      monitorEl.style.left = `${Math.round(startLeft)}px`;
+      monitorEl.style.top = `${Math.round(startTop)}px`;
+    };
+
+    const moveDrag = (clientX, clientY) => {
+      const { vw, vh } = getViewportSize();
+      const bounds = getMonitorBounds();
+      const dx = clientX - dragStartX;
+      const dy = clientY - dragStartY;
+      const maxLeft = Math.max(0, vw - bounds.width);
+      const maxTop = Math.max(0, vh - bounds.height);
+      const nextLeft = Math.max(0, Math.min(maxLeft, startLeft + dx));
+      const nextTop = Math.max(0, Math.min(maxTop, startTop + dy));
+      monitorEl.style.left = `${Math.round(nextLeft)}px`;
+      monitorEl.style.top = `${Math.round(nextTop)}px`;
+      this._savedMonitorPos = { left: nextLeft, top: nextTop };
+    };
+
+    const endDrag = () => {
+      isDraggingMouse = false;
+      activeDragTouchId = null;
+      monitorEl.classList.remove('dragging');
+    };
+
+    // Mouse Dragging on Header
+    headerEl.addEventListener('mousedown', (e) => {
+      if (this.isMonitorMinimized) return;
+      if (e.target && typeof e.target.closest === 'function' && e.target.closest('#btn-minimize-monitor')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      isDraggingMouse = true;
+      beginDrag(e.clientX, e.clientY);
+    });
+
+    this._addWindowListener('mousemove', (e) => {
+      if (!isDraggingMouse) return;
+      moveDrag(e.clientX, e.clientY);
+    });
+
+    this._addWindowListener('mouseup', () => {
+      if (isDraggingMouse) {
+        endDrag();
+      }
+    });
+
+    // Multi-Touch Dragging on Header
+    const findTouch = (touchList, id) => {
+      if (!touchList) return null;
+      for (let i = 0; i < touchList.length; i++) {
+        if (touchList[i].identifier === id) return touchList[i];
+      }
+      return null;
+    };
+
+    headerEl.addEventListener('touchstart', (e) => {
+      if (this.isMonitorMinimized) return;
+      if (e.target && typeof e.target.closest === 'function' && e.target.closest('#btn-minimize-monitor')) return;
+      const touches = (e.changedTouches && e.changedTouches.length > 0) ? e.changedTouches : e.touches;
+      if (activeDragTouchId === null && touches && touches.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        const t = touches[0];
+        activeDragTouchId = t.identifier !== undefined ? t.identifier : 0;
+        beginDrag(t.clientX, t.clientY);
+      }
+    }, { passive: false });
+
+    const onHeaderTouchMove = (e) => {
+      if (activeDragTouchId === null) return;
+      const t = findTouch(e.touches, activeDragTouchId) || findTouch(e.changedTouches, activeDragTouchId);
+      if (t) {
+        if (e.cancelable) e.preventDefault();
+        moveDrag(t.clientX, t.clientY);
+      }
+    };
+
+    const onHeaderTouchEnd = (e) => {
+      if (activeDragTouchId === null) return;
+      if (e.changedTouches && e.changedTouches.length > 0) {
+        if (findTouch(e.changedTouches, activeDragTouchId)) {
+          endDrag();
+        }
+      } else if (!e.touches || !findTouch(e.touches, activeDragTouchId)) {
+        endDrag();
+      }
+    };
+
+    headerEl.addEventListener('touchmove', (e) => {
+      e.stopPropagation();
+      onHeaderTouchMove(e);
+    }, { passive: false });
+
+    headerEl.addEventListener('touchend', (e) => {
+      e.stopPropagation();
+      onHeaderTouchEnd(e);
+    }, { passive: false });
+
+    headerEl.addEventListener('touchcancel', (e) => {
+      e.stopPropagation();
+      onHeaderTouchEnd(e);
+    }, { passive: false });
+
+    this._addWindowListener('touchmove', onHeaderTouchMove, { passive: false });
+    this._addWindowListener('touchend', onHeaderTouchEnd, { passive: false });
+    this._addWindowListener('touchcancel', onHeaderTouchEnd, { passive: false });
   }
 
   showCombatMessage(text) {
@@ -757,12 +1055,44 @@ export class GameHUD {
       }
     }
 
-    // Laser Energy Bar (Smooth rendering)
+    // Laser Energy Bar (Smooth rendering & Fire Laser visual state)
     const laserBar = document.getElementById('hud-laser-bar');
     const laserPct = document.getElementById('hud-laser-pct');
+    const laserLabel = document.getElementById('hud-laser-label');
+    const laserBtn = document.getElementById('btn-laser');
+    const laserBtnIcon = document.getElementById('btn-laser-icon');
+    const laserBtnText = document.getElementById('btn-laser-text');
+    const laserBtnSubtext = document.getElementById('btn-laser-subtext');
+
     const laserEnergyPct = Math.max(0, Math.min(100, Math.round(state.laserEnergy !== undefined ? state.laserEnergy : 100)));
-    if (laserBar) laserBar.style.width = `${laserEnergyPct}%`;
-    if (laserPct) laserPct.textContent = `${laserEnergyPct}%`;
+    if (laserBar) {
+      laserBar.style.width = `${laserEnergyPct}%`;
+      if (state.hasFireLaser) {
+        laserBar.classList.add('fire-laser');
+      } else {
+        laserBar.classList.remove('fire-laser');
+      }
+    }
+    if (laserPct) {
+      laserPct.textContent = state.hasFireLaser ? `${laserEnergyPct}% 🔥` : `${laserEnergyPct}%`;
+    }
+    if (laserLabel) {
+      laserLabel.textContent = state.hasFireLaser ? '🔥 FIRE LASER [1.75x]' : 'LASER [SHIELD/DIG]';
+      laserLabel.style.color = state.hasFireLaser ? '#ffaa00' : '#94a3b8';
+    }
+    if (laserBtn) {
+      if (state.hasFireLaser) {
+        laserBtn.classList.add('fire-active');
+        if (laserBtnIcon) laserBtnIcon.textContent = '🔥';
+        if (laserBtnText) laserBtnText.textContent = 'FIRE LASER';
+        if (laserBtnSubtext) laserBtnSubtext.textContent = '[1.75x FLAME]';
+      } else {
+        laserBtn.classList.remove('fire-active');
+        if (laserBtnIcon) laserBtnIcon.textContent = '⚡';
+        if (laserBtnText) laserBtnText.textContent = 'LASER';
+        if (laserBtnSubtext) laserBtnSubtext.textContent = '[SHIELD/DIG]';
+      }
+    }
 
     // Missile Lock Gauge & Status Bar
     const missileBar = document.getElementById('hud-missile-bar');
@@ -895,7 +1225,16 @@ export class GameHUD {
     // Tactical Power-Up Badges
     const powerupBadge = document.getElementById('hud-powerup-badge');
     if (powerupBadge) {
-      if (state.isInvisible) {
+      if (state.hasFireLaser) {
+        powerupBadge.style.display = 'inline-flex';
+        const remSec = Math.ceil(state.fireLaserTimer || 0);
+        if (remSec > 0) {
+          powerupBadge.textContent = `🔥 FIRE LASER (${remSec}s)`;
+        } else {
+          powerupBadge.textContent = '🔥 FIRE LASER [LOCKED TO ENEMY]';
+        }
+        powerupBadge.className = 'hud-powerup-badge fire-laser';
+      } else if (state.isInvisible) {
         powerupBadge.style.display = 'inline-flex';
         powerupBadge.textContent = '👁️ CLOAKED';
         powerupBadge.className = 'hud-powerup-badge cloak';
@@ -924,14 +1263,19 @@ export class GameHUD {
     const monitorEl = document.getElementById('hud-master-monitor');
     if (monitorEl) {
       const isMaster = !!state.isMaster;
-      if (!isMaster) {
+      const showStats = state.showStats !== undefined
+        ? !!state.showStats
+        : (this.engine?.config?.showStats !== false);
+      if (!isMaster || !showStats) {
         monitorEl.style.display = 'none';
       } else {
         monitorEl.style.display = 'block';
-        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-        if (now - this.lastMonitorUpdateTime >= this.monitorThrottleMs) {
-          this.lastMonitorUpdateTime = now;
-          this.updateMasterMonitor(state);
+        if (!this.isMonitorMinimized) {
+          const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          if (now - this.lastMonitorUpdateTime >= this.monitorThrottleMs) {
+            this.lastMonitorUpdateTime = now;
+            this.updateMasterMonitor(state);
+          }
         }
       }
     }
@@ -1018,6 +1362,12 @@ export class GameHUD {
   }
 
   destroy() {
+    if (this._windowListeners && typeof window !== 'undefined') {
+      for (const { type, handler, options } of this._windowListeners) {
+        window.removeEventListener(type, handler, options);
+      }
+      this._windowListeners = [];
+    }
     if (this.hudElement && this.hudElement.parentNode) {
       this.hudElement.parentNode.removeChild(this.hudElement);
     }

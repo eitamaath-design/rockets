@@ -542,6 +542,26 @@ export class WeaponsSystem {
       blending: THREE.AdditiveBlending
     });
 
+    // Fire Laser materials (fiery white core + blazing incandescent orange/gold/red glow)
+    this.fireLaserCoreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.98,
+      blending: THREE.AdditiveBlending
+    });
+    this.fireLaserGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xff5500,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending
+    });
+    this.remoteFireLaserGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xff3300,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending
+    });
+
     // 3D Homing Missile Fuselage & Fins
     this.missileBodyGeom = new THREE.CylinderGeometry(0.30, 0.30, 2.6, 8);
     this.missileBodyGeom.rotateX(Math.PI / 2);
@@ -708,28 +728,35 @@ export class WeaponsSystem {
         hitPoint = centerOrigin.clone().addScaledVector(fwd, this.laserMaxRange);
       }
 
+      const isFireLaser = !!ship.hasFireLaser;
+      const dmgMultiplier = isFireLaser ? 1.75 : 1.0;
+      const effectiveLaserDamage = this.laserDamage * dmgMultiplier;
+      const carveRadius = isFireLaser ? 84.0 : 60.0;
+      const carveDepth = isFireLaser ? 70.0 : 50.0;
+      const beamSparkColor = isFireLaser ? 0xff5500 : 0x00d4ff;
+
       const shotId = `laser-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
 
       // Spawn visual twin laser beams
-      this.spawnTwinLaserBeam(leftEmitter, rightEmitter, hitPoint, true);
+      this.spawnTwinLaserBeam(leftEmitter, rightEmitter, hitPoint, true, isFireLaser);
       audio.playLaserShot(true);
 
       // Resolve Impact
       if (hitTargetType === 'asteroid' && hitTargetObj) {
-        this.spawnExplosion(hitPoint, 6, 0x00d4ff);
-        this.spawnLaserImpactSparks(hitPoint, null, 0x00d4ff);
+        this.spawnExplosion(hitPoint, isFireLaser ? 9 : 6, beamSparkColor);
+        this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
         let dmgResult = null;
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
           // Primary laser requires 5 shots (20 HP / 4.0 damage = 5 shots) to destroy small asteroids or excavate rock volumes
-          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? 4.0 : 45.0;
-          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, 60.0, 50.0, 160.0);
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (4.0 * dmgMultiplier) : (45.0 * dmgMultiplier);
+          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, carveRadius, carveDepth, 160.0);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, 60.0, 50.0, 160.0);
+          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, carveRadius, carveDepth, 160.0);
           dmgResult = { carveResult };
         }
         const cRes = dmgResult?.carveResult;
         logger.log('WEAPON_HIT', JSON.stringify({
-          weapon: 'laser',
+          weapon: isFireLaser ? 'fire_laser' : 'laser',
           asteroidId: hitTargetObj.id || (hitTargetObj.isMegaAsteroid ? 'mega' : 'asteroid'),
           isMega: !!hitTargetObj.isMegaAsteroid,
           dist: Number(hitDistance.toFixed(1)),
@@ -740,14 +767,17 @@ export class WeaponsSystem {
           totalDensityDelta: cRes?.totalDensityDelta ?? 0
         }));
       } else if (hitTargetType === 'ship' && hitTargetObj) {
-        this.spawnExplosion(hitPoint, 8, 0x00ffff);
-        this.spawnLaserImpactSparks(hitPoint, null, 0x00ffff);
+        if (typeof ship.recordEngagementHit === 'function') {
+          ship.recordEngagementHit();
+        }
+        this.spawnExplosion(hitPoint, isFireLaser ? 10 : 8, isFireLaser ? 0xff4400 : 0x00ffff);
+        this.spawnLaserImpactSparks(hitPoint, null, isFireLaser ? 0xff6600 : 0x00ffff);
         if (this.network && typeof this.network.sendHitTarget === 'function') {
-          this.network.sendHitTarget(hitTargetObj, this.laserDamage, 'laser');
+          this.network.sendHitTarget(hitTargetObj, effectiveLaserDamage, 'laser');
         }
       } else if (!hitTargetType) {
         logger.log('WEAPON_MISS', JSON.stringify({
-          weapon: 'laser',
+          weapon: isFireLaser ? 'fire_laser' : 'laser',
           origin: [Number(centerOrigin.x.toFixed(1)), Number(centerOrigin.y.toFixed(1)), Number(centerOrigin.z.toFixed(1))],
           dir: [Number(fwd.x.toFixed(2)), Number(fwd.y.toFixed(2)), Number(fwd.z.toFixed(2))],
           maxRange: this.laserMaxRange
@@ -763,16 +793,17 @@ export class WeaponsSystem {
           hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
           dir: { x: fwd.x, y: fwd.y, z: fwd.z },
           targetType: hitTargetType,
+          isFireLaser,
           time: now
         });
       }
     }
   }
 
-  spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, isLocal) {
+  spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, isLocal, isFireLaser = false) {
     const group = new THREE.Group();
-    const coreMat = isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat;
-    const glowMat = isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat;
+    const coreMat = isFireLaser ? this.fireLaserCoreMat : (isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
+    const glowMat = isFireLaser ? (isLocal ? this.fireLaserGlowMat : this.remoteFireLaserGlowMat) : (isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
 
     // Create left beam
     const leftDist = leftOrigin.distanceTo(hitPoint);
@@ -814,6 +845,7 @@ export class WeaponsSystem {
   }
 
   spawnRemoteLaserBeam(data, peerId) {
+    const isFireLaser = !!data.isFireLaser;
     const leftOrigin = data.leftOrigin
       ? new THREE.Vector3(data.leftOrigin.x, data.leftOrigin.y, data.leftOrigin.z)
       : new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
@@ -826,12 +858,13 @@ export class WeaponsSystem {
       ? new THREE.Vector3(data.hitPoint.x, data.hitPoint.y, data.hitPoint.z)
       : leftOrigin.clone().add(new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z).multiplyScalar(500));
 
-    this.spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, false);
+    this.spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, false, isFireLaser);
     audio.playLaserShot(false, leftOrigin);
 
     if (data.targetType === 'asteroid') {
-      this.spawnExplosion(hitPoint, 6, 0xff0066);
-      this.spawnLaserImpactSparks(hitPoint, null, 0xff0066);
+      const sparkCol = isFireLaser ? 0xff5500 : 0xff0066;
+      this.spawnExplosion(hitPoint, isFireLaser ? 9 : 6, sparkCol);
+      this.spawnLaserImpactSparks(hitPoint, null, sparkCol);
     }
   }
 
@@ -1771,6 +1804,9 @@ export class WeaponsSystem {
       if (this.explosionGlowTex) this.explosionGlowTex.dispose();
       if (this.explosionMat) this.explosionMat.dispose();
     }
+    if (this.fireLaserCoreMat) this.fireLaserCoreMat.dispose();
+    if (this.fireLaserGlowMat) this.fireLaserGlowMat.dispose();
+    if (this.remoteFireLaserGlowMat) this.remoteFireLaserGlowMat.dispose();
     this.fireTrails.cleanup();
   }
 }

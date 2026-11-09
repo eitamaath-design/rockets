@@ -52,7 +52,8 @@ class AppRouter {
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 60,
       shaderQuality: params.get('shader') || 'balanced',
-      particleDensity: params.get('particles') || 'balanced'
+      particleDensity: params.get('particles') || 'balanced',
+      showStats: params.get('stats') !== null ? (params.get('stats') !== 'false' && params.get('stats') !== '0') : true
     };
 
     if (roomParam) {
@@ -178,6 +179,13 @@ class AppRouter {
                     <option value="high">High (150%)</option>
                   </select>
                 </div>
+                <div class="config-field">
+                  <label for="show-stats-select">Real-Time Statistics</label>
+                  <select id="show-stats-select" class="lobby-select">
+                    <option value="true" selected>Show (Master)</option>
+                    <option value="false">Hide (Off)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -287,7 +295,8 @@ class AppRouter {
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
           shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
-          particleDensity: document.getElementById('particle-density-select')?.value || 'balanced'
+          particleDensity: document.getElementById('particle-density-select')?.value || 'balanced',
+          showStats: document.getElementById('show-stats-select') ? document.getElementById('show-stats-select').value !== 'false' : true
         };
         this.startMatch({
           roomId,
@@ -391,6 +400,7 @@ class AppRouter {
       maxFps: 60,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
+      showStats: true,
       ...(config || {})
     };
 
@@ -405,7 +415,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh

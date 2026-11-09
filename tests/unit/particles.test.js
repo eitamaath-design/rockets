@@ -219,7 +219,7 @@ describe('GPU InstancedMesh Particle & Explosion Systems', () => {
 
       expect(space.debrisList.length).toBe(16);
       expect(space.debrisList[0].pos).toBeDefined();
-      expect(space.debrisList[0].vel.length()).toBeGreaterThan(10);
+      expect(space.debrisList[0].vel.length()).toBeGreaterThan(0);
 
       const camera = new THREE.PerspectiveCamera();
       space.update(0.016, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0), camera);

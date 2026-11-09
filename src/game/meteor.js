@@ -19,6 +19,7 @@ export class MeteorSystem {
   constructor(scene, spaceEnv, options = {}) {
     this.scene = scene;
     this.spaceEnv = spaceEnv;
+    this.powerUpSystem = options?.powerUpSystem || null;
 
     const freq = typeof options === 'number'
       ? options
@@ -30,7 +31,7 @@ export class MeteorSystem {
     this.activeMeteor = null;
 
     // Pre-allocated GPU InstancedMesh for the meteor's roaring fire & smoke trail
-    this.maxParticles = 250;
+    this.maxParticles = 500;
     this.particles = [];
     this.trailPlaneGeo = new THREE.PlaneGeometry(1, 1);
     this.glowTexture = createRadialGlowTexture(64);
@@ -129,10 +130,24 @@ export class MeteorSystem {
     const dir = targetPos.clone().sub(spawnPos).normalize();
     const speed = 260; // Roaring speed across sector
     const velocity = dir.clone().multiplyScalar(speed);
-    const radius = 56.0; // Asteroid-sized massive planetary impactor
-    const mass = 1200000; // Colossal planetary mass
 
-    // 3. 3D Model: Molten craggy rock core with glowing lava crust & roaring fire aura
+    // 2b. Size dynamically between 5% and 10% of Central Mega-Asteroid (e.g. 140u-280u for 2800u)
+    let megaRadius = this.spaceEnv?.megaAsteroidRadius;
+    if (!megaRadius && this.spaceEnv?.asteroids?.length > 0) {
+      const megaCandidate = this.spaceEnv.asteroids.find(a => a.isMegaAsteroid || a.radius >= 1000);
+      if (megaCandidate) {
+        megaRadius = megaCandidate.radius;
+      }
+    }
+    if (!megaRadius || megaRadius < 1000) {
+      megaRadius = 2800;
+    }
+    const radiusMin = megaRadius * 0.05;
+    const radiusMax = megaRadius * 0.10;
+    const radius = radiusMin + Math.random() * (radiusMax - radiusMin);
+    const mass = Math.round(1200000 * Math.pow(radius / 56.0, 3));
+
+    // 3. 3D Model: True craggy molten asteroid engulfed in turbulent fire mantles
     const group = new THREE.Group();
     group.position.copy(spawnPos);
 
@@ -148,7 +163,7 @@ export class MeteorSystem {
     group.add(coreMesh);
 
     // Blazing white-hot incandescent inner core
-    const coronaGeom = new THREE.SphereGeometry(radius * 0.75, 16, 12);
+    const coronaGeom = new THREE.SphereGeometry(radius * 0.85, 16, 12);
     const coronaMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -171,7 +186,7 @@ export class MeteorSystem {
     group.add(fireEnvelopeMesh);
 
     // Outer blazing yellow plasma halo
-    const haloGeom = new THREE.IcosahedronGeometry(radius * 1.40, 2);
+    const haloGeom = new THREE.IcosahedronGeometry(radius * 1.45, 2);
     const haloMat = new THREE.MeshBasicMaterial({
       color: 0xffaa00,
       transparent: true,
@@ -271,14 +286,26 @@ export class MeteorSystem {
         if (distSq < minDist * minDist) {
           const isMega = (a.radius >= 2500 || a.isMegaAsteroid);
           if (isMega) {
-            // Stationary Mega-Asteroid: blast massive crater without shifting its position
-            logger.log('METEOR', 'Meteor IMPACT with Central Mega-Asteroid! Blasting massive crater.');
+            // Stationary Mega-Asteroid: blast massive crater basin without shifting its position
             const hitPoint = m.position.clone();
             const hitDir = m.dir.clone();
+            const carveRadius = Math.max(180.0, m.radius * 1.5);
+            const carveDepth = Math.max(120.0, m.radius * 1.1);
+            logger.log('METEOR', `Meteor IMPACT with Central Mega-Asteroid! Blasting massive crater basin (r=${Math.round(carveRadius)}u, d=${Math.round(carveDepth)}u).`);
             if (typeof this.spaceEnv.carveAsteroid === 'function') {
-              this.spaceEnv.carveAsteroid(a, hitPoint, hitDir, 130.0, 90.0);
+              this.spaceEnv.carveAsteroid(a, hitPoint, hitDir, carveRadius, carveDepth, 160.0);
             }
-            this.triggerExplosion(m.position, 65, 0xff3300);
+            this.triggerExplosion(m.position, Math.max(65, m.radius * 0.75), 0xff3300);
+
+            // Spawn Collectible Fire Laser Power-Up inside the newly carved crater basin
+            const craterCenter = hitPoint.clone().addScaledVector(hitDir, carveDepth * 0.45);
+            if (this.powerUpSystem && typeof this.powerUpSystem.spawnCraterPowerUp === 'function') {
+              this.powerUpSystem.spawnCraterPowerUp(craterCenter, {
+                craterRadius: carveRadius,
+                craterDepth: carveDepth,
+                normal: hitDir.clone().negate()
+              });
+            }
           } else {
             // Deliver clamped kinetic momentum impulse to the belt asteroid
             const normal = a.position.clone().sub(m.position).normalize();
@@ -415,26 +442,28 @@ export class MeteorSystem {
     const scaledCount = this.particleDensity === 'balanced'
       ? count
       : Math.max(1, Math.round(count * (this.particleDensityMultiplier || 1.0)));
+    const r = this.activeMeteor ? this.activeMeteor.radius : 56.0;
+    const jitterMag = r * 0.65;
     for (let i = 0; i < scaledCount; i++) {
       if (this.particles.length >= this.maxParticles) break;
       const jitter = new THREE.Vector3(
-        (Math.random() - 0.5) * 45.0,
-        (Math.random() - 0.5) * 45.0,
-        (Math.random() - 0.5) * 45.0
+        (Math.random() - 0.5) * jitterMag,
+        (Math.random() - 0.5) * jitterMag,
+        (Math.random() - 0.5) * jitterMag
       );
       const pPos = pos.clone().add(jitter);
-      const pVel = dir.clone().multiplyScalar(-40.0).add(new THREE.Vector3(
-        (Math.random() - 0.5) * 25.0,
-        (Math.random() - 0.5) * 25.0,
-        (Math.random() - 0.5) * 25.0
+      const pVel = dir.clone().multiplyScalar(-50.0).add(new THREE.Vector3(
+        (Math.random() - 0.5) * (r * 0.35),
+        (Math.random() - 0.5) * (r * 0.35),
+        (Math.random() - 0.5) * (r * 0.35)
       ));
-      const life = 0.65 + Math.random() * 0.45;
+      const life = 0.75 + Math.random() * 0.55;
       this.particles.push({
         pos: pPos,
         vel: pVel,
         life,
         maxLife: life,
-        baseScale: 38.0 + Math.random() * 24.0
+        baseScale: (r * 0.65) + Math.random() * (r * 0.55)
       });
     }
   }

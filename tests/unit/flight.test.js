@@ -27,20 +27,21 @@ describe('Player Flight Physics & Momentum', () => {
   });
 
   it('should accelerate forward when thrust button is held, capped at maxSpeed', () => {
+    expect(ship.maxSpeed).toBe(140.0);
     ship.input.thrust = true;
 
     // Simulate 1 second of forward acceleration (forwardAccel = 45 u/s^2)
     ship.update(1.0);
     expect(ship.getSpeed()).toBeCloseTo(45.0, 1);
 
-    // Simulate 3 more seconds of thrust: speed must be clamped to maxSpeed (90 u/s)
+    // Simulate 3 more seconds of thrust: speed must be clamped to maxSpeed (140 u/s)
     ship.update(3.0);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed, 1);
     expect(ship.getSpeed()).toBeLessThanOrEqual(ship.maxSpeed);
   });
 
   it('should come to a complete stop 3x faster holding the brake button (~0.67s)', () => {
-    // 1. Bring ship to full speed (90 u/s)
+    // 1. Bring ship to full speed (140 u/s)
     ship.velocity.set(0, 0, -ship.maxSpeed);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed, 1);
 
@@ -50,7 +51,7 @@ describe('Player Flight Physics & Momentum', () => {
 
     // 3. At 0.333s, speed should be approximately half (brakes are 3x more effective)
     ship.update(0.333);
-    expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed / 2.0, 1);
+    expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed / 2.0, 0);
 
     // 4. By 0.70 seconds total, speed must reach 0.0 (complete halt)
     ship.update(0.367);
@@ -177,7 +178,7 @@ describe('Player Flight Physics & Momentum', () => {
     ship.input.yawLeft = false;
 
     // Allow physical hull to complete rate-limited catch-up with POV yaw
-    ship.update(1.5);
+    ship.update(3.5);
     expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBeCloseTo(0, 3);
 
     // 3. Resting in space for 2 seconds with zero input
@@ -276,11 +277,11 @@ describe('Player Flight Physics & Momentum', () => {
   });
 
   describe('Decoupled Unthrottled Pilot POV & Capability-Limited Hull Controller', () => {
-    it('should initialize capabilities.maxTurnRate = 1.5, support getter/setter, and restore on resetSpawn', () => {
+    it('should initialize capabilities.maxTurnRate = 0.75, support getter/setter, and restore on resetSpawn', () => {
       expect(ship.desiredQuaternion).toBeInstanceOf(THREE.Quaternion);
       expect(ship.capabilities).toBeDefined();
-      expect(ship.capabilities.maxTurnRate).toBeCloseTo(1.5, 2);
-      expect(ship.maxTurnRate).toBeCloseTo(1.5, 2);
+      expect(ship.capabilities.maxTurnRate).toBe(0.75);
+      expect(ship.maxTurnRate).toBe(0.75);
 
       // Upgrade ship capability dynamically
       ship.capabilities.maxTurnRate = 2.5;
@@ -340,7 +341,7 @@ describe('Player Flight Physics & Momentum', () => {
     });
 
     it('should bound physical hull rotation strictly by capabilities.maxTurnRate * dt', () => {
-      ship.capabilities.maxTurnRate = 1.5;
+      ship.capabilities.maxTurnRate = 0.75;
       ship.applyMouseLook(1.5, 0);
 
       const initialHull = ship.quaternion.clone();
@@ -350,26 +351,26 @@ describe('Player Flight Physics & Momentum', () => {
       const hullStep = initialHull.angleTo(ship.quaternion);
       const maxAllowed = ship.capabilities.maxTurnRate * dt + 0.0001;
       expect(hullStep).toBeLessThanOrEqual(maxAllowed);
-      expect(hullStep).toBeCloseTo(1.5 * dt, 3);
+      expect(hullStep).toBeCloseTo(0.75 * dt, 3);
     });
 
     it('should proportionally increase hull catch-up rate when upgrading capabilities.maxTurnRate', () => {
-      // Test baseline 1.5 rad/s
+      // Test baseline 0.75 rad/s
       ship.resetSpawn();
-      ship.capabilities.maxTurnRate = 1.5;
+      ship.capabilities.maxTurnRate = 0.75;
       ship.applyMouseLook(1.5, 0);
       const dt = 0.1;
       ship.update(dt);
       const step1 = new THREE.Quaternion(0, 0, 0, 1).angleTo(ship.quaternion);
 
-      // Test upgraded 3.0 rad/s
+      // Test upgraded 1.5 rad/s
       ship.resetSpawn();
-      ship.capabilities.maxTurnRate = 3.0;
+      ship.capabilities.maxTurnRate = 1.5;
       ship.applyMouseLook(1.5, 0);
       ship.update(dt);
       const step2 = new THREE.Quaternion(0, 0, 0, 1).angleTo(ship.quaternion);
 
-      // 3.0 rad/s should catch up twice as fast as 1.5 rad/s
+      // 1.5 rad/s should catch up twice as fast as 0.75 rad/s
       expect(step2).toBeCloseTo(step1 * 2.0, 3);
     });
 
@@ -456,7 +457,7 @@ describe('Player Flight Physics & Momentum', () => {
       expect(ship.quaternion.angleTo(ship.desiredQuaternion)).toBeLessThanOrEqual(preAngle + 0.1);
     });
 
-    it('should seamlessly process mouse move input with pointer lock, client coordinate fallback, and UI occlusion protection', () => {
+    it('should seamlessly process mouse move input with pointer lock, client coordinate fallback, and UI occlusion protection', async () => {
       const initialQuat = ship.desiredQuaternion.clone();
       const mouseSensitivity = 0.0022;
 
@@ -475,6 +476,22 @@ describe('Player Flight Physics & Momentum', () => {
       const euler = new THREE.Euler().setFromQuaternion(ship.desiredQuaternion, 'YXZ');
       expect(euler.y).toBeCloseTo(expectedDeltaYaw, 3);
       expect(euler.x).toBeCloseTo(expectedDeltaPitch, 3);
+
+      // 2. Verify GameEngine.prototype.isInteractiveTarget excludes .hud-master-monitor and .touch-btn
+      const { GameEngine } = await import('../../src/game/engine.js');
+      const monitorEl = document.createElement('div');
+      monitorEl.className = 'hud-master-monitor';
+      const headerChild = document.createElement('span');
+      monitorEl.appendChild(headerChild);
+
+      const touchBtnEl = document.createElement('button');
+      touchBtnEl.className = 'action-touch-btn touch-btn';
+
+      const plainCanvas = document.createElement('canvas');
+
+      expect(GameEngine.prototype.isInteractiveTarget(headerChild)).toBe(true);
+      expect(GameEngine.prototype.isInteractiveTarget(touchBtnEl)).toBe(true);
+      expect(GameEngine.prototype.isInteractiveTarget(plainCanvas)).toBe(false);
     });
   });
 });

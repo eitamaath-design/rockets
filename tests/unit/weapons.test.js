@@ -315,20 +315,20 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(m.velocity.length()).toBeCloseTo(210.0, 1);
     });
 
-    it('should inherit ship velocity and guarantee forward separation when ship moves at cruising speed (90 u/s)', () => {
-      // Ship moving forward at maximum cruising speed 90 u/s along -Z
-      ship.velocity.set(0, 0, -90);
-      expect(ship.getSpeed()).toBe(90.0);
+    it('should inherit ship velocity and guarantee forward separation when ship moves at cruising speed (140 u/s)', () => {
+      // Ship moving forward at maximum cruising speed 140 u/s along -Z
+      ship.velocity.set(0, 0, -140);
+      expect(ship.getSpeed()).toBe(140.0);
 
       const fired = weapons.triggerSecondary(true, ship, 1000);
       expect(fired).toBe(true);
       const m = weapons.missiles[0];
 
-      // Initial speed must equal baseInitialSpeed (85) + ship forward velocity (90) = 175 u/s
-      expect(m.guidance.inheritedSpeed).toBe(90.0);
-      expect(m.guidance.currentSpeed).toBe(175.0);
-      expect(m.guidance.maxSpeed).toBe(300.0); // 210 + 90
-      expect(m.velocity.length()).toBeCloseTo(175.0, 1);
+      // Initial speed must equal baseInitialSpeed (85) + ship forward velocity (140) = 225 u/s
+      expect(m.guidance.inheritedSpeed).toBe(140.0);
+      expect(m.guidance.currentSpeed).toBe(225.0);
+      expect(m.guidance.maxSpeed).toBe(350.0); // 210 + 140
+      expect(m.velocity.length()).toBeCloseTo(225.0, 1);
       expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
 
       // Advance 60 frames (1 second at 60 FPS) and verify separation distance increases monotonically
@@ -350,20 +350,20 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       }
     });
 
-    it('should inherit ship velocity and guarantee forward separation when ship moves at evasive boost speed (270 u/s)', () => {
-      // Ship moving forward at maximum evasive boost speed (90 cruising + 180 impulse = 270 u/s)
-      ship.velocity.set(0, 0, -270);
-      expect(ship.getSpeed()).toBe(270.0);
+    it('should inherit ship velocity and guarantee forward separation when ship moves at evasive boost speed (320 u/s)', () => {
+      // Ship moving forward at maximum evasive boost speed (140 cruising + 180 impulse = 320 u/s)
+      ship.velocity.set(0, 0, -320);
+      expect(ship.getSpeed()).toBe(320.0);
 
       const fired = weapons.triggerSecondary(true, ship, 2000);
       expect(fired).toBe(true);
       const m = weapons.missiles[0];
 
-      // Initial speed must equal 85 + 270 = 355 u/s
-      expect(m.guidance.inheritedSpeed).toBe(270.0);
-      expect(m.guidance.currentSpeed).toBe(355.0);
-      expect(m.guidance.maxSpeed).toBe(480.0); // 210 + 270
-      expect(m.velocity.length()).toBeCloseTo(355.0, 1);
+      // Initial speed must equal 85 + 320 = 405 u/s
+      expect(m.guidance.inheritedSpeed).toBe(320.0);
+      expect(m.guidance.currentSpeed).toBe(405.0);
+      expect(m.guidance.maxSpeed).toBe(530.0); // 210 + 320
+      expect(m.velocity.length()).toBeCloseTo(405.0, 1);
       expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
 
       // Advance 60 frames and verify separation distance increases monotonically
@@ -389,12 +389,12 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       weapons.lockSystem.isLocked = true;
       weapons.lockSystem.currentTargetId = 'pilot-target-1';
 
-      ship.velocity.set(0, 0, -90);
+      ship.velocity.set(0, 0, -140);
       weapons.triggerSecondary(true, ship, 1000);
       const m = weapons.missiles[0];
 
       expect(m.targetId).toBe('pilot-target-1');
-      expect(m.guidance.currentSpeed).toBe(175.0);
+      expect(m.guidance.currentSpeed).toBe(225.0);
 
       const remoteTarget = {
         position: new THREE.Vector3(0, 0, -1500),
@@ -403,7 +403,7 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       };
       const remoteMap = new Map([['pilot-target-1', remoteTarget]]);
 
-      // Advance 60 frames: ship at 90 u/s, missile homing towards target
+      // Advance 60 frames: ship at 140 u/s, missile homing towards target
       let prevDistance = m.group.position.distanceTo(ship.position);
       for (let frame = 0; frame < 60; frame++) {
         const dt = 1 / 60;
@@ -417,11 +417,11 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
     });
 
     it('should dynamically clamp missile speed via ensureSeparationSpeed when ship activates boost after launch', () => {
-      // Fired while cruising at 90 u/s
-      ship.velocity.set(0, 0, -90);
+      // Fired while cruising at 140 u/s
+      ship.velocity.set(0, 0, -140);
       weapons.triggerSecondary(true, ship, 1000);
       const m = weapons.missiles[0];
-      expect(m.guidance.currentSpeed).toBe(175.0);
+      expect(m.guidance.currentSpeed).toBe(225.0);
 
       // Advance 10 frames at cruising speed
       for (let i = 0; i < 10; i++) {
@@ -430,13 +430,14 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
         weapons.update(dt, ship, new Map(), () => {});
       }
 
-      // Pilot activates evasive boost AFTER launching missile: velocity surges to 270 u/s
-      ship.velocity.set(0, 0, -270);
-      expect(ship.getSpeed()).toBe(270.0);
+      // Pilot activates evasive boost AFTER launching missile: velocity surges to 320 u/s
+      ship.velocity.set(0, 0, -320);
+      expect(ship.getSpeed()).toBe(320.0);
 
-      // Next update call must trigger ensureSeparationSpeed(270)
+      // Next update call must trigger ensureSeparationSpeed(320)
       weapons.update(1 / 60, ship, new Map(), () => {});
-      expect(m.guidance.currentSpeed).toBeGreaterThanOrEqual(270 + 85); // At least 355 u/s
+      expect(m.guidance.currentSpeed).toBeGreaterThanOrEqual(320 + 85); // At least 405 u/s
+      expect(m.guidance.maxSpeed).toBeGreaterThanOrEqual(320 + 210); // At least 530 u/s
       expect(m.guidance.currentSpeed).toBeGreaterThan(ship.getSpeed());
 
       // Advance 50 more frames: ship can never catch up or overtake the missile

@@ -175,6 +175,43 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       expect(pill.textContent).toContain('VOX: HIGH (64³)');
       expect(pill.textContent).toContain('FPS: 90');
       expect(pill.textContent).toContain('DPI: 0.75x');
+      hud.destroy();
+    });
+
+    it('should synchronize showStats configuration option across GameHUD and room config', () => {
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount = document.getElementById('hud-mount');
+      const mockEngine = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          renderScale: 1.0,
+          maxFps: 60,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced',
+          showStats: false
+        },
+        network: {
+          roomName: 'NoStats-Sector',
+          roomId: 'nostats-sector',
+          isMaster: true,
+          onMapResetVote: () => {}
+        },
+        playerShip: {
+          input: { analogPitch: 0, analogYaw: 0 }
+        }
+      };
+
+      const hud = new GameHUD(mount, mockEngine);
+      const monitor = document.getElementById('hud-master-monitor');
+      hud.update({ isMaster: true, showStats: false });
+      expect(monitor.style.display).toBe('none');
+
+      hud.update({ isMaster: true, showStats: true });
+      expect(monitor.style.display).toBe('block');
+      hud.destroy();
     });
   });
 });

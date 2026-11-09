@@ -16,6 +16,7 @@ export class GameNetwork {
       maxFps: 60,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
+      showStats: true,
       ...(config || {})
     };
     this.playerName = playerName || `Pilot-${(selfId || 'Host').slice(0, 4)}`;

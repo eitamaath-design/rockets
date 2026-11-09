@@ -25,6 +25,7 @@ export class GameEngine {
       maxFps: 60,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
+      showStats: true,
       ...(config || {})
     };
     this._lastRenderTime = 0;
@@ -118,10 +119,11 @@ export class GameEngine {
 
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
     this.beaconSystem = new EngagementBeaconSystem(this.scene);
-    this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv, {
-      frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10
-    });
     this.powerUpSystem = new PowerUpSystem(this.scene);
+    this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv, {
+      frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10,
+      powerUpSystem: this.powerUpSystem
+    });
 
     this.applyPerformanceConfig(this.config);
 
@@ -169,6 +171,11 @@ export class GameEngine {
     if (this.meteorSystem && typeof this.meteorSystem.setParticleDensity === 'function') {
       this.meteorSystem.setParticleDensity(pDensity);
     }
+    if (this.config.showStats === undefined) {
+      this.config.showStats = true;
+    } else {
+      this.config.showStats = Boolean(this.config.showStats);
+    }
   }
 
   setupNetworkHandlers() {
@@ -196,6 +203,9 @@ export class GameEngine {
     this.network.onHit((data) => {
       this.timeSinceLastCombat = 0; // Combat activity reset!
       if (data.targetId === this.network.selfId) {
+        if (typeof this.playerShip.recordEngagementHit === 'function') {
+          this.playerShip.recordEngagementHit();
+        }
         const wasKilled = this.playerShip.takeDamage(data.damage);
         this.cockpit.triggerDamageFlash();
         audio.playDamageHit();
@@ -300,6 +310,13 @@ export class GameEngine {
       return true;
     }
     return false;
+  }
+
+  isInteractiveTarget(target) {
+    return Boolean(
+      target && typeof target.closest === 'function' &&
+      target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .touch-joystick-container, .hud-master-monitor, .action-touch-btn, .touch-btn')
+    );
   }
 
   setupInputListeners() {
@@ -434,10 +451,7 @@ export class GameEngine {
 
     document.addEventListener('mousemove', (e) => {
       const target = e.target;
-      const isOverInteractiveUI = Boolean(
-        target && typeof target.closest === 'function' &&
-        target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .touch-joystick-container')
-      );
+      const isOverInteractiveUI = this.isInteractiveTarget(target);
 
       let movementX = typeof e.movementX === 'number' ? e.movementX : undefined;
       let movementY = typeof e.movementY === 'number' ? e.movementY : undefined;
@@ -560,6 +574,9 @@ export class GameEngine {
       // 3. Update Weapons & Explosions
       this.weaponsSystem.update(dt, this.playerShip, this.remoteShips, (dmg, weapon, attacker) => {
         this.timeSinceLastCombat = 0;
+        if (typeof this.playerShip.recordEngagementHit === 'function') {
+          this.playerShip.recordEngagementHit();
+        }
         this.cockpit.triggerDamageFlash();
       }, this.camera);
 
@@ -831,6 +848,10 @@ export class GameEngine {
         laserEnergy: Math.round(this.weaponsSystem.laserEnergy),
         laserMaxEnergy: this.weaponsSystem.laserMaxEnergy,
         laserRecharging: (this.weaponsSystem.laserCooldownTimer <= 0 && this.weaponsSystem.laserEnergy < this.weaponsSystem.laserMaxEnergy),
+        hasFireLaser: !!this.playerShip.hasFireLaser,
+        fireLaserTimer: Math.max(0, this.playerShip.fireLaserTimer || 0),
+        engagementsCompleted: this.playerShip.engagementsCompleted || 0,
+        inCombatEngagement: !!this.playerShip.inCombatEngagement,
         missileLocked: this.weaponsSystem.lockSystem.isLocked,
         missileLockProgress: this.weaponsSystem.lockSystem.getProgress(),
         missileTarget: this.weaponsSystem.lockSystem.targetScreenPos,
@@ -854,6 +875,7 @@ export class GameEngine {
         deaths: this.playerShip.deaths,
         activePeersCount: this.network.peers.size + 1,
         isMaster: this.network.isMaster,
+        showStats: this.config.showStats !== false,
         masterId: this.network.currentMasterId,
         avgPing: this.network.getAveragePing(),
         fps: Math.round(this.fpsRolling),

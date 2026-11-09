@@ -13,11 +13,11 @@ export class PlayerShip {
     this.desiredQuaternion = new THREE.Quaternion();
     // Upgradeable ship capability ceiling (rotational rate limit in rad/s)
     this.capabilities = {
-      maxTurnRate: 1.5
+      maxTurnRate: 0.75
     };
 
     // Flight parameters
-    this.maxSpeed = 90.0; // units per second
+    this.maxSpeed = 140.0; // units per second
     this.forwardAccel = 45.0; // units per second squared
     this.decelRate = (this.maxSpeed / 2.0) * 3.0; // 3x effective deceleration (stops in ~0.67s instead of 2.0s)
     this.strafeAccel = 40.0;
@@ -50,6 +50,14 @@ export class PlayerShip {
     this.invisibilityTimer = 0.0;
     this.hasHologramDecoy = false;
     this.storedPowerUp = null; // { type, name, icon, color }
+
+    // Fire Laser Upgrade State & Dual-Gate Enemy Engagement Persistence
+    this.hasFireLaser = false;
+    this.fireLaserTimer = 0.0;
+    this.fireLaserBaseDuration = 75.0; // Generous 75s (60s-90s)
+    this.engagementsCompleted = 0;
+    this.inCombatEngagement = false;
+    this.engagementCooldown = 0.0;
 
     this.isDead = false;
     this.respawnTimer = 0;
@@ -114,6 +122,36 @@ export class PlayerShip {
     }
   }
 
+  activateFireLaser(duration = 75.0) {
+    this.hasFireLaser = true;
+    this.fireLaserTimer = duration;
+    this.engagementsCompleted = 0;
+    this.inCombatEngagement = false;
+    this.engagementCooldown = 0.0;
+  }
+
+  deactivateFireLaser() {
+    this.hasFireLaser = false;
+    this.fireLaserTimer = 0.0;
+    this.inCombatEngagement = false;
+    this.engagementCooldown = 0.0;
+  }
+
+  recordEngagementHit() {
+    this.inCombatEngagement = true;
+    this.engagementCooldown = 8.0;
+  }
+
+  concludeEngagement() {
+    if (this.inCombatEngagement) {
+      this.inCombatEngagement = false;
+      this.engagementCooldown = 0.0;
+      this.engagementsCompleted += 1;
+    } else if (this.engagementsCompleted === 0) {
+      this.engagementsCompleted = 1;
+    }
+  }
+
   resetSpawn() {
     // Clear initial spawn coordinate in orbital safe space facing forward
     this.position.set(0, 80, 3200);
@@ -130,6 +168,8 @@ export class PlayerShip {
     this.isInvisible = false;
     this.invisibilityTimer = 0;
     this.hasHologramDecoy = false;
+    this.deactivateFireLaser();
+    this.engagementsCompleted = 0;
     this.isDead = false;
     this.respawnTimer = 0;
     this.invulnerableTimer = 2.5;
@@ -148,6 +188,10 @@ export class PlayerShip {
 
     if (this.isDead) return false;
     if (!bypassInvuln && this.invulnerableTimer > 0) return false;
+
+    if (['laser', 'cannon', 'missile'].includes(weaponType)) {
+      this.recordEngagementHit();
+    }
 
     // Reset shield recharge cooldown timer
     this.shieldRechargeTimer = this.shieldRechargeDelay;
@@ -199,6 +243,7 @@ export class PlayerShip {
   recordKill() {
     this.kills++;
     this.score += 100;
+    this.concludeEngagement();
   }
 
   /**
@@ -285,6 +330,27 @@ export class PlayerShip {
       this.invisibilityTimer = Math.max(0, this.invisibilityTimer - dt);
       if (this.invisibilityTimer <= 0) {
         this.isInvisible = false;
+      }
+    }
+
+    // Active combat engagement tracking
+    if (this.inCombatEngagement) {
+      this.engagementCooldown = Math.max(0, this.engagementCooldown - dt);
+      if (this.engagementCooldown <= 0) {
+        this.inCombatEngagement = false;
+        this.engagementsCompleted += 1;
+      }
+    }
+
+    // Fire Laser Dual-Gate Persistence:
+    // Lasts at least 1 combat engagement against an enemy AND for the duration of the timer.
+    // It only expires once BOTH the timer <= 0 AND at least 1 engagement has concluded.
+    if (this.hasFireLaser) {
+      if (this.fireLaserTimer > 0) {
+        this.fireLaserTimer = Math.max(0, this.fireLaserTimer - dt);
+      }
+      if (this.fireLaserTimer <= 0 && this.engagementsCompleted >= 1) {
+        this.deactivateFireLaser();
       }
     }
 
