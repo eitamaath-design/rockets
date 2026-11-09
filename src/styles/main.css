@@ -1347,6 +1347,19 @@ html, body {
   text-shadow: 0 0 6px rgba(0, 229, 255, 0.8);
 }
 
+.hud-boost-badge.charging {
+  background: rgba(168, 85, 247, 0.45);
+  color: #f3e8ff;
+  border: 1px solid rgba(216, 180, 254, 0.9);
+  text-shadow: 0 0 8px rgba(216, 180, 254, 0.9);
+  animation: warpPulse 0.35s infinite alternate ease-in-out;
+}
+
+@keyframes warpPulse {
+  0% { transform: scale(1.0); }
+  100% { transform: scale(1.08); box-shadow: 0 0 8px rgba(192, 132, 252, 0.8); }
+}
+
 .hud-boost-badge.cooling {
   background: rgba(50, 60, 75, 0.5);
   color: #7dd3fc;
@@ -1355,6 +1368,11 @@ html, body {
 
 .btn-thrust.boost-ready {
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.45), inset 0 0 8px rgba(0, 229, 255, 0.25);
+}
+
+.btn-thrust.warp-charging {
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.85), inset 0 0 10px rgba(216, 180, 254, 0.6);
+  border-color: #c084fc;
 }
 
 .btn-thrust:active, .btn-thrust.active {

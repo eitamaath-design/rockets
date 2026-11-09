@@ -298,18 +298,35 @@ export class GameEngine {
     return this.network.castMapResetVote(choice);
   }
 
-  triggerBoostAction() {
+  triggerThrustStart() {
     if (!this.playerShip) return false;
-    const boosted = this.playerShip.triggerThrustPress(performance.now());
-    if (boosted) {
-      audio.playBoost();
-      this.cockpit.triggerBoostFlash();
-      if (this.thrusterTrails) {
-        this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false, 'local', true);
-      }
+    const warpCharging = this.playerShip.triggerThrustPress(performance.now());
+    if (warpCharging) {
+      audio.startWarpCharge();
       return true;
     }
     return false;
+  }
+
+  triggerThrustEnd() {
+    if (!this.playerShip) return null;
+    if (this.playerShip.isWarpCharging) {
+      const warpResult = this.playerShip.releaseWarpCharge(this.spaceEnv);
+      audio.stopWarpCharge();
+      if (warpResult && warpResult.success) {
+        audio.playWarpJump(warpResult.chargeRatio);
+        if (this.cockpit) this.cockpit.triggerBoostFlash();
+        if (this.thrusterTrails) {
+          this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false, 'local', true);
+        }
+      }
+      return warpResult;
+    }
+    return null;
+  }
+
+  triggerBoostAction() {
+    return this.triggerThrustStart();
   }
 
   isInteractiveTarget(target) {
@@ -327,7 +344,7 @@ export class GameEngine {
       switch (e.code) {
         case 'KeyW':
           if (!this.playerShip.input.thrust) {
-            this.triggerBoostAction();
+            this.triggerThrustStart();
           }
           this.playerShip.input.thrust = true;
           break;
@@ -378,6 +395,7 @@ export class GameEngine {
     window.addEventListener('keyup', (e) => {
       switch (e.code) {
         case 'KeyW':
+          this.triggerThrustEnd();
           this.playerShip.input.thrust = false;
           break;
         case 'KeyS':
@@ -864,8 +882,13 @@ export class GameEngine {
         isDead: this.playerShip.isDead,
         respawnCountdown: Math.ceil(this.playerShip.respawnTimer),
         invulnerable: (this.playerShip.invulnerableTimer > 0),
-        boostReady: (this.playerShip.boostCooldownTimer <= 0),
-        boostCooldown: Math.ceil(this.playerShip.boostCooldownTimer),
+        warpReady: (this.playerShip.warpCooldownTimer <= 0),
+        warpCooldown: Math.ceil(this.playerShip.warpCooldownTimer),
+        isWarpCharging: this.playerShip.isWarpCharging,
+        warpChargeTime: this.playerShip.warpChargeTime,
+        warpChargeRatio: this.playerShip.maxWarpCharge > 0 ? (this.playerShip.warpChargeTime / this.playerShip.maxWarpCharge) : 0,
+        boostReady: (this.playerShip.warpCooldownTimer <= 0),
+        boostCooldown: Math.ceil(this.playerShip.warpCooldownTimer),
         inactivityBeacon: (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0),
         score: this.playerShip.score,
         kills: this.playerShip.kills,

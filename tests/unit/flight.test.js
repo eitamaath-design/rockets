@@ -59,33 +59,86 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.velocity.length()).toBe(0);
   });
 
-  it('should trigger evasive boost on double-tapping thrust with 2.0s cooldown and 300% surge', () => {
-    expect(ship.boostCooldownTimer).toBe(0);
+  it('should charge warp on double-tapping thrust until released, executing proportional warp jump', () => {
+    expect(ship.warpCooldownTimer).toBe(0);
+    expect(ship.isWarpCharging).toBe(false);
+    expect(ship.warpChargeTime).toBe(0);
     expect(ship.getSpeed()).toBe(0);
 
     // First tap at t = 1000ms
     const tap1 = ship.triggerThrustPress(1000);
-    expect(tap1).toBe(false); // First tap does not trigger boost yet
+    expect(tap1).toBe(false); // First tap does not initiate warp charge
+    expect(ship.isWarpCharging).toBe(false);
     expect(ship.getSpeed()).toBe(0);
 
     // Double tap within 150ms window (t = 1150ms)
     const tap2 = ship.triggerThrustPress(1150);
-    expect(tap2).toBe(true); // Boost triggered!
-    expect(ship.getSpeed()).toBeGreaterThan(120); // 300% forward surge impulse (180 u/s)
-    expect(ship.boostCooldownTimer).toBe(2.0); // 2-second cooldown started
+    expect(tap2).toBe(true); // Warp charging initiated!
+    expect(ship.isWarpCharging).toBe(true);
+    expect(ship.warpChargeTime).toBe(0);
+    // Instant boost forward logic is completely removed: ship does not surge forward instantly on tap
+    expect(ship.getSpeed()).toBe(0);
+
+    // Holding thrust charges warp continuously until release
+    ship.update(1.0);
+    expect(ship.isWarpCharging).toBe(true);
+    expect(ship.warpChargeTime).toBeCloseTo(1.0, 2);
+
+    // Continue charging past max charge: should cap at maxWarpCharge (3.0s) and continue charging until released
+    ship.update(3.0);
+    expect(ship.isWarpCharging).toBe(true);
+    expect(ship.warpChargeTime).toBe(3.0);
+
+    // Button released: execute warp jump!
+    const initialZ = ship.position.z;
+    const warpResult = ship.releaseWarpCharge();
+    expect(warpResult).not.toBeNull();
+    expect(warpResult.success).toBe(true);
+    expect(warpResult.chargeRatio).toBe(1.0);
+    expect(warpResult.distance).toBe(ship.maxWarpDistance); // Full 750u forward displacement
+
+    // Ship moved forward along -Z (looking straight down -Z at spawn)
+    expect(ship.position.z).toBeCloseTo(initialZ - ship.maxWarpDistance, 1);
+    expect(ship.isWarpCharging).toBe(false);
+    expect(ship.warpChargeTime).toBe(0);
+    expect(ship.warpCooldownTimer).toBe(2.0); // 2-second cooldown started
 
     // Third tap within cooldown window should be rejected
     const tap3 = ship.triggerThrustPress(1300);
     expect(tap3).toBe(false);
 
-    // Advance time by 2.1s: cooldown expires, boost ready again
+    // Advance time by 2.1s: cooldown expires, warp ready again
     ship.update(2.1);
-    expect(ship.boostCooldownTimer).toBe(0);
+    expect(ship.warpCooldownTimer).toBe(0);
 
-    // New double tap activates boost again
+    // New double tap activates warp charging again
     ship.triggerThrustPress(4000);
     const tapAfterCooldown = ship.triggerThrustPress(4150);
     expect(tapAfterCooldown).toBe(true);
+    expect(ship.isWarpCharging).toBe(true);
+  });
+
+  it('should clamp warp jump displacement when an obstacle is detected in raycast', () => {
+    ship.resetSpawn();
+    const initialPos = ship.position.clone();
+    ship.triggerThrustPress(1000);
+    ship.triggerThrustPress(1150);
+    ship.update(3.0); // Fully charged (3.0s -> 750u)
+
+    // Mock spaceEnv with ray collision at 200u
+    const mockSpaceWithObstacle = {
+      checkRayCollision: (origin, dir, maxDist) => ({
+        hit: true,
+        distance: 200.0,
+        point: origin.clone().addScaledVector(dir, 200.0)
+      })
+    };
+
+    const result = ship.releaseWarpCharge(mockSpaceWithObstacle);
+    expect(result.success).toBe(true);
+    // Distance clamped to hit.distance - ship.radius - 2.0 = 200 - 2.8 - 2.0 = 195.2u
+    expect(result.distance).toBeCloseTo(200.0 - ship.radius - 2.0, 1);
+    expect(ship.position.z).toBeCloseTo(initialPos.z - result.distance, 1);
   });
 
   it('should strafe laterally using side thrusters', () => {

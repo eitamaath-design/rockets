@@ -24,11 +24,14 @@ export class PlayerShip {
     this.strafeAccel = 40.0;
     this.maxStrafeSpeed = 35.0;
 
-    // Double-tap Thrust Boost (instant dodge surge forward every 2.0s, 300% stronger)
-    this.boostCooldown = 2.0; // seconds
-    this.boostCooldownTimer = 0.0;
+    // Charged Double-Tap Warp Drive (charge up to 3.0s, hold until released, proportional displacement)
+    this.warpCooldown = 2.0; // seconds
+    this.warpCooldownTimer = 0.0;
+    this.isWarpCharging = false;
+    this.warpChargeTime = 0.0;
+    this.maxWarpCharge = 3.0; // seconds
+    this.maxWarpDistance = 750.0; // units at 100% charge
     this.lastThrustTapTime = 0.0;
-    this.boostImpulse = 180.0; // 300% stronger forward surge impulse
 
     // Rotation speeds (radians per second)
     this.pitchSpeed = 3.2;
@@ -98,6 +101,18 @@ export class PlayerShip {
 
   set maxTurnRate(val) {
     this.capabilities.maxTurnRate = val;
+  }
+
+  get boostCooldownTimer() {
+    return this.warpCooldownTimer;
+  }
+
+  set boostCooldownTimer(val) {
+    this.warpCooldownTimer = val;
+  }
+
+  get boostCooldown() {
+    return this.warpCooldown;
   }
 
   /**
@@ -179,7 +194,9 @@ export class PlayerShip {
     this.shield = this.maxShield;
     this.isShieldBroken = false;
     this.shieldRechargeTimer = 0;
-    this.boostCooldownTimer = 0;
+    this.warpCooldownTimer = 0;
+    this.isWarpCharging = false;
+    this.warpChargeTime = 0;
     this.lastThrustTapTime = 0;
     this.isInvisible = false;
     this.invisibilityTimer = 0;
@@ -263,9 +280,9 @@ export class PlayerShip {
   }
 
   /**
-   * Double-tap thrust detection to activate instant evasive boost
+   * Double-tap thrust detection to start charging warp drive
    * @param {number} now Timestamp in ms
-   * @returns {boolean} True if boost was successfully triggered
+   * @returns {boolean} True if warp charging was initiated
    */
   triggerThrustPress(now = performance.now()) {
     const elapsed = now - this.lastThrustTapTime;
@@ -273,11 +290,53 @@ export class PlayerShip {
 
     // Double tap within 40ms to 380ms window
     if (elapsed >= 40 && elapsed <= 380) {
-      if (this.boostCooldownTimer <= 0 && !this.isDead) {
-        return this.activateBoost();
+      if (this.warpCooldownTimer <= 0 && !this.isDead) {
+        this.isWarpCharging = true;
+        this.warpChargeTime = 0.0;
+        return true;
       }
     }
     return false;
+  }
+
+  /**
+   * Releases warp charge upon key/button release, executing proportional displacement
+   * with collision raycasting against obstacles.
+   * @param {SpaceEnvironment} [spaceEnv]
+   * @returns {Object|null} Result of warp jump or null if not charging
+   */
+  releaseWarpCharge(spaceEnv = null) {
+    if (!this.isWarpCharging) return null;
+
+    const chargeRatio = Math.min(1.0, this.warpChargeTime / this.maxWarpCharge);
+    let result = { success: false, chargeRatio, distance: 0 };
+
+    if (chargeRatio > 0.03 && !this.isDead) {
+      const env = spaceEnv || this.spaceEnv;
+      const fwd = this.getForwardVector();
+      let warpDist = chargeRatio * this.maxWarpDistance;
+
+      // Obstacle collision check along forward raycast to prevent warping inside rock
+      if (env && typeof env.checkRayCollision === 'function') {
+        const hit = env.checkRayCollision(this.position, fwd, warpDist + this.radius);
+        if (hit && hit.hit && typeof hit.distance === 'number') {
+          warpDist = Math.max(0, hit.distance - this.radius - 2.0);
+        }
+      }
+
+      this.position.addScaledVector(fwd, warpDist);
+
+      // Forward velocity pulse proportional to charge
+      const warpSpeed = this.maxSpeed * (1.0 + chargeRatio * 1.5);
+      this.velocity.copy(fwd).multiplyScalar(warpSpeed);
+
+      this.warpCooldownTimer = this.warpCooldown;
+      result = { success: true, chargeRatio, distance: warpDist };
+    }
+
+    this.isWarpCharging = false;
+    this.warpChargeTime = 0.0;
+    return result;
   }
 
   useSpecialPowerUp(engine) {
@@ -307,17 +366,6 @@ export class PlayerShip {
     this.invisibilityTimer = 0;
   }
 
-  activateBoost() {
-    this.boostCooldownTimer = this.boostCooldown;
-    const fwd = this.getForwardVector();
-    this.velocity.addScaledVector(fwd, this.boostImpulse);
-    // Allow high velocity surge during 300% boost dodge
-    const maxBoostSpeed = this.maxSpeed * 3.0;
-    if (this.velocity.length() > maxBoostSpeed) {
-      this.velocity.setLength(maxBoostSpeed);
-    }
-    return true;
-  }
 
   applyImpulse(impulseVector) {
     this.velocity.add(impulseVector);
@@ -338,8 +386,13 @@ export class PlayerShip {
       this.shipCollisionDebounceTimer = Math.max(0, this.shipCollisionDebounceTimer - dt);
     }
 
-    if (this.boostCooldownTimer > 0) {
-      this.boostCooldownTimer = Math.max(0, this.boostCooldownTimer - dt);
+    if (this.warpCooldownTimer > 0) {
+      this.warpCooldownTimer = Math.max(0, this.warpCooldownTimer - dt);
+    }
+
+    if (this.isWarpCharging) {
+      // Charges continuously until the button is released
+      this.warpChargeTime = Math.min(this.maxWarpCharge, this.warpChargeTime + dt);
     }
 
     if (this.invisibilityTimer > 0) {
@@ -576,12 +629,14 @@ export class PlayerShip {
   }
 
   getEngineState() {
-    const isBoosting = this.boostCooldownTimer > (this.boostCooldown - 0.4);
     return {
       thrust: this.input.thrust,
       brake: this.input.brake,
       speed: this.getSpeed(),
-      isBoosting
+      isWarpCharging: this.isWarpCharging,
+      warpChargeTime: this.warpChargeTime,
+      warpChargeRatio: this.maxWarpCharge > 0 ? (this.warpChargeTime / this.maxWarpCharge) : 0,
+      isBoosting: this.isWarpCharging
     };
   }
 }

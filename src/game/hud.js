@@ -246,9 +246,9 @@ export class GameHUD {
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap to BOOST">
+            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap & Hold to WARP">
               🚀 <strong>THRUST</strong>
-              <span class="hud-boost-badge" id="hud-boost-badge">⚡ BOOST</span>
+              <span class="hud-boost-badge" id="hud-boost-badge">⚡ WARP</span>
             </button>
             <button class="action-touch-btn touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
@@ -598,9 +598,18 @@ export class GameHUD {
 
     // Main Thrust & Brake
     setupHoldButton('btn-thrust', () => {
-      this.engine.triggerBoostAction();
+      if (this.engine.triggerThrustStart) {
+        this.engine.triggerThrustStart();
+      } else if (this.engine.triggerBoostAction) {
+        this.engine.triggerBoostAction();
+      }
       shipInput.thrust = true;
-    }, () => shipInput.thrust = false);
+    }, () => {
+      if (this.engine.triggerThrustEnd) {
+        this.engine.triggerThrustEnd();
+      }
+      shipInput.thrust = false;
+    });
     setupHoldButton('btn-brake', () => shipInput.brake = true, () => shipInput.brake = false);
 
     // Dual Forward Weapons & Special Powerup
@@ -1095,18 +1104,30 @@ export class GameHUD {
     const speedVal = document.getElementById('hud-speed-val');
     if (speedVal) speedVal.textContent = state.speed;
 
-    // Boost Badge (Double-tap thrust evasive boost)
+    // Warp Badge (Double-tap & hold thrust warp drive)
     const boostBadge = document.getElementById('hud-boost-badge');
     const thrustBtn = document.getElementById('btn-thrust');
     if (boostBadge) {
-      if (state.boostReady) {
-        boostBadge.textContent = '⚡ BOOST';
+      if (state.isWarpCharging) {
+        const pct = Math.min(100, Math.round((state.warpChargeRatio || 0) * 100));
+        boostBadge.textContent = `WARP ${pct}%`;
+        boostBadge.className = 'hud-boost-badge charging';
+        if (thrustBtn) thrustBtn.classList.add('warp-charging');
+      } else if (state.warpReady ?? state.boostReady) {
+        boostBadge.textContent = '⚡ WARP';
         boostBadge.className = 'hud-boost-badge ready';
-        if (thrustBtn) thrustBtn.classList.add('boost-ready');
+        if (thrustBtn) {
+          thrustBtn.classList.remove('warp-charging');
+          thrustBtn.classList.add('boost-ready');
+        }
       } else {
-        boostBadge.textContent = `${state.boostCooldown}s`;
+        const cd = state.warpCooldown !== undefined ? state.warpCooldown : state.boostCooldown;
+        boostBadge.textContent = `${cd}s`;
         boostBadge.className = 'hud-boost-badge cooling';
-        if (thrustBtn) thrustBtn.classList.remove('boost-ready');
+        if (thrustBtn) {
+          thrustBtn.classList.remove('warp-charging');
+          thrustBtn.classList.remove('boost-ready');
+        }
       }
     }
 

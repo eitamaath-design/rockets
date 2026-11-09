@@ -695,52 +695,119 @@ export class AudioManager {
   }
 
   /**
-   * Double-tap thrust evasive boost: punchy sub-bass kick + plasma turbine surge
+   * Start rising pitch frequency sweep oscillator while charging warp drive
    */
-  playBoost() {
+  startWarpCharge() {
     if (!this.ctx || this.isMuted) return;
     this.resume();
+    this.stopWarpCharge();
 
     const now = this.ctx.currentTime;
+    this.warpOsc = this.ctx.createOscillator();
+    this.warpGain = this.ctx.createGain();
 
-    // 1. Heavy sub-bass thump
+    this.warpOsc.type = 'sawtooth';
+    this.warpOsc.frequency.setValueAtTime(90, now);
+    // Exponential pitch sweep upwards towards 650Hz over 3.0s max charge
+    this.warpOsc.frequency.exponentialRampToValueAtTime(650, now + 3.0);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(250, now);
+    filter.frequency.exponentialRampToValueAtTime(1800, now + 3.0);
+
+    this.warpGain.gain.setValueAtTime(0.001, now);
+    this.warpGain.gain.linearRampToValueAtTime(0.38, now + 0.15);
+
+    this.warpOsc.connect(filter);
+    filter.connect(this.warpGain);
+    this.warpGain.connect(this.compressor);
+
+    try {
+      this.warpOsc.start(now);
+    } catch (_) {}
+  }
+
+  /**
+   * Stop warp charging audio sweep gracefully
+   */
+  stopWarpCharge() {
+    if (!this.ctx) return;
+    if (this.warpGain) {
+      try {
+        const now = this.ctx.currentTime;
+        this.warpGain.gain.cancelScheduledValues(now);
+        this.warpGain.gain.setValueAtTime(this.warpGain.gain.value, now);
+        this.warpGain.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+      } catch (_) {}
+    }
+    if (this.warpOsc) {
+      try {
+        const now = this.ctx.currentTime;
+        this.warpOsc.stop(now + 0.06);
+      } catch (_) {}
+      this.warpOsc = null;
+      this.warpGain = null;
+    }
+  }
+
+  /**
+   * Punchy spatial warp jump sonic boom
+   * @param {number} [chargeRatio=1.0]
+   */
+  playWarpJump(chargeRatio = 1.0) {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+    this.stopWarpCharge();
+
+    const now = this.ctx.currentTime;
+    const ratio = Math.max(0.2, Math.min(1.0, chargeRatio));
+
+    // 1. Heavy sub-bass thump & spatial sonic boom
     const subOsc = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(220, now);
-    subOsc.frequency.exponentialRampToValueAtTime(45, now + 0.28);
+    subOsc.frequency.setValueAtTime(180 * (0.8 + 0.4 * ratio), now);
+    subOsc.frequency.exponentialRampToValueAtTime(32, now + 0.35 * ratio);
 
-    subGain.gain.setValueAtTime(0.55, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+    subGain.gain.setValueAtTime(0.70 * ratio, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.40 * ratio);
 
     subOsc.connect(subGain);
     subGain.connect(this.compressor);
     subOsc.start(now);
-    subOsc.stop(now + 0.32);
+    subOsc.stop(now + 0.42 * ratio);
 
-    // 2. High-pass plasma whoosh
+    // 2. High-pass spatial warp displacement whoosh
     if (this.noiseBuffer) {
       const noise = this.ctx.createBufferSource();
       noise.buffer = this.noiseBuffer;
 
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(320, now);
-      filter.frequency.exponentialRampToValueAtTime(1400, now + 0.12);
-      filter.frequency.exponentialRampToValueAtTime(250, now + 0.35);
-      filter.Q.setValueAtTime(2.2, now);
+      filter.frequency.setValueAtTime(450, now);
+      filter.frequency.exponentialRampToValueAtTime(2400, now + 0.10);
+      filter.frequency.exponentialRampToValueAtTime(200, now + 0.45 * ratio);
+      filter.Q.setValueAtTime(3.0, now);
 
       const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.48, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+      noiseGain.gain.setValueAtTime(0.60 * ratio, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.48 * ratio);
 
       noise.connect(filter);
       filter.connect(noiseGain);
       noiseGain.connect(this.compressor);
 
       noise.start(now);
-      noise.stop(now + 0.38);
+      noise.stop(now + 0.50 * ratio);
     }
+  }
+
+  /**
+   * Backward-compatible alias for warp jump
+   */
+  playBoost() {
+    this.playWarpJump(1.0);
   }
 }
 
