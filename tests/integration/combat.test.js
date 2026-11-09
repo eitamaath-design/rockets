@@ -58,8 +58,8 @@ describe('Combat Integration: Multi-Player Engagement', () => {
 
     expect(weapons.lasers.length).toBe(1);
 
-    // Update weapons simulation (laser flies at 480 u/s)
-    weapons.update(0.05, localShip, remotesMap, () => {});
+    // Update weapons simulation (laser flies at 160 u/s, dt = 0.15s covers 24u)
+    weapons.update(0.15, localShip, remotesMap, () => {});
 
     // Hit should be detected and packet dispatched
     expect(sentHits.length).toBe(1);

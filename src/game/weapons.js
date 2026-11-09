@@ -437,15 +437,15 @@ export class WeaponsSystem {
     // 1. Primary Weapon: Directed Energy Laser Beam (Continuous Sustained Beam ~5s)
     this.laserMaxEnergy = 100.0;
     this.laserEnergy = 100.0;
-    this.laserFireInterval = 0.08; // 12.5 ticks per second for seamless continuous beam
-    this.laserShotCost = 1.6; // 1.6 * 12.5 = 20.0 energy/s -> exactly 5.0 seconds continuous sustained fire!
+    this.laserFireInterval = 0.16; // 6.25 ticks per second for seamless continuous beam
+    this.laserShotCost = 3.2; // 3.2 * 6.25 = 20.0 energy/s -> exactly 5.0 seconds continuous sustained fire!
     this.laserCooldownDelay = 0.50;
     this.laserCooldownTimer = 0;
     this.laserRechargeRate = 25.0; // Smooth 4-second recharge
     this.laserLastFireTime = 0;
     this.laserDamage = 2.4; // 2.4 per tick (30 dps; 72 shield dps)
     this.laserMaxRange = 3500.0;
-    this.laserSpeed = 480.0;
+    this.laserSpeed = 160.0;
 
     // 2. Secondary Weapon: Dual-Mode Missile System (Guided 3s Lock + Unguided Dumb-Fire)
     this.lockSystem = new MissileLockSystem();
@@ -754,12 +754,14 @@ export class WeaponsSystem {
         this.spawnExplosion(hitPoint, isFireLaser ? 9 : 6, beamSparkColor);
         this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
         let dmgResult = null;
+        const reducedCarveRadius = carveRadius * 0.464;
+        const reducedCarveDepth = carveDepth * 0.464;
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          // Primary laser requires 5 shots (20 HP / 4.0 damage = 5 shots) to destroy small asteroids or excavate rock volumes
-          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (4.0 * dmgMultiplier) : (45.0 * dmgMultiplier);
-          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, carveRadius, carveDepth, 160.0);
+          // Primary laser requires 50 shots (20 HP / 0.4 damage = 50 shots) to destroy small asteroids or excavate rock volumes (10x less effective)
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (0.4 * dmgMultiplier) : (4.5 * dmgMultiplier);
+          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, 16.0, false, 50);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, carveRadius, carveDepth, 160.0);
+          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, 16.0);
           dmgResult = { carveResult };
         }
         const cRes = dmgResult?.carveResult;
@@ -846,8 +848,8 @@ export class WeaponsSystem {
     this.scene.add(group);
     this.laserBeams.push({
       group,
-      life: 0.14,
-      maxLife: 0.14,
+      life: 0.18,
+      maxLife: 0.18,
       isLocal
     });
   }

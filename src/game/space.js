@@ -1842,10 +1842,10 @@ export class SpaceEnvironment {
     return maxStage;
   }
 
-  damageAsteroid(asteroid, damage = 5, hitPoint = null, hitDir = null, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false) {
+  damageAsteroid(asteroid, damage = 5, hitPoint = null, hitDir = null, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false, maxCrackStages = 5) {
     if (!asteroid) return { destroyed: false, carved: false, cracked: false, crackStage: 0, carveResult: null };
 
-    // Small asteroids have finite HP (20 HP = 5 laser shots at 4.0 damage each) and fracture visibly on shots 1-4 before shattering on shot 5
+    // Small asteroids have finite HP (20 HP = 50 laser shots at 0.4 damage each) and fracture visibly before shattering
     if (asteroid.hp !== undefined && asteroid.hp !== Infinity) {
       asteroid.hp -= damage;
       if (asteroid.hp <= 0) {
@@ -1856,12 +1856,12 @@ export class SpaceEnvironment {
           audio.playExplosion(1.2, blastPos);
         }
         this.removeAsteroid(asteroid);
-        return { destroyed: true, carved: false, cracked: false, crackStage: 5, asteroid, hp: 0, carveResult: null };
+        return { destroyed: true, carved: false, cracked: false, crackStage: maxCrackStages, asteroid, hp: 0, carveResult: null };
       }
 
       let carveRes = null;
       if (hitPoint && hitDir) {
-        carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
+        carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote, maxCrackStages);
       }
       return {
         destroyed: false,
@@ -1874,10 +1874,10 @@ export class SpaceEnvironment {
       };
     }
 
-    // Medium/large belt asteroids and Central Mega-Asteroid undergo 5-stage progressive fracture -> volumetric excavation
+    // Medium/large belt asteroids and Central Mega-Asteroid undergo progressive fracture -> volumetric excavation
     let carveRes = null;
     if (hitPoint && hitDir) {
-      carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
+      carveRes = this.fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote, maxCrackStages);
     }
     return {
       destroyed: false,
@@ -1891,14 +1891,11 @@ export class SpaceEnvironment {
   }
 
   /**
-   * 5-Stage Progressive Asteroid Fracture & Surface Cracking:
-   * - Shots 1-4 in a localized impact zone accumulate fracture stages (1 -> 2 -> 3 -> 4),
-   *   writing to mc.crackField and darkening mc.palette with branching fissure patterns
-   *   without crossing mc.isolation = 40.0 (isosurfaceCrossed: false).
-   * - Shot 5 (stage >= 5) removes the fracture zone and triggers full volumetric excavation
-   *   via carveAsteroid (isosurfaceCrossed: true).
+   * Progressive Asteroid Fracture & Surface Cracking:
+   * - Accumulates fracture stages in a localized impact zone
+   * - Triggers volumetric excavation at maxCrackStages.
    */
-  fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false) {
+  fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false, maxCrackStages = 5) {
     if (!asteroid || !asteroid.mesh || !hitPoint || !hitDir) {
       return {
         voxelsModified: 0,
@@ -1989,23 +1986,23 @@ export class SpaceEnvironment {
       asteroid.crackZones.push(zone);
     }
 
-    // Stage 5: Excavate rock volume!
-    if (zone.stage >= 5) {
+    // Excavate rock volume!
+    if (zone.stage >= maxCrackStages) {
       const zIdx = asteroid.crackZones.indexOf(zone);
       if (zIdx !== -1) asteroid.crackZones.splice(zIdx, 1);
 
       const resCarve = this.carveAsteroid(asteroid, hitPoint, hitDir, carveRadius, carveDepth, strength, isRemote);
       return {
         ...resCarve,
-        crackStage: 5,
-        maxCrackStage: 5,
+        crackStage: maxCrackStages,
+        maxCrackStage: maxCrackStages,
         cracked: false,
         excavated: true
       };
     }
 
-    // Stages 1 to 4: Progressive non-destructive surface fracture & palette fissure etching
-    const severity = zone.stage / 4.0;
+    // Progressive non-destructive surface fracture & palette fissure etching
+    const severity = zone.stage / maxCrackStages;
     const iso = mc.isolation || 40.0;
     const hInv = 1.0 / half;
     const ldx = localDir.x, ldy = localDir.y, ldz = localDir.z;
@@ -2272,7 +2269,7 @@ export class SpaceEnvironment {
     const effectiveDepth = isMega
       ? (carveDepth >= 100.0 ? carveDepth : Math.max(260.0, voxelSize * 2.4, carveDepth * 5.0))
       : (isMedium ? asteroid.radius * 2.5 : carveDepth);
-    const carveStrength = isMega ? Math.max(strength, 160.0) : strength;
+    const carveStrength = (strength !== undefined && strength !== null) ? strength : (isMega ? 160.0 : 80.0);
 
     let voxelsModified = 0;
     let isosurfaceCrossedCount = 0;

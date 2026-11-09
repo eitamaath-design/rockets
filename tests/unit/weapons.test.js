@@ -49,17 +49,22 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(weapons.laserEnergy).toBeLessThan(initialEnergy);
     });
 
-    it('should sustain continuous laser beam fire for approximately 5 seconds', () => {
+    it('should have laser speed 160 and fire interval 0.16s', () => {
+      expect(weapons.laserSpeed).toBe(160.0);
+      expect(weapons.laserFireInterval).toBe(0.16);
+    });
+
+    it('should sustain continuous laser beam fire for approximately 5 seconds at 0.16s interval', () => {
       expect(weapons.laserEnergy).toBe(100.0);
-      // Fire for 5 seconds at 0.08s ticks
+      // Fire for 5 seconds at 0.16s ticks
       let now = 1000;
       let shots = 0;
-      for (let t = 0; t <= 5.0; t += 0.08) {
-        now += 80;
+      for (let t = 0; t <= 5.0; t += 0.16) {
+        now += 160;
         weapons.triggerPrimary(true, ship, now);
         shots++;
       }
-      expect(shots).toBeGreaterThanOrEqual(60);
+      expect(shots).toBeGreaterThanOrEqual(30);
       // Energy should be depleted or near 0 after 5s continuous firing
       expect(weapons.laserEnergy).toBeLessThan(5.0);
     });
@@ -70,10 +75,11 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(ship.isInvisible).toBe(false);
     });
 
-    it('should carve asteroid when laser strikes an asteroid', () => {
+    it('should carve asteroid with strength 16.0 and damage 0.4 against small asteroids (50 shots)', () => {
       let carved = false;
-      let carveRadius = 0;
-      const fakeAsteroid = { mesh: new THREE.Mesh(), radius: 40 };
+      let carveStrength = 0;
+      let appliedDamage = 0;
+      const fakeAsteroid = { mesh: new THREE.Mesh(), radius: 40, hp: 20 };
       mockSpaceEnv.checkRayCollision = (origin, dir, maxDist) => {
         return {
           asteroid: fakeAsteroid,
@@ -81,17 +87,18 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
           hitPoint: new THREE.Vector3(0, 0, 0)
         };
       };
-      mockSpaceEnv.carveAsteroid = (ast, pos, dir, radius, depth) => {
+      mockSpaceEnv.damageAsteroid = (ast, dmg, pos, dir, r, d, strength) => {
         expect(ast).toBe(fakeAsteroid);
+        appliedDamage = dmg;
         carved = true;
-        carveRadius = radius;
+        carveStrength = strength;
+        return { cracked: true, crackStage: 1, carveResult: { voxelsModified: 10 } };
       };
 
       weapons.triggerPrimary(true, ship, 1000);
       expect(carved).toBe(true);
-      // Laser carving volume is now dynamically scaled from ship size (~3.5u for r=2.8),
-      // just a little bit bigger than ship size regardless of asteroid size.
-      expect(carveRadius).toBeCloseTo(3.5, 1);
+      expect(appliedDamage).toBeCloseTo(0.4, 2);
+      expect(carveStrength).toBe(16.0);
     });
 
     it('should recharge laser energy after cooldown period', () => {
@@ -236,7 +243,7 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(exp.ring.scale.x).toBeGreaterThan(initialRingScale);
     });
 
-    it('should invoke damageAsteroid when laser impacts an asteroid', () => {
+    it('should invoke damageAsteroid with 0.4 damage when laser impacts an asteroid', () => {
       let damaged = false;
       let dmgAmount = 0;
       let cRadius = 0;
@@ -256,13 +263,13 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
 
       weapons.triggerPrimary(true, ship, 1000);
       expect(damaged).toBe(true);
-      expect(dmgAmount).toBe(4.0);
-      // Laser carving volume scaled with ship radius (r=2.8 * 1.25 ≈ 3.5u)
-      expect(cRadius).toBeCloseTo(3.5, 1);
-      expect(cDepth).toBeCloseTo(3.08, 1);
+      expect(dmgAmount).toBe(0.4);
+      // Laser carving volume scaled with ship radius and 10x reduction
+      expect(cRadius).toBeCloseTo(1.6, 1);
+      expect(cDepth).toBeCloseTo(1.4, 1);
     });
 
-    it('should require 5 laser shots (4.0 damage each) to destroy a 20 HP small asteroid', () => {
+    it('should require 50 laser shots (0.4 damage each) to destroy a 20 HP small asteroid', () => {
       const smallAsteroid = { mesh: new THREE.Mesh(), radius: 28, hp: 20 };
       let hitCount = 0;
       let destroyed = false;
@@ -274,23 +281,24 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       mockSpaceEnv.damageAsteroid = (ast, dmg) => {
         hitCount++;
         ast.hp -= dmg;
-        if (ast.hp <= 0) {
+        if (ast.hp <= 0.001 || hitCount >= 50) {
           destroyed = true;
-          return { destroyed: true, crackStage: 5, hp: 0 };
+          return { destroyed: true, crackStage: 50, hp: 0 };
         }
         return { destroyed: false, cracked: true, crackStage: hitCount, hp: ast.hp };
       };
 
-      for (let shot = 1; shot <= 4; shot++) {
+      for (let shot = 1; shot <= 49; shot++) {
+        weapons.laserEnergy = 100.0;
         weapons.triggerPrimary(true, ship, 1000 + shot * 200);
         expect(destroyed).toBe(false);
-        expect(smallAsteroid.hp).toBe(20 - shot * 4.0);
+        expect(smallAsteroid.hp).toBeCloseTo(20 - shot * 0.4, 1);
       }
 
-      // 5th shot destroys the small asteroid
-      weapons.triggerPrimary(true, ship, 2000);
-      expect(hitCount).toBe(5);
-      expect(smallAsteroid.hp).toBe(0);
+      // 50th shot destroys the small asteroid
+      weapons.triggerPrimary(true, ship, 11000);
+      expect(hitCount).toBe(50);
+      expect(smallAsteroid.hp).toBeCloseTo(0, 5);
       expect(destroyed).toBe(true);
     });
   });
