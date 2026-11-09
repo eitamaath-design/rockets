@@ -30,8 +30,12 @@ export class RemoteShip {
     this.engineFlares = [];
     this.sideThrusterFlares = [];
     this.shieldMesh = null;
+    this.starGlowMesh = null;
     this.nameCanvas = null;
     this.nameSprite = null;
+
+    // Reusable vector for zero-allocation distance calculation in update
+    this._worldPos = new THREE.Vector3();
 
     this.createShipMesh();
     this.createNameplate();
@@ -211,6 +215,19 @@ export class RemoteShip {
     });
     this.shieldMesh = new THREE.Mesh(shieldGeom, shieldMat);
     this.group.add(this.shieldMesh);
+
+    // 9. Dedicated Celestial Star-Glow Billboard Mesh (AdditiveBlending, depthWrite: false)
+    const starGlowGeom = new THREE.PlaneGeometry(12.0, 12.0);
+    const starGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff,
+      transparent: true,
+      opacity: 0.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.starGlowMesh = new THREE.Mesh(starGlowGeom, starGlowMat);
+    this.starGlowMesh.position.set(0, 0, 0);
+    this.group.add(this.starGlowMesh);
   }
 
   createNameplate() {
@@ -303,6 +320,10 @@ export class RemoteShip {
       for (const core of this.coreFlares) {
         core.visible = false;
       }
+      if (this.starGlowMesh) {
+        this.starGlowMesh.visible = false;
+        this.starGlowMesh.material.opacity = 0;
+      }
       return;
     }
     this.group.visible = true;
@@ -346,6 +367,44 @@ export class RemoteShip {
       core.visible = !this.isDead;
       if (core.material) {
         core.material.opacity = coreOpacity;
+      }
+    }
+
+    // Distance-based Star-Glow Billboard calculation (zero heap allocations)
+    if (this.starGlowMesh) {
+      if (this.isDead || this.isInvisible) {
+        this.starGlowMesh.visible = false;
+        this.starGlowMesh.material.opacity = 0;
+      } else {
+        this.starGlowMesh.visible = true;
+        this.group.getWorldPosition(this._worldPos);
+        let dist = 0;
+        if (camera && camera.position) {
+          dist = this._worldPos.distanceTo(camera.position);
+        }
+
+        let glowOpacity = 0.0;
+        let glowScale = 1.0;
+
+        if (dist <= 100) {
+          glowOpacity = 0.0;
+          glowScale = 4.0;
+        } else if (dist <= 200) {
+          const t = (dist - 100) / 100;
+          glowOpacity = t * 0.95;
+          glowScale = 4.0 + t * 4.0;
+        } else {
+          glowOpacity = 0.95;
+          const farT = Math.min(1.0, (dist - 200) / 5800);
+          glowScale = 8.0 + farT * 16.0;
+        }
+
+        this.starGlowMesh.material.opacity = glowOpacity;
+        this.starGlowMesh.scale.set(glowScale, glowScale, 1.0);
+
+        if (camera) {
+          this.starGlowMesh.quaternion.copy(camera.quaternion);
+        }
       }
     }
 
