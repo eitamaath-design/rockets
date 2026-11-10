@@ -300,11 +300,36 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(weapons.missiles.length).toBe(0); // Detonated
     });
 
-    it('should deploy Hologram Decoy Clone when requested', () => {
+    it('should deploy Hologram Decoy Clone when requested with 5x 12-component replica geometry and synchronized translucency', () => {
       expect(weapons.decoys.length).toBe(0);
       weapons.deployDecoyClone(ship);
       expect(weapons.decoys.length).toBe(1);
-      expect(weapons.decoys[0].speed).toBeGreaterThan(50);
+      const decoy = weapons.decoys[0];
+      expect(decoy.speed).toBeGreaterThan(50);
+
+      // Verify 5x starfighter scale matching PlayerShip dimensions (radius 14.0, length 28.0)
+      expect(decoy.group.scale.x).toBe(5.0);
+      expect(decoy.group.scale.y).toBe(5.0);
+      expect(decoy.group.scale.z).toBe(5.0);
+
+      // Verify 12-component starfighter structure has comprehensive child meshes
+      expect(decoy.group.children.length).toBeGreaterThanOrEqual(10);
+
+      // Verify default 80% translucency = 0.20 base opacity
+      expect(decoy.group.userData.translucency).toBe(80);
+      expect(decoy.group.userData.baseOpacity).toBeCloseTo(0.20, 2);
+
+      // Verify dynamic translucency update through weapons system
+      weapons.setTranslucency(70);
+      expect(weapons.blinkTranslucency).toBe(70);
+      expect(decoy.group.userData.translucency).toBe(70);
+      expect(decoy.group.userData.baseOpacity).toBeCloseTo(0.30, 2);
+
+      // Verify shimmering update loop preserves base opacity
+      expect(decoy.group.userData.materials[0].opacity).toBeCloseTo(0.30, 2);
+      weapons.update(0.1, ship, new Map(), null, new THREE.PerspectiveCamera());
+      expect(decoy.group.userData.materials[0].opacity).toBeGreaterThan(0.01);
+      expect(decoy.group.userData.materials[0].opacity).toBeLessThanOrEqual(1.0);
     });
 
     it('should configure FireTrailSystem with frustumCulled false and long-lived smoke particles', () => {

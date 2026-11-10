@@ -349,5 +349,44 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       expect(ship.getLaserCarveRadius(false)).toBe(12.5);
       expect(ship.getLaserCarveRadius(true)).toBeCloseTo(12.5 * Math.cbrt(1.4), 2);
     });
+
+    it('should configure, display and clamp blinkTranslucency room configuration parameter', async () => {
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount = document.getElementById('hud-mount');
+      const mockEngine = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          forwardAccel: 60,
+          momentumShearing: 0.0,
+          carveRadius: 6.5,
+          blinkTranslucency: 85,
+          renderScale: 1.0,
+          maxFps: 0,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
+        },
+        network: { roomName: 'Holo-Sector', roomId: 'holo-sector' },
+        playerShip: { input: { analogPitch: 0, analogYaw: 0 } }
+      };
+
+      const hud = new GameHUD(mount, mockEngine);
+      const pill = document.getElementById('hud-config-pill');
+      expect(pill.textContent).toContain('HOLO: 85%');
+      hud.destroy();
+
+      const { GameNetwork } = await import('../../src/net/network.js');
+      const net = new GameNetwork({
+        roomId: 'test-trans-room',
+        config: { blinkTranslucency: 80 }
+      });
+      net.broadcastConfig({ blinkTranslucency: 150 });
+      expect(net.config.blinkTranslucency).toBe(95);
+
+      net.broadcastConfig({ blinkTranslucency: 2 });
+      expect(net.config.blinkTranslucency).toBe(10);
+    });
   });
 });

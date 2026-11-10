@@ -151,6 +151,7 @@ class LobbyService {
           forwardAccel: 60,
           momentumShearing: 0.0,
           carveRadius: 6.5,
+          blinkTranslucency: 80,
           renderScale: 1.0,
           maxFps: 60,
           shaderQuality: 'balanced',
@@ -198,6 +199,7 @@ class LobbyService {
           asteroidCount: 100,
           megaRadius: 2800,
           meteorFrequency: 10,
+          blinkTranslucency: 80,
           showStats: true
         },
         ttlSecondsRemaining: remainingTTL

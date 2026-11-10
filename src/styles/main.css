@@ -68,7 +68,7 @@ html, body {
 }
 
 .blink-blur {
-  animation: blinkBlurAnim 150ms ease-out;
+  animation: blinkBlurAnim 750ms ease-out;
 }
 
 /* =========================================
@@ -331,6 +331,12 @@ html, body {
   background: rgba(244, 114, 182, 0.15);
   color: #f472b6;
   border: 1px solid rgba(244, 114, 182, 0.3);
+}
+
+.badge-blink {
+  background: rgba(0, 229, 255, 0.15);
+  color: #00e5ff;
+  border: 1px solid rgba(0, 229, 255, 0.3);
 }
 
 .lobby-slider {

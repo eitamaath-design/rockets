@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 import { createRadialGlowTexture } from './trail.js';
+import { createShipReplicaGroup } from './shipModel.js';
 
 // Module-scoped scratch objects for zero runtime heap allocations
 const _dummy = new THREE.Object3D();
@@ -690,6 +691,7 @@ export class WeaponsSystem {
     this.mines = []; // legacy mines
     this.explosions = []; // { mesh, life, maxLife, maxRadius }
     this.decoys = []; // { group, dir, speed, life, maxLife, isLocal, id }
+    this.blinkTranslucency = 80; // Synchronized room translucency percentage for decoys
 
     // Dynamic fire particle trails for missiles and explosions
     this.fireTrails = new FireTrailSystem(this.scene);
@@ -1429,31 +1431,25 @@ export class WeaponsSystem {
     }
   }
 
+  setTranslucency(val) {
+    const clamped = Math.min(95, Math.max(10, Number(val) || 80));
+    this.blinkTranslucency = clamped;
+    for (const d of this.decoys) {
+      if (d.group && d.group.userData && typeof d.group.userData.setTranslucency === 'function') {
+        d.group.userData.setTranslucency(clamped);
+      }
+    }
+  }
+
   spawnDecoy(origin, dir, isLocal, id) {
-    const group = new THREE.Group();
+    const group = createShipReplicaGroup({
+      mode: 'decoy',
+      translucency: this.blinkTranslucency ?? 80,
+      scale: 5.0,
+      color: 0x00ffff
+    });
     group.position.copy(origin);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
-
-    const hullGeom = new THREE.ConeGeometry(1.2, 4.0, 5);
-    hullGeom.rotateX(-Math.PI / 2);
-    const hull = new THREE.Mesh(hullGeom, this.decoyMat);
-    group.add(hull);
-
-    const wingGeom = new THREE.BoxGeometry(5.0, 0.08, 1.8);
-    const wings = new THREE.Mesh(wingGeom, this.decoyMat);
-    wings.position.set(0, 0, 0.8);
-    group.add(wings);
-
-    const flareGeom = new THREE.SphereGeometry(0.5, 8, 8);
-    const flareMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending
-    });
-    const flare = new THREE.Mesh(flareGeom, flareMat);
-    flare.position.set(0, 0, 2.2);
-    group.add(flare);
 
     this.scene.add(group);
     this.decoys.push({
@@ -2057,13 +2053,22 @@ export class WeaponsSystem {
       d.life -= dt;
       d.group.position.addScaledVector(d.dir, d.speed * dt);
 
-      // Shimmering holographic flicker
-      const pulse = 0.5 + Math.sin(d.life * 14.0) * 0.25;
-      d.group.children.forEach(c => {
-        if (c.material && c.material.opacity !== undefined) {
-          c.material.opacity = pulse;
+      // Shimmering holographic flicker preserving room translucency
+      const baseOp = d.group.userData?.baseOpacity ?? 0.20;
+      const pulse = Math.min(1.0, Math.max(0.02, baseOp * (1.0 + Math.sin(d.life * 14.0) * 0.35)));
+      if (d.group.userData?.materials) {
+        for (const mat of d.group.userData.materials) {
+          if (mat && mat.opacity !== undefined) {
+            mat.opacity = pulse;
+          }
         }
-      });
+      } else {
+        d.group.children.forEach(c => {
+          if (c.material && c.material.opacity !== undefined) {
+            c.material.opacity = pulse;
+          }
+        });
+      }
 
       if (d.life <= 0) {
         this.spawnExplosion(d.group.position, 6, 0x00ffff);

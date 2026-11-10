@@ -10,6 +10,7 @@ import { MeteorSystem } from './meteor.js';
 import { PowerUpSystem } from './powerups.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
+import { createShipReplicaGroup } from './shipModel.js';
 
 /**
  * Dynamic particle sphere with trails that decays after 1 second upon blink relocation.
@@ -250,25 +251,13 @@ export class GameEngine {
     // Blink VFX (dynamic particle sphere with trails decaying after 1 second)
     this.blinkVfx = new BlinkVFXSystem(this.scene);
 
-    // Predictive Blink Landing Hologram Outline (visible strictly to local player) - scaled 5x (radius 14.0, length 28.0)
-    const holoGroup = new THREE.Group();
-    const holoMat = new THREE.MeshBasicMaterial({
-      color: 0x00ffff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.75,
-      blending: THREE.AdditiveBlending
+    // Predictive Blink Landing Hologram Outline (visible strictly to local player) - 12-component 5x starfighter replica
+    const holoGroup = createShipReplicaGroup({
+      mode: 'blink',
+      translucency: this.config.blinkTranslucency !== undefined ? this.config.blinkTranslucency : 80,
+      scale: 5.0,
+      color: 0x00ffff
     });
-    const hullGeom = new THREE.ConeGeometry(6.0, 20.0, 5);
-    hullGeom.rotateX(-Math.PI / 2);
-    const hullMesh = new THREE.Mesh(hullGeom, holoMat);
-    holoGroup.add(hullMesh);
-
-    const wingGeom = new THREE.BoxGeometry(25.0, 0.4, 9.0);
-    const wingMesh = new THREE.Mesh(wingGeom, holoMat);
-    wingMesh.position.set(0, 0, 4.0);
-    holoGroup.add(wingMesh);
-
     holoGroup.visible = false;
     this.scene.add(holoGroup);
     this.blinkHologram = holoGroup;
@@ -319,6 +308,16 @@ export class GameEngine {
     }
     if (this.playerShip && typeof this.playerShip.setFlightConfig === 'function') {
       this.playerShip.setFlightConfig(this.config);
+    }
+    if (this.config.blinkTranslucency !== undefined) {
+      const bt = Math.min(95, Math.max(10, Math.round(Number(this.config.blinkTranslucency)) || 80));
+      this.config.blinkTranslucency = bt;
+      if (this.blinkHologram && this.blinkHologram.userData && typeof this.blinkHologram.userData.setTranslucency === 'function') {
+        this.blinkHologram.userData.setTranslucency(bt);
+      }
+      if (this.weaponsSystem && typeof this.weaponsSystem.setTranslucency === 'function') {
+        this.weaponsSystem.setTranslucency(bt);
+      }
     }
     if (this.config.showStats === undefined) {
       this.config.showStats = true;
@@ -575,7 +574,7 @@ export class GameEngine {
       canvas.classList.add('blink-blur');
       setTimeout(() => {
         if (canvas) canvas.classList.remove('blink-blur');
-      }, 150);
+      }, 750);
     }
     const hud = document.querySelector('.game-hud-overlay');
     if (hud) {
@@ -584,7 +583,7 @@ export class GameEngine {
       hud.classList.add('blink-blur');
       setTimeout(() => {
         if (hud) hud.classList.remove('blink-blur');
-      }, 150);
+      }, 750);
     }
   }
 
@@ -1021,13 +1020,18 @@ export class GameEngine {
         this.blinkVfx.update(dt);
       }
 
-      // Update predictive blink landing hologram (visible strictly to local player)
+      // Update predictive blink landing hologram with vibrating focus during warp charging
       if (this.blinkHologram) {
         if (this.playerShip && this.playerShip.isWarpCharging && !this.playerShip.isDead) {
           const landing = this.playerShip.getBlinkLandingPosition(this.spaceEnv);
-          this.blinkHologram.position.copy(landing.targetPosition);
-          // Ship keeps the same viewpoint orientation
-          this.blinkHologram.quaternion.copy(this.playerShip.quaternion);
+          const chargeRatio = this.playerShip.maxWarpCharge > 0 ? (this.playerShip.warpChargeTime / this.playerShip.maxWarpCharge) : 0;
+          const nowSec = performance.now() / 1000;
+          if (this.blinkHologram.userData && typeof this.blinkHologram.userData.updateVibration === 'function') {
+            this.blinkHologram.userData.updateVibration(landing.targetPosition, this.playerShip.quaternion, chargeRatio, nowSec);
+          } else {
+            this.blinkHologram.position.copy(landing.targetPosition);
+            this.blinkHologram.quaternion.copy(this.playerShip.quaternion);
+          }
           this.blinkHologram.visible = true;
         } else {
           this.blinkHologram.visible = false;

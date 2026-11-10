@@ -819,4 +819,111 @@ describe('Player Flight Physics & Momentum', () => {
       expect(ship.velocity.z).toBe(100.0);
     });
   });
+
+  describe('Ship-Replica Visuals, Vibrating Focus & 5x Animation Timing', () => {
+    it('should construct high-fidelity 12-component starfighter replica at 5x scale with translucency controls', async () => {
+      const { createShipReplicaGroup, createStarfighterReplica } = await import('../../src/game/shipModel.js');
+      expect(typeof createShipReplicaGroup).toBe('function');
+      expect(typeof createStarfighterReplica).toBe('function');
+
+      const replica = createShipReplicaGroup({ translucency: 80, scale: 5.0, mode: 'blink' });
+      expect(replica).toBeInstanceOf(THREE.Group);
+      expect(replica.scale.x).toBe(5.0);
+      expect(replica.scale.y).toBe(5.0);
+      expect(replica.scale.z).toBe(5.0);
+
+      // Verify child meshes >= 10 covering 12 components
+      expect(replica.children.length).toBeGreaterThanOrEqual(10);
+
+      // Verify userData translucency & baseOpacity
+      expect(replica.userData.translucency).toBe(80);
+      expect(replica.userData.baseOpacity).toBeCloseTo(0.20, 2);
+      expect(Array.isArray(replica.userData.materials)).toBe(true);
+      expect(replica.userData.materials.length).toBeGreaterThan(0);
+
+      // Verify dynamic translucency update
+      replica.userData.setTranslucency(85);
+      expect(replica.userData.translucency).toBe(85);
+      expect(replica.userData.baseOpacity).toBeCloseTo(0.15, 2);
+      for (const mat of replica.userData.materials) {
+        expect(mat.opacity).toBeCloseTo(0.15, 2);
+      }
+    });
+
+    it('should execute real-time vibrating focus during warp charging and reset when inactive', async () => {
+      const { createShipReplicaGroup } = await import('../../src/game/shipModel.js');
+      const replica = createShipReplicaGroup({ translucency: 80, scale: 5.0, mode: 'blink' });
+
+      const landingPos = new THREE.Vector3(100, 50, -300);
+      const playerQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
+
+      // Active warp charging: chargeRatio = 0.8
+      replica.userData.updateVibration(landingPos, playerQuat, 0.8, 1.25);
+
+      // Spatial jitter: position displaced from landingPos
+      const distFromLanding = replica.position.distanceTo(landingPos);
+      expect(distFromLanding).toBeGreaterThan(0.01);
+
+      // Scale oscillation: not exactly 5.0
+      expect(replica.scale.x).not.toBe(5.0);
+
+      // Dynamic shimmer: materials opacity within [0.02, 1.0]
+      for (const mat of replica.userData.materials) {
+        expect(mat.opacity).toBeGreaterThanOrEqual(0.02);
+        expect(mat.opacity).toBeLessThanOrEqual(1.0);
+      }
+
+      // Inactive: chargeRatio = 0
+      replica.userData.updateVibration(landingPos, playerQuat, 0.0, 2.0);
+      expect(replica.position.x).toBe(landingPos.x);
+      expect(replica.position.y).toBe(landingPos.y);
+      expect(replica.position.z).toBe(landingPos.z);
+      expect(replica.quaternion.x).toBe(playerQuat.x);
+      expect(replica.quaternion.y).toBe(playerQuat.y);
+      expect(replica.quaternion.z).toBe(playerQuat.z);
+      expect(replica.quaternion.w).toBe(playerQuat.w);
+      expect(replica.scale.x).toBe(5.0);
+      for (const mat of replica.userData.materials) {
+        expect(mat.opacity).toBeCloseTo(0.20, 2);
+      }
+    });
+
+    it('should configure 750ms post-blink blur duration in triggerBlinkBlur', async () => {
+      const { GameEngine } = await import('../../src/game/engine.js');
+      const container = document.createElement('div');
+      container.id = 'game-canvas-container';
+      document.body.appendChild(container);
+
+      const canvas = document.createElement('canvas');
+      canvas.id = 'game-canvas';
+      container.appendChild(canvas);
+
+      const hud = document.createElement('div');
+      hud.className = 'game-hud-overlay';
+      container.appendChild(hud);
+
+      vi.useFakeTimers();
+
+      const engine = {
+        triggerBlinkBlur: GameEngine.prototype.triggerBlinkBlur
+      };
+
+      engine.triggerBlinkBlur();
+      expect(canvas.classList.contains('blink-blur')).toBe(true);
+      expect(hud.classList.contains('blink-blur')).toBe(true);
+
+      // At 200ms, blur must still be active (longer than legacy 150ms)
+      vi.advanceTimersByTime(200);
+      expect(canvas.classList.contains('blink-blur')).toBe(true);
+      expect(hud.classList.contains('blink-blur')).toBe(true);
+
+      // At 750ms, blur clears
+      vi.advanceTimersByTime(550);
+      expect(canvas.classList.contains('blink-blur')).toBe(false);
+      expect(hud.classList.contains('blink-blur')).toBe(false);
+
+      vi.useRealTimers();
+      container.remove();
+    });
+  });
 });
