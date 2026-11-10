@@ -1578,7 +1578,7 @@ export class SpaceEnvironment {
    * Samples center, nose, tail, left/right wings, and belly using orientation quaternion (or velocity direction).
    * Ensures zero visual clipping with robust outward margin while maintaining insideCarving tunnel/cavern clearance.
    */
-  resolveShipCollision(position, velocity, shipRadius = 2.8, shipMass = 1200, orientation = null, dt = 0.016) {
+  resolveShipCollision(position, velocity, shipRadius = 14.0, shipMass = 1200, orientation = null, dt = 0.016) {
     this.lastCollisionLogTime = this.lastCollisionLogTime || 0;
     this.lastClipWarnTime = this.lastClipWarnTime || 0;
     const now = Date.now();

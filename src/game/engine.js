@@ -243,7 +243,7 @@ export class GameEngine {
     // Blink VFX (dynamic particle sphere with trails decaying after 1 second)
     this.blinkVfx = new BlinkVFXSystem(this.scene);
 
-    // Predictive Blink Landing Hologram Outline (visible strictly to local player)
+    // Predictive Blink Landing Hologram Outline (visible strictly to local player) - scaled 5x (radius 14.0, length 28.0)
     const holoGroup = new THREE.Group();
     const holoMat = new THREE.MeshBasicMaterial({
       color: 0x00ffff,
@@ -252,14 +252,14 @@ export class GameEngine {
       opacity: 0.75,
       blending: THREE.AdditiveBlending
     });
-    const hullGeom = new THREE.ConeGeometry(1.2, 4.0, 5);
+    const hullGeom = new THREE.ConeGeometry(6.0, 20.0, 5);
     hullGeom.rotateX(-Math.PI / 2);
     const hullMesh = new THREE.Mesh(hullGeom, holoMat);
     holoGroup.add(hullMesh);
 
-    const wingGeom = new THREE.BoxGeometry(5.0, 0.08, 1.8);
+    const wingGeom = new THREE.BoxGeometry(25.0, 0.4, 9.0);
     const wingMesh = new THREE.Mesh(wingGeom, holoMat);
-    wingMesh.position.set(0, 0, 0.8);
+    wingMesh.position.set(0, 0, 4.0);
     holoGroup.add(wingMesh);
 
     holoGroup.visible = false;
@@ -839,10 +839,10 @@ export class GameEngine {
         }
       }
 
-      // 4b. Ship-to-Ship Elastic Bumper Collision Bounce
+      // 4b. Ship-to-Ship Elastic Bumper Collision Bounce (shipRadius = 14.0)
       if (!this.playerShip.isDead) {
-        const shipRadius = 2.8;
-        const minShipDist = shipRadius * 2.0; // 5.6u
+        const shipRadius = 14.0;
+        const minShipDist = shipRadius * 2.0; // 28.0u
         for (const remote of this.remoteShips.values()) {
           if (!remote || remote.isDead) continue;
           const p1 = this.playerShip.position;

@@ -76,9 +76,9 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.isWarpCharging).toBe(false);
     expect(ship.warpChargeTime).toBe(0);
     expect(ship.getSpeed()).toBe(0);
-    expect(ship.length).toBe(5.6);
-    expect(ship.minBlinkDistance).toBe(5.6);
-    expect(ship.maxBlinkDistance).toBe(56.0);
+    expect(ship.length).toBe(28.0);
+    expect(ship.minBlinkDistance).toBe(28.0);
+    expect(ship.maxBlinkDistance).toBe(280.0);
 
     // First tap at t = 1000ms
     const tap1 = ship.triggerThrustPress(1000);
@@ -103,11 +103,11 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.isWarpCharging).toBe(true);
     expect(ship.warpChargeTime).toBe(1.0);
 
-    // Predictive hologram simulation returns landing position (10x ship length = 56.0u)
+    // Predictive hologram simulation returns landing position (10x ship length = 280.0u)
     const landing = ship.getBlinkLandingPosition();
-    expect(landing.distance).toBe(56.0);
+    expect(landing.distance).toBe(280.0);
     expect(landing.chargeRatio).toBe(1.0);
-    expect(landing.targetPosition.z).toBeCloseTo(ship.position.z - 56.0, 1);
+    expect(landing.targetPosition.z).toBeCloseTo(ship.position.z - 280.0, 1);
 
     // Button released: execute blink!
     const initialZ = ship.position.z;
@@ -169,7 +169,7 @@ describe('Player Flight Physics & Momentum', () => {
     const pred = ship.getBlinkLandingPosition();
     expect(pred.direction.x).toBeCloseTo(1.0, 2);
     expect(pred.direction.z).toBeCloseTo(0.0, 2);
-    expect(pred.distance).toBe(56.0);
+    expect(pred.distance).toBe(280.0);
 
     // Release blink
     const posBeforeBlink = ship.position.clone();
@@ -181,7 +181,7 @@ describe('Player Flight Physics & Momentum', () => {
     expect(result.direction.x).toBeCloseTo(1.0, 2);
 
     // Position shifted along +X (momentum direction), NOT -Z (viewpoint orientation)
-    expect(ship.position.x).toBeCloseTo(posBeforeBlink.x + 56.0, 1);
+    expect(ship.position.x).toBeCloseTo(posBeforeBlink.x + 280.0, 1);
     expect(ship.position.z).toBeCloseTo(posBeforeBlink.z, 1);
 
     // Speed is preserved

@@ -734,7 +734,7 @@ export class WeaponsSystem {
       // Derive laser carving dimensions dynamically from ship radius so carving volume
       // is just a little bit bigger than ship size regardless of asteroid size (~3.5u for r=2.8,
       // scaling automatically for future larger ships), replacing legacy hardcoded 60u/84u values.
-      const shipRadius = (ship && typeof ship.radius === 'number') ? ship.radius : 2.8;
+      const shipRadius = (ship && typeof ship.radius === 'number') ? ship.radius : 14.0;
       const carveRadius = (ship && typeof ship.getLaserCarveRadius === 'function')
         ? ship.getLaserCarveRadius(isFireLaser)
         : (shipRadius * (isFireLaser ? 1.4 : 1.25));

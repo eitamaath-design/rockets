@@ -11,7 +11,7 @@ export class PlayerShip {
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.quaternion = new THREE.Quaternion();
     this.desiredQuaternion = new THREE.Quaternion();
-    this.radius = 2.8; // Standard fighter collision/bounding radius
+    this.radius = 14.0; // Standard fighter collision/bounding radius (5x scaled from 2.8)
     // Upgradeable ship capability ceiling (rotational rate limit in rad/s)
     this.capabilities = {
       maxTurnRate: 0.75
@@ -25,15 +25,15 @@ export class PlayerShip {
     this.maxStrafeSpeed = 35.0;
 
     // Momentum-Directed Charged Blink (charge up to 1.0s, hold until released, 1x to 10x ship length forward displacement)
-    this.length = 5.6; // Standard starfighter hull length (2 * radius 2.8)
-    this.minBlinkDistance = this.length; // 1x ship length (5.6u) forward displacement at 0s charge
-    this.maxBlinkDistance = this.length * 10.0; // 10x ship length (56.0u) forward displacement at 1.0s max charge
+    this.length = 28.0; // Standard starfighter hull length (2 * radius 14.0, 5x scaled from 5.6)
+    this.minBlinkDistance = this.length; // 1x ship length (28.0u) forward displacement at 0s charge
+    this.maxBlinkDistance = this.length * 10.0; // 10x ship length (280.0u) forward displacement at 1.0s max charge
     this.warpCooldown = 2.0; // seconds
     this.warpCooldownTimer = 0.0;
     this.isWarpCharging = false;
     this.warpChargeTime = 0.0;
     this.maxWarpCharge = 1.0; // seconds max charge (reduced from 3.0s)
-    this.maxWarpDistance = this.maxBlinkDistance; // 56.0 units for backward compatibility
+    this.maxWarpDistance = this.maxBlinkDistance; // 280.0 units for backward compatibility
     this.lastThrustTapTime = 0.0;
 
     // Rotation speeds (radians per second)

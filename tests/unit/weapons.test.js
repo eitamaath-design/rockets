@@ -264,9 +264,9 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       weapons.triggerPrimary(true, ship, 1000);
       expect(damaged).toBe(true);
       expect(dmgAmount).toBe(0.4);
-      // Laser carving volume scaled with ship radius and 10x reduction
-      expect(cRadius).toBeCloseTo(1.6, 1);
-      expect(cDepth).toBeCloseTo(1.4, 1);
+      // Laser carving volume scaled with ship radius (14.0) and 10x reduction
+      expect(cRadius).toBeCloseTo(8.12, 1);
+      expect(cDepth).toBeCloseTo(7.16, 1);
     });
 
     it('should require 50 laser shots (0.4 damage each) to destroy a 20 HP small asteroid', () => {

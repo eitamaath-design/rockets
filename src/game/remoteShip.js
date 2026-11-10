@@ -40,6 +40,9 @@ export class RemoteShip {
     this.createShipMesh();
     this.createNameplate();
     this.scene.add(this.group);
+
+    // Scale the entire remote ship group 5x (matching PlayerShip 5x scaling: radius 14.0, length 28.0)
+    this.group.scale.set(5.0, 5.0, 5.0);
   }
 
   createShipMesh() {
