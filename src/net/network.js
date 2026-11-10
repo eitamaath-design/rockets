@@ -1,6 +1,7 @@
 import { joinRoom, selfId } from '@trystero-p2p/nostr';
 import { lobbyService, APP_ID, RELIABLE_NOSTR_RELAYS } from './lobby.js';
 import { createActionChannel } from './actions.js';
+import { logger } from '../utils/logger.js';
 
 export class GameNetwork {
   constructor({ roomId, roomName, mapSeed, config, playerName, onPeerJoined, onPeerLeft, onMasterChanged, onCombatLog }) {
@@ -237,7 +238,7 @@ export class GameNetwork {
     // Peer Join / Leave callbacks (supports both modern setter and legacy function APIs)
     const handlePeerJoin = (peerId) => {
       if (!peerId || typeof peerId !== 'string') return;
-      console.log(`[Mesh] Peer connected: ${peerId}`);
+      logger.log('MESH', `Peer connected: ${peerId}`);
       this.peers.set(peerId, { id: peerId, ping: 40, lastSeen: Date.now() });
       this.updateMasterElection();
       if (this.isMaster && this.sendConfig) {
@@ -252,7 +253,7 @@ export class GameNetwork {
 
     const handlePeerLeave = (peerId) => {
       if (!peerId || typeof peerId !== 'string') return;
-      console.log(`[Mesh] Peer disconnected: ${peerId}`);
+      logger.log('MESH', `Peer disconnected: ${peerId}`);
       this.peers.delete(peerId);
       this.updateMasterElection();
       this.onPeerLeft(peerId);
@@ -311,7 +312,7 @@ export class GameNetwork {
       this.currentMasterId = electedMasterId;
       this.isMaster = amIMaster;
 
-      console.log(`[Mesh] Master Election: elected ${electedMasterId} (Self is master: ${amIMaster})`);
+      logger.log('MESH', `Master Election: elected ${electedMasterId} (Self is master: ${amIMaster})`);
 
       if (amIMaster) {
         // Start publishing keep-alive TTL heartbeats to public lobby

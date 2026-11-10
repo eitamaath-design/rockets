@@ -12,6 +12,7 @@ export class GameHUD {
     this.monitorThrottleMs = 100; // 10Hz throttle (100ms)
     this.isMonitorMinimized = false;
     this._windowListeners = [];
+    this._documentListeners = [];
     this._lastValues = {};
 
     this.createDom();
@@ -52,6 +53,9 @@ export class GameHUD {
         <span>🔄 Rotate phone to landscape for flight stick controls</span>
         <button class="hud-btn-mini-fullscreen" id="btn-rotate-fullscreen">⛶ Fullscreen</button>
       </div>
+
+      <!-- Floating Fullscreen Exit Button for Android & Mobile Touch Ergonomics -->
+      <button class="hud-float-exit-fullscreen" id="hud-float-exit-fullscreen" style="display: none;" title="Exit Fullscreen">✕ Exit Fullscreen</button>
 
       <!-- Top Status Bar with Integrated Compact Gauges -->
       <div class="hud-top-bar">
@@ -522,6 +526,14 @@ export class GameHUD {
     }
   }
 
+  _addDocumentListener(type, handler, options) {
+    if (typeof document !== 'undefined') {
+      document.addEventListener(type, handler, options);
+      if (!this._documentListeners) this._documentListeners = [];
+      this._documentListeners.push({ type, handler, options });
+    }
+  }
+
   bindTouchControls() {
     const shipInput = this.engine.playerShip.input;
 
@@ -728,8 +740,22 @@ export class GameHUD {
   bindFullscreen() {
     const fsBtn = document.getElementById('hud-btn-fullscreen');
     const rotateFsBtn = document.getElementById('btn-rotate-fullscreen');
+    const floatExitBtn = document.getElementById('hud-float-exit-fullscreen');
 
-    const toggleFs = () => {
+    const exitFs = (e) => {
+      if (e) {
+        if (typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof e.preventDefault === 'function') e.preventDefault();
+      }
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    };
+
+    const toggleFs = (e) => {
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
       if (!document.fullscreenElement && !document.webkitFullscreenElement) {
         const root = document.documentElement;
         if (root.requestFullscreen) {
@@ -741,25 +767,28 @@ export class GameHUD {
           if (screen.orientation && screen.orientation.lock) {
             screen.orientation.lock('landscape').catch(() => {});
           }
-        } catch (e) {}
+        } catch (err) {}
       } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen().catch(() => {});
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen();
-        }
+        exitFs(e);
       }
     };
 
     if (fsBtn) fsBtn.addEventListener('click', toggleFs);
     if (rotateFsBtn) rotateFsBtn.addEventListener('click', toggleFs);
+    if (floatExitBtn) {
+      floatExitBtn.addEventListener('click', exitFs);
+      floatExitBtn.addEventListener('touchstart', exitFs, { passive: false });
+    }
 
-    const updateFsBtnText = () => {
+    const updateFsState = () => {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
       if (fsBtn) fsBtn.textContent = isFs ? '⛶ Exit' : '⛶ Fullscreen';
+      if (floatExitBtn) {
+        floatExitBtn.style.display = isFs ? 'flex' : 'none';
+      }
     };
-    document.addEventListener('fullscreenchange', updateFsBtnText);
-    document.addEventListener('webkitfullscreenchange', updateFsBtnText);
+    this._addDocumentListener('fullscreenchange', updateFsState);
+    this._addDocumentListener('webkitfullscreenchange', updateFsState);
   }
 
   bindMapResetVoting() {
@@ -1647,6 +1676,12 @@ export class GameHUD {
         window.removeEventListener(type, handler, options);
       }
       this._windowListeners = [];
+    }
+    if (this._documentListeners && typeof document !== 'undefined') {
+      for (const { type, handler, options } of this._documentListeners) {
+        document.removeEventListener(type, handler, options);
+      }
+      this._documentListeners = [];
     }
     if (this.hudElement && this.hudElement.parentNode) {
       this.hudElement.parentNode.removeChild(this.hudElement);

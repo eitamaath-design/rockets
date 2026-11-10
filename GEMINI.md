@@ -10,7 +10,7 @@ In this project (`rockets`), the project-level deployment policy is strictly con
 2. **Mandatory Step E Runbook per Task:**
    - **Unit Tests:** Ensure all unit tests pass cleanly: `npm run test:unit`.
    - **Proof of Work:** Confirm `git diff --stat` contains physical code changes on disk (never accept natural language assertions of completion without disk diffs).
-   - **PWA Cache Invalidation:** If frontend assets/logic changed, increment `CACHE_NAME` in `public/sw.js` (e.g. `v13` -> `v14`) to prevent browser cache lockup.
+   - **PWA Cache Invalidation:** Automated at build time via Vite plugin in `vite.config.js` (replaces `__BUILD_ID__` with git SHA + timestamp in `dist/sw.js`), preventing browser cache lockup without manual version bumping.
    - **Compile Assets:** `npm run build`
    - **Deploy to GitHub Pages:** `npm run deploy` (publishes `dist/` to `gh-pages` branch)
    - **Commit & Push to Remote:**

@@ -545,7 +545,7 @@ export class GameEngine {
   isInteractiveTarget(target) {
     return Boolean(
       target && typeof target.closest === 'function' &&
-      target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .touch-joystick-container, .hud-master-monitor, .action-touch-btn, .touch-btn')
+      target.closest('.hud-top-bar, .hud-diag-modal, .hud-vote-banner, .touch-joystick-container, .hud-master-monitor, .action-touch-btn, .touch-btn, #hud-float-exit-fullscreen, .hud-float-exit-fullscreen, .hud-btn-fullscreen')
     );
   }
 

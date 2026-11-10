@@ -659,6 +659,45 @@ html, body {
   cursor: pointer;
 }
 
+/* Floating Cyberpunk Fullscreen Exit Button */
+.hud-float-exit-fullscreen {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  min-height: 44px;
+  min-width: 140px;
+  padding: 8px 18px;
+  background: rgba(10, 16, 26, 0.88);
+  border: 1px solid var(--hud-cyan, #00d4ff);
+  border-radius: 22px;
+  color: #00f0ff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.35);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.hud-float-exit-fullscreen:hover,
+.hud-float-exit-fullscreen:active {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: #38bdf8;
+  box-shadow: 0 0 22px rgba(0, 212, 255, 0.6);
+  transform: translateX(-50%) scale(1.02);
+}
+
 .hud-btn-leave {
   background: rgba(239, 68, 68, 0.2);
   border: 1px solid var(--hud-red);
