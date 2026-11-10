@@ -129,6 +129,35 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       expect(weapons.missiles[0].targetId).toBeNull();
     });
 
+    it('should launch missile from under the ship (ventral pylon) along local down vector to prevent trail FOV occlusion', () => {
+      // 1. Upright ship
+      ship.position.set(100, 200, 300);
+      ship.quaternion.set(0, 0, 0, 1);
+      weapons.triggerSecondary(true, ship, 2000);
+
+      const m1 = weapons.missiles[weapons.missiles.length - 1];
+      // Expected: forward is (0, 0, -1), down is (0, -1, 0)
+      // origin = (100, 200, 300) + 2.5 * (0, 0, -1) + 3.0 * (0, -1, 0) = (100, 197, 297.5)
+      expect(m1.group.position.x).toBeCloseTo(100, 4);
+      expect(m1.group.position.y).toBeCloseTo(197, 4);
+      expect(m1.group.position.z).toBeCloseTo(297.5, 4);
+
+      // 2. Rotated ship (e.g. pitched 90 deg down, pointing at -Y)
+      ship.position.set(50, 50, 50);
+      ship.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+      weapons.triggerSecondary(true, ship, 3000);
+
+      const m2 = weapons.missiles[weapons.missiles.length - 1];
+      const relPos = m2.group.position.clone().sub(ship.position);
+      const fwd = ship.getForwardVector();
+      const down = ship.getDownVector();
+
+      expect(relPos.dot(fwd)).toBeCloseTo(2.5, 4);
+      expect(relPos.dot(down)).toBeCloseTo(3.0, 4);
+      // Verify orthogonal to right vector
+      expect(relPos.dot(ship.getRightVector())).toBeCloseTo(0, 4);
+    });
+
     it('should hit remote opponent with unguided dumb-fire missile proximity detonation', () => {
       let hitTargetCalled = false;
       let hitPeer = null;

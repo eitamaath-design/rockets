@@ -673,6 +673,10 @@ export class PlayerShip {
     return new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion).normalize();
   }
 
+  getDownVector() {
+    return new THREE.Vector3(0, -1, 0).applyQuaternion(this.quaternion).normalize();
+  }
+
   getSpeed() {
     return this.velocity.length();
   }

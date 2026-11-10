@@ -909,9 +909,15 @@ export class WeaponsSystem {
     }
 
     const fwd = ship.getForwardVector();
+    const down = (typeof ship.getDownVector === 'function')
+      ? ship.getDownVector()
+      : new THREE.Vector3(0, -1, 0).applyQuaternion(ship.quaternion).normalize();
+    // Launch from ventral underbelly missile pylon beneath the fuselage,
+    // displaced downward along local down axis (3.0u) and forward (2.5u)
+    // so the smoke/fire contrail dissipates below the cockpit FOV.
     const origin = ship.position.clone()
-      .addScaledVector(fwd, 3.5)
-      .add(new THREE.Vector3(0, -0.4, 0));
+      .addScaledVector(fwd, 2.5)
+      .addScaledVector(down, 3.0);
 
     const shipVel = (ship && ship.velocity) ? ship.velocity.clone() : new THREE.Vector3(0, 0, 0);
     const missileId = `missile-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
