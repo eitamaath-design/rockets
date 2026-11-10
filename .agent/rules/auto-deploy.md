@@ -1,15 +1,19 @@
 # Rule: Automatic End-of-Task Production Deployment
 
-Whenever modifying, fixing, or enhancing any aspect of the **Rockets** codebase:
-- **Mandatory Deployment**: Once code changes and verification tests pass, changes **MUST** be deployed automatically at the end of the turn.
-- **Commands**:
-  1. `npm run test:unit`
-  2. `npm run build` (automated Vite plugin replaces `__BUILD_ID__` in `dist/sw.js` with git SHA + timestamp)
-  3. `npm run deploy` (deploys compiled `dist/` directly to GitHub Pages via `gh-pages`)
-  4. Stage, commit, and push source changes to `main`:
-     ```bash
-     git add -A
-     git commit -m "<concise descriptive summary>"
-     git push origin main
-     ```
-- Never leave completed changes unbuilt or undeployed. Always update the user with the live site link: `https://eitamaath-design.github.io/rockets/`.
+Project-level deployment policy: **`Auto-Deploy Per Task: true`**.
+Every completed task MUST automatically test, build, deploy, and push to remote before concluding.
+
+Full runbook details and architecture are documented in:
+👉 [KNOWLEDGE_BASE.md §4: Operations & Maintenance Runbook](file:///d:/Projects/Rockets/KNOWLEDGE_BASE.md#4-operations--maintenance-runbook)
+
+### Essential Step E Command Sequence
+1. `npm run test:unit`
+2. `git diff --stat`
+3. `npm run deploy` (test-gated via predeploy, compiling assets with automated SW cache ID injection)
+4. Stage, commit, and push changes to `main`:
+   ```bash
+   git add .
+   git commit -m "<concise descriptive summary>"
+   git push origin main
+   ```
+5. Confirm live production site: `https://eitamaath-design.github.io/rockets/`.

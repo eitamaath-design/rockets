@@ -129,7 +129,7 @@ This document serves as the permanent master reference for the **Rockets** multi
 ## 4. Operations & Maintenance Runbook
 
 ### Prerequisites & Setup
-1. Node.js (>= 18.0.0)
+1. Node.js (>= 20.0.0, specified via `.nvmrc` and `engines`)
 2. npm (>= 9.0.0)
 3. Git & GitHub CLI (`gh`) authenticated with repository write access
 
@@ -137,6 +137,10 @@ This document serves as the permanent master reference for the **Rockets** multi
 - **Development Server:**
   ```bash
   npm run dev
+  ```
+- **Code Linting (ESLint):**
+  ```bash
+  npm run lint
   ```
 - **Run Unit & Integration Tests (Vitest):**
   ```bash
@@ -166,17 +170,17 @@ This document serves as the permanent master reference for the **Rockets** multi
 
 ### Mandatory Automatic Per-Task Deployment Runbook
 Every individual task lead in the **Rockets** workspace must execute this release sequence at the conclusion of Step E before concluding the task:
-1. Run unit test suite: `npm run test:unit`.
-2. Verify proof of work via `git diff --stat` (ensure physical disk changes exist).
-3. Cache invalidation is automated at build time via Vite plugin (replaces `__BUILD_ID__` in `dist/sw.js`).
-4. Publish to GitHub Pages: `npm run deploy` (test-gated via `predeploy`, running unit tests and compiling production bundle).
-5. Commit and push:
+1. **Unit Tests:** Ensure all unit tests pass cleanly: `npm run test:unit`.
+2. **Proof of Work:** Verify `git diff --stat` contains physical code changes on disk (never accept natural language assertions of completion without disk diffs).
+3. **Automated SW Cache & Build:** Cache invalidation is automated at build time via Vite plugin (replaces `__BUILD_ID__` in `dist/sw.js` during `npm run build`, generating hidden sourcemaps).
+4. **Deploy to Production:** Publish to GitHub Pages via `npm run deploy` (automatically triggers `predeploy`, which runs `npm run test:unit && npm run build` and publishes `dist/` to the `gh-pages` branch).
+5. **Commit & Push to Remote:**
    ```bash
    git add .
    git commit -m "<concise descriptive summary of completed task>"
    git push origin main
    ```
-6. Confirm live URL and report status to the parent orchestrator.
+6. **Confirm Live URL:** Confirm live URL (`https://eitamaath-design.github.io/rockets/`) and report deployment exit code, commit SHA, and test status to the parent orchestrator.
 
 ---
 
@@ -220,6 +224,10 @@ Every individual task lead in the **Rockets** workspace must execute this releas
 | `GEMINI.md` | Project-level Antigravity directives enforcing automatic end-of-task build, test, and production deployment. |
 | `.agent/rules/auto-deploy.md` | Workspace rule file enforcing automatic deployment to GitHub Pages. |
 | `KNOWLEDGE_BASE.md` | Master project knowledge base. |
+| `package.json` | Project manifest, dependencies (`three`, `@trystero-p2p/nostr`), devDependencies (`eslint`, `vitest`, `vite`, `playwright`), and npm scripts. |
+| `vite.config.js` | Vite configuration with `swBuildPlugin` and hidden sourcemaps (`sourcemap: 'hidden'`). |
+| `eslint.config.js` | Flat ESLint configuration with `@eslint/js` recommended, browser/Node globals, Vitest test globals, ignoring `dist/`, `node_modules/`, `test-results/`. |
+| `.nvmrc` | Node.js runtime version pinned to v20. |
 
 ---
 
