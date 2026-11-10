@@ -175,6 +175,9 @@ export class GameHUD {
         <div class="crosshair-dot"></div>
       </div>
 
+      <!-- Line-of-Sight Corner Bracket Targeting System -->
+      <div class="hud-targeting-container" id="hud-targeting-container"></div>
+
       <!-- Dynamic Ship Bore-Sight Reticle (Actual Hull Orientation vs Pilot POV) -->
       <div class="hud-ship-boresight tracking" id="hud-ship-boresight">
         <div class="boresight-reticle">
@@ -1473,9 +1476,91 @@ export class GameHUD {
       speedBadge.className = 'metric-badge ' + (speed <= 100 ? 'nominal' : 'warning');
     }
 
-    // 9. Update 2D Tactical Radar (Refreshes every 3 seconds)
+    // 9. Update Targeting System
     const dt = state.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
+    this.updateTargetingSystem();
+
+    // 10. Update 2D Tactical Radar (Refreshes every 3 seconds)
     this.updateRadar(dt);
+  }
+
+  updateTargetingSystem() {
+    const container = document.getElementById('hud-targeting-container');
+    if (!container || !this.engine) return;
+
+    const playerShip = this.engine.playerShip;
+    const remoteShips = this.engine.remoteShips;
+    const camera = this.engine.camera;
+    const spaceEnv = this.engine.spaceEnv;
+
+    if (!playerShip || !camera || !remoteShips) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const vpWidth = window.innerWidth || (document.documentElement ? document.documentElement.clientWidth : 800);
+    const vpHeight = window.innerHeight || (document.documentElement ? document.documentElement.clientHeight : 600);
+
+    let html = '';
+
+    for (const [peerId, remote] of remoteShips.entries()) {
+      if (!remote || remote.isDead || remote.isInvisible) continue;
+
+      // Project remote ship position to NDC screen coordinates
+      const pos = remote.position.clone();
+      const screenPos = pos.clone().project(camera);
+
+      // Check if behind camera or outside screen margins
+      if (screenPos.z >= 1.0 || Math.abs(screenPos.x) > 1.2 || Math.abs(screenPos.y) > 1.2) {
+        continue;
+      }
+
+      // Check Line of Sight against obstacles / asteroids
+      let isBlocked = false;
+      if (spaceEnv && typeof spaceEnv.checkRayBlocked === 'function') {
+        isBlocked = spaceEnv.checkRayBlocked(playerShip.position, remote.position);
+      }
+      if (isBlocked) {
+        continue;
+      }
+
+      // Convert NDC (-1 to +1) to pixel screen coordinates
+      const screenX = (screenPos.x * 0.5 + 0.5) * vpWidth;
+      const screenY = (-(screenPos.y * 0.5) + 0.5) * vpHeight;
+
+      // Distance-scaled bracket dimensions (e.g. 38px to 100px based on distance)
+      const dist = Math.max(1.0, playerShip.position.distanceTo(remote.position));
+      const boxSize = Math.max(38, Math.min(100, Math.round(1400 / dist)));
+
+      const shieldVal = remote.shield !== undefined ? remote.shield : 100;
+      const maxShieldVal = remote.maxShield !== undefined ? remote.maxShield : 100;
+      const shieldPct = Math.max(0, Math.min(100, (shieldVal / maxShieldVal) * 100));
+
+      const hpVal = remote.hp !== undefined ? remote.hp : 100;
+      const maxHpVal = remote.maxHp !== undefined ? remote.maxHp : 100;
+      const hpPct = Math.max(0, Math.min(100, (hpVal / maxHpVal) * 100));
+
+      const pilotName = remote.playerName || 'Pilot';
+
+      const leftPx = Math.round(screenX - boxSize / 2);
+      const topPx = Math.round(screenY - boxSize / 2);
+
+      html += `
+        <div class="hud-target-box" id="hud-target-${peerId}" style="left: ${leftPx}px; top: ${topPx}px; width: ${boxSize}px; height: ${boxSize}px;">
+          <div class="target-bars-wrapper">
+            <div class="target-bar target-bar-shield"><div class="target-shield-fill" style="width: ${shieldPct.toFixed(1)}%;"></div></div>
+            <div class="target-bar target-bar-hp"><div class="target-hp-fill" style="width: ${hpPct.toFixed(1)}%;"></div></div>
+          </div>
+          <div class="target-bracket tl"></div>
+          <div class="target-bracket tr"></div>
+          <div class="target-bracket bl"></div>
+          <div class="target-bracket br"></div>
+          <div class="target-pilot-name">${pilotName}</div>
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
   }
 
   updateRadar(dt = 0.016) {

@@ -21,6 +21,8 @@ export class RemoteShip {
     // Stats
     this.hp = 100;
     this.maxHp = 100;
+    this.shield = 100;
+    this.maxShield = 100;
     this.isDead = false;
     this.isThrusting = false;
     this.strafeState = 0; // -1, 0, 1
@@ -293,6 +295,13 @@ export class RemoteShip {
     if (state.hp !== undefined && state.hp !== this.hp) {
       this.hp = state.hp;
       this.updateNameplateTexture();
+    }
+
+    if (state.shield !== undefined) {
+      this.shield = state.shield;
+    }
+    if (state.maxShield !== undefined) {
+      this.maxShield = state.maxShield;
     }
 
     this.isDead = !!state.isDead;
