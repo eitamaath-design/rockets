@@ -118,6 +118,69 @@ describe('Weapons System: Laser Beam & Homing Missile with 3-Second Lock', () =>
       weapons.update(5.0, ship, new Map(), () => {});
       expect(weapons.laserEnergy).toBe(100.0);
     });
+
+    it('should maintain persistent steady continuous beam mesh across frames while held (no flashing, zero recreation)', () => {
+      expect(weapons.laserBeams.length).toBe(0);
+      weapons.triggerPrimary(true, ship, 1000);
+      expect(weapons.laserBeams.length).toBe(1);
+      const activeBeam = weapons.activeLaserBeam;
+      expect(activeBeam).toBeDefined();
+      const beamGroup = activeBeam.group;
+
+      // Next frame at 1016ms (within 0.16s tick interval) with ship moving
+      ship.position.set(10, 20, -50);
+      weapons.triggerPrimary(true, ship, 1016);
+
+      // Verify same mesh object is retained (zero recreation / no flashing)
+      expect(weapons.laserBeams.length).toBe(1);
+      expect(weapons.activeLaserBeam.group).toBe(beamGroup);
+
+      // Verify rock-solid steady opacity during continuous firing
+      weapons.update(0.016, ship, new Map(), () => {});
+      expect(activeBeam.coreMat.opacity).toBeCloseTo(0.98, 2);
+      expect(activeBeam.glowMat.opacity).toBeCloseTo(0.85, 2);
+
+      // Release fire button: beam should stop cleanly and be removed
+      weapons.triggerPrimary(false, ship, 1032);
+      expect(weapons.activeLaserBeam).toBeNull();
+      expect(weapons.laserBeams.length).toBe(0);
+    });
+
+    it('should maintain remote peer continuous beam persistence across packets without flickering', () => {
+      const data1 = {
+        leftOrigin: { x: -2, y: 0, z: 0 },
+        rightOrigin: { x: 2, y: 0, z: 0 },
+        hitPoint: { x: 0, y: 0, z: -100 },
+        dir: { x: 0, y: 0, z: -1 },
+        isFireLaser: false
+      };
+      weapons.spawnRemoteLaserBeam(data1, 'peer-1');
+      expect(weapons.laserBeams.length).toBe(1);
+      const remoteBeam = weapons.remoteLaserBeams.get('peer-1');
+      expect(remoteBeam).toBeDefined();
+
+      // Advance time by 80ms (typical network packet cadence)
+      weapons.update(0.08, ship, new Map(), () => {});
+      expect(weapons.laserBeams.length).toBe(1);
+      expect(remoteBeam.coreMat.opacity).toBeCloseTo(0.98, 2);
+
+      // Second packet arrives from same peer: must reuse existing beam rather than duplicating
+      const data2 = {
+        leftOrigin: { x: -2, y: 1, z: 0 },
+        rightOrigin: { x: 2, y: 1, z: 0 },
+        hitPoint: { x: 0, y: 1, z: -100 },
+        dir: { x: 0, y: 0, z: -1 },
+        isFireLaser: false
+      };
+      weapons.spawnRemoteLaserBeam(data2, 'peer-1');
+      expect(weapons.laserBeams.length).toBe(1);
+      expect(weapons.remoteLaserBeams.get('peer-1')).toBe(remoteBeam);
+
+      // When remote peer stops firing, advance past lifetime: beam expires and cleans up
+      weapons.update(0.35, ship, new Map(), () => {});
+      expect(weapons.laserBeams.length).toBe(0);
+      expect(weapons.remoteLaserBeams.has('peer-1')).toBe(false);
+    });
   });
 
   describe('Secondary Dual-Mode Missile: Guided with 3s Lock + Unguided Dumb-Fire', () => {

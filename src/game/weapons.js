@@ -9,6 +9,12 @@ const _color = new THREE.Color();
 const _camQuat = new THREE.Quaternion();
 const _hideMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 const _scratchVecA = new THREE.Vector3();
+const _beamLeftOrigin = new THREE.Vector3();
+const _beamRightOrigin = new THREE.Vector3();
+const _beamHitPoint = new THREE.Vector3();
+const _beamCenterOrigin = new THREE.Vector3();
+const _beamMid = new THREE.Vector3();
+const _beamUp = new THREE.Vector3();
 
 /**
  * Dynamic GPU InstancedMesh fire trail system for kinetic projectiles and missiles.
@@ -457,6 +463,8 @@ export class WeaponsSystem {
 
     // Active weapon entities
     this.laserBeams = []; // { group, life, maxLife, isLocal }
+    this.activeLaserBeam = null; // Currently sustained steady local laser beam
+    this.remoteLaserBeams = new Map(); // peerId -> remote sustained laser beam
     this.projectileLasers = []; // projectile lasers (compatibility)
     this.missiles = []; // { group, dir, guidance, targetId, isLocal, id, life }
     this.projectiles = []; // legacy / compatibility projectiles
@@ -650,90 +658,210 @@ export class WeaponsSystem {
     }
   }
 
+  createTwinLaserGroup(isLocal, isFireLaser = false) {
+    const group = new THREE.Group();
+    const templateCoreMat = isFireLaser ? this.fireLaserCoreMat : (isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
+    const templateGlowMat = isFireLaser ? (isLocal ? this.fireLaserGlowMat : this.remoteFireLaserGlowMat) : (isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
+    const coreMat = templateCoreMat.clone();
+    const glowMat = templateGlowMat.clone();
+
+    const leftCore = new THREE.Mesh(this.laserCoreGeom, coreMat);
+    const leftGlow = new THREE.Mesh(this.laserGlowGeom, glowMat);
+    const rightCore = new THREE.Mesh(this.laserCoreGeom, coreMat);
+    const rightGlow = new THREE.Mesh(this.laserGlowGeom, glowMat);
+
+    group.add(leftCore);
+    group.add(leftGlow);
+    group.add(rightCore);
+    group.add(rightGlow);
+
+    return {
+      group,
+      leftCore,
+      leftGlow,
+      rightCore,
+      rightGlow,
+      coreMat,
+      glowMat,
+      ownMaterials: true,
+      isLocal,
+      isFireLaser,
+      life: 0.28,
+      maxLife: 0.28,
+      isContinuous: true
+    };
+  }
+
+  updateTwinLaserTransforms(beamObj, leftOrigin, rightOrigin, hitPoint, isFireLaser = false) {
+    if (beamObj.isFireLaser !== isFireLaser) {
+      beamObj.isFireLaser = isFireLaser;
+      const templateCoreMat = isFireLaser ? this.fireLaserCoreMat : (beamObj.isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
+      const templateGlowMat = isFireLaser ? (beamObj.isLocal ? this.fireLaserGlowMat : this.remoteFireLaserGlowMat) : (beamObj.isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
+      beamObj.coreMat.color.copy(templateCoreMat.color);
+      beamObj.coreMat.opacity = templateCoreMat.opacity;
+      beamObj.glowMat.color.copy(templateGlowMat.color);
+      beamObj.glowMat.opacity = templateGlowMat.opacity;
+    }
+
+    // Left beam
+    const leftDist = leftOrigin.distanceTo(hitPoint);
+    _beamMid.copy(leftOrigin).add(hitPoint).multiplyScalar(0.5);
+    beamObj.leftCore.scale.set(1, 1, leftDist);
+    beamObj.leftCore.position.copy(_beamMid);
+    beamObj.leftCore.lookAt(hitPoint);
+    beamObj.leftGlow.scale.set(1, 1, leftDist);
+    beamObj.leftGlow.position.copy(_beamMid);
+    beamObj.leftGlow.lookAt(hitPoint);
+
+    // Right beam
+    const rightDist = rightOrigin.distanceTo(hitPoint);
+    _beamMid.copy(rightOrigin).add(hitPoint).multiplyScalar(0.5);
+    beamObj.rightCore.scale.set(1, 1, rightDist);
+    beamObj.rightCore.position.copy(_beamMid);
+    beamObj.rightCore.lookAt(hitPoint);
+    beamObj.rightGlow.scale.set(1, 1, rightDist);
+    beamObj.rightGlow.position.copy(_beamMid);
+    beamObj.rightGlow.lookAt(hitPoint);
+  }
+
+  stopPrimaryLaser() {
+    if (this.activeLaserBeam) {
+      if (this.activeLaserBeam.group && this.activeLaserBeam.group.parent) {
+        this.activeLaserBeam.group.parent.remove(this.activeLaserBeam.group);
+      }
+      if (this.activeLaserBeam.ownMaterials) {
+        if (this.activeLaserBeam.coreMat) this.activeLaserBeam.coreMat.dispose();
+        if (this.activeLaserBeam.glowMat) this.activeLaserBeam.glowMat.dispose();
+      }
+      const idx = this.laserBeams.indexOf(this.activeLaserBeam);
+      if (idx !== -1) {
+        this.laserBeams.splice(idx, 1);
+      }
+      this.activeLaserBeam = null;
+    }
+    if (typeof audio.stopLaserLoop === 'function') {
+      audio.stopLaserLoop();
+    }
+  }
+
   /**
    * Primary Weapon: Authentic Instantaneous Coherent Twin Laser Beam
    * Fires twin converging beams from wing emitters to target/impact point.
    * Carves tunnels and craters through asteroids!
    */
   triggerPrimary(isHolding, ship, now) {
-    if (!isHolding || ship.isDead) return;
+    if (!isHolding || ship.isDead) {
+      this.stopPrimaryLaser();
+      return;
+    }
+
+    // If out of energy, stop beam
+    if (this.laserEnergy < this.laserShotCost && !this.activeLaserBeam) {
+      this.stopPrimaryLaser();
+      return;
+    }
 
     if (typeof ship.breakInvisibility === 'function') {
       ship.breakInvisibility();
     }
 
     const nowSec = now > 1000 ? now * 0.001 : now;
-    if (this.laserEnergy >= this.laserShotCost && (nowSec - this.laserLastFireTime) >= (this.laserFireInterval - 0.001)) {
+
+    const fwd = ship.getForwardVector();
+    const right = ship.getRightVector();
+    _beamUp.set(0, 1, 0).applyQuaternion(ship.quaternion);
+
+    // Wing emitter origins (zero allocations)
+    _beamLeftOrigin.copy(ship.position)
+      .addScaledVector(fwd, 2.2)
+      .addScaledVector(right, -0.72)
+      .addScaledVector(_beamUp, -0.28);
+
+    _beamRightOrigin.copy(ship.position)
+      .addScaledVector(fwd, 2.2)
+      .addScaledVector(right, 0.72)
+      .addScaledVector(_beamUp, -0.28);
+
+    _beamCenterOrigin.copy(ship.position).addScaledVector(fwd, 2.0);
+
+    // Perform raycast hitscan against asteroids and targets
+    let hitPoint = null;
+    let hitDistance = this.laserMaxRange;
+    let hitTargetType = null;
+    let hitTargetObj = null;
+
+    // 1. Raycast vs Asteroids
+    if (this.spaceEnv && typeof this.spaceEnv.checkRayCollision === 'function') {
+      const astHit = this.spaceEnv.checkRayCollision(_beamCenterOrigin, fwd, this.laserMaxRange);
+      if (astHit) {
+        hitPoint = astHit.hitPoint;
+        hitDistance = astHit.distance;
+        hitTargetType = 'asteroid';
+        hitTargetObj = astHit.asteroid;
+      }
+    }
+
+    // 2. Raycast vs Remote Ships (if closer than asteroid hit)
+    if (this.network && this.network.peers) {
+      for (const [peerId, peerData] of this.network.peers.entries()) {
+        const remoteState = peerData?.lastState;
+        if (!remoteState || remoteState.isDead || remoteState.isInvisible) continue;
+
+        _scratchVecA.set(remoteState.pos.x, remoteState.pos.y, remoteState.pos.z).sub(_beamCenterOrigin);
+        const proj = _scratchVecA.dot(fwd);
+        if (proj > 0 && proj < hitDistance) {
+          const perpDistSq = _scratchVecA.lengthSq() - (proj * proj);
+          if (perpDistSq < 16.0) { // 4u hit radius
+            hitDistance = proj;
+            _beamHitPoint.copy(_beamCenterOrigin).addScaledVector(fwd, proj);
+            hitPoint = _beamHitPoint;
+            hitTargetType = 'ship';
+            hitTargetObj = peerId;
+          }
+        }
+      }
+    }
+
+    // If nothing hit, project beam to max range
+    if (!hitPoint) {
+      _beamHitPoint.copy(_beamCenterOrigin).addScaledVector(fwd, this.laserMaxRange);
+      hitPoint = _beamHitPoint;
+    }
+
+    const isFireLaser = !!ship.hasFireLaser;
+    const beamSparkColor = isFireLaser ? 0xff5500 : 0x00d4ff;
+
+    // Maintain steady continuous beam mesh every frame
+    if (!this.activeLaserBeam) {
+      this.activeLaserBeam = this.createTwinLaserGroup(true, isFireLaser);
+      this.scene.add(this.activeLaserBeam.group);
+      this.laserBeams.push(this.activeLaserBeam);
+      if (typeof audio.startLaserLoop === 'function') {
+        audio.startLaserLoop(true);
+      }
+    }
+    this.activeLaserBeam.life = 0.28;
+    this.updateTwinLaserTransforms(this.activeLaserBeam, _beamLeftOrigin, _beamRightOrigin, hitPoint, isFireLaser);
+
+    // Continuous contact sparks at hit point
+    if (hitTargetType) {
+      this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
+    }
+
+    // Periodic combat & excavation tick (every 0.16s)
+    if ((nowSec - this.laserLastFireTime) >= (this.laserFireInterval - 0.001)) {
+      if (this.laserEnergy < this.laserShotCost) {
+        this.stopPrimaryLaser();
+        return;
+      }
+
       this.laserLastFireTime = nowSec;
       this.laserCooldownTimer = this.laserCooldownDelay;
       this.laserEnergy = Math.max(0, this.laserEnergy - this.laserShotCost);
 
-      const fwd = ship.getForwardVector();
-      const right = ship.getRightVector();
-      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(ship.quaternion);
-
-      // Wing emitter origins
-      const leftEmitter = ship.position.clone()
-        .addScaledVector(fwd, 2.2)
-        .addScaledVector(right, -0.72)
-        .addScaledVector(up, -0.28);
-
-      const rightEmitter = ship.position.clone()
-        .addScaledVector(fwd, 2.2)
-        .addScaledVector(right, 0.72)
-        .addScaledVector(up, -0.28);
-
-      const centerOrigin = ship.position.clone().addScaledVector(fwd, 2.0);
-
-      // Perform raycast hitscan against asteroids and targets
-      let hitPoint = null;
-      let hitDistance = this.laserMaxRange;
-      let hitTargetType = null;
-      let hitTargetObj = null;
-
-      // 1. Raycast vs Asteroids
-      if (this.spaceEnv && typeof this.spaceEnv.checkRayCollision === 'function') {
-        const astHit = this.spaceEnv.checkRayCollision(centerOrigin, fwd, this.laserMaxRange);
-        if (astHit) {
-          hitPoint = astHit.hitPoint;
-          hitDistance = astHit.distance;
-          hitTargetType = 'asteroid';
-          hitTargetObj = astHit.asteroid;
-        }
-      }
-
-      // 2. Raycast vs Remote Ships (if closer than asteroid hit)
-      if (this.network && this.network.peers) {
-        for (const [peerId, peerData] of this.network.peers.entries()) {
-          const remoteState = peerData?.lastState;
-          if (!remoteState || remoteState.isDead || remoteState.isInvisible) continue;
-
-          const rPos = new THREE.Vector3(remoteState.pos.x, remoteState.pos.y, remoteState.pos.z);
-          const toR = rPos.clone().sub(centerOrigin);
-          const proj = toR.dot(fwd);
-          if (proj > 0 && proj < hitDistance) {
-            const perpDistSq = toR.lengthSq() - (proj * proj);
-            if (perpDistSq < 16.0) { // 4u hit radius
-              hitDistance = proj;
-              hitPoint = centerOrigin.clone().addScaledVector(fwd, proj);
-              hitTargetType = 'ship';
-              hitTargetObj = peerId;
-            }
-          }
-        }
-      }
-
-      // If nothing hit, project beam to max range
-      if (!hitPoint) {
-        hitPoint = centerOrigin.clone().addScaledVector(fwd, this.laserMaxRange);
-      }
-
-      const isFireLaser = !!ship.hasFireLaser;
       const dmgMultiplier = isFireLaser ? 1.75 : 1.0;
       const effectiveLaserDamage = this.laserDamage * dmgMultiplier;
-      // Derive laser carving dimensions dynamically from ship radius so carving volume
-      // is just a little bit bigger than ship size regardless of asteroid size (~3.5u for r=2.8,
-      // scaling automatically for future larger ships), replacing legacy hardcoded 60u/84u values.
+      // Derive laser carving dimensions dynamically from ship radius
       const shipRadius = (ship && typeof ship.radius === 'number') ? ship.radius : 14.0;
       const carveRadius = (ship && typeof ship.getLaserCarveRadius === 'function')
         ? ship.getLaserCarveRadius(isFireLaser)
@@ -741,28 +869,18 @@ export class WeaponsSystem {
       const carveDepth = (ship && typeof ship.getLaserCarveDepth === 'function')
         ? ship.getLaserCarveDepth(isFireLaser)
         : (shipRadius * (isFireLaser ? 1.25 : 1.1));
-      const beamSparkColor = isFireLaser ? 0xff5500 : 0x00d4ff;
 
       const shotId = `laser-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
 
-      // Spawn visual twin laser beams
-      this.spawnTwinLaserBeam(leftEmitter, rightEmitter, hitPoint, true, isFireLaser);
-      if (typeof audio.startLaserLoop === 'function') {
-        audio.startLaserLoop(true);
-      }
-      audio.playLaserShot(true);
-
       // Resolve Impact
       if (hitTargetType === 'asteroid' && hitTargetObj) {
-        this.spawnExplosion(hitPoint, isFireLaser ? 9 : 6, beamSparkColor);
-        this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
         let dmgResult = null;
         // 3x more effective asteroid carving:
         const carveFactor = 0.464 * 1.44225; // ~0.6692 for 3x volumetric excavation yield
         const reducedCarveRadius = carveRadius * carveFactor;
         const reducedCarveDepth = carveDepth * carveFactor;
-        const carveStrength = 48.0; // 3x effective density strength (increased from 16.0)
-        const maxCrackStages = 17; // 3x faster fracture (reduced from 50)
+        const carveStrength = 48.0; // 3x effective density strength
+        const maxCrackStages = 17; // 3x faster fracture
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
           // 3x more effective damage: 1.2 for small asteroids, 13.5 for mega/medium
           const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (1.2 * dmgMultiplier) : (13.5 * dmgMultiplier);
@@ -788,14 +906,13 @@ export class WeaponsSystem {
           ship.recordEngagementHit();
         }
         this.spawnExplosion(hitPoint, isFireLaser ? 10 : 8, isFireLaser ? 0xff4400 : 0x00ffff);
-        this.spawnLaserImpactSparks(hitPoint, null, isFireLaser ? 0xff6600 : 0x00ffff);
         if (this.network && typeof this.network.sendHitTarget === 'function') {
           this.network.sendHitTarget(hitTargetObj, effectiveLaserDamage, 'laser');
         }
       } else if (!hitTargetType) {
         logger.log('WEAPON_MISS', JSON.stringify({
           weapon: isFireLaser ? 'fire_laser' : 'laser',
-          origin: [Number(centerOrigin.x.toFixed(1)), Number(centerOrigin.y.toFixed(1)), Number(centerOrigin.z.toFixed(1))],
+          origin: [Number(_beamCenterOrigin.x.toFixed(1)), Number(_beamCenterOrigin.y.toFixed(1)), Number(_beamCenterOrigin.z.toFixed(1))],
           dir: [Number(fwd.x.toFixed(2)), Number(fwd.y.toFixed(2)), Number(fwd.z.toFixed(2))],
           maxRange: this.laserMaxRange
         }));
@@ -805,8 +922,8 @@ export class WeaponsSystem {
       if (this.network && typeof this.network.broadcastLaser === 'function') {
         this.network.broadcastLaser({
           id: shotId,
-          leftOrigin: { x: leftEmitter.x, y: leftEmitter.y, z: leftEmitter.z },
-          rightOrigin: { x: rightEmitter.x, y: rightEmitter.y, z: rightEmitter.z },
+          leftOrigin: { x: _beamLeftOrigin.x, y: _beamLeftOrigin.y, z: _beamLeftOrigin.z },
+          rightOrigin: { x: _beamRightOrigin.x, y: _beamRightOrigin.y, z: _beamRightOrigin.z },
           hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
           dir: { x: fwd.x, y: fwd.y, z: fwd.z },
           targetType: hitTargetType,
@@ -818,47 +935,14 @@ export class WeaponsSystem {
   }
 
   spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, isLocal, isFireLaser = false) {
-    const group = new THREE.Group();
-    const coreMat = isFireLaser ? this.fireLaserCoreMat : (isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
-    const glowMat = isFireLaser ? (isLocal ? this.fireLaserGlowMat : this.remoteFireLaserGlowMat) : (isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
-
-    // Create left beam
-    const leftDist = leftOrigin.distanceTo(hitPoint);
-    const leftMid = leftOrigin.clone().add(hitPoint).multiplyScalar(0.5);
-    const leftCore = new THREE.Mesh(this.laserCoreGeom, coreMat);
-    leftCore.scale.set(1, 1, leftDist);
-    leftCore.position.copy(leftMid);
-    leftCore.lookAt(hitPoint);
-    group.add(leftCore);
-
-    const leftGlow = new THREE.Mesh(this.laserGlowGeom, glowMat);
-    leftGlow.scale.set(1, 1, leftDist);
-    leftGlow.position.copy(leftMid);
-    leftGlow.lookAt(hitPoint);
-    group.add(leftGlow);
-
-    // Create right beam
-    const rightDist = rightOrigin.distanceTo(hitPoint);
-    const rightMid = rightOrigin.clone().add(hitPoint).multiplyScalar(0.5);
-    const rightCore = new THREE.Mesh(this.laserCoreGeom, coreMat);
-    rightCore.scale.set(1, 1, rightDist);
-    rightCore.position.copy(rightMid);
-    rightCore.lookAt(hitPoint);
-    group.add(rightCore);
-
-    const rightGlow = new THREE.Mesh(this.laserGlowGeom, glowMat);
-    rightGlow.scale.set(1, 1, rightDist);
-    rightGlow.position.copy(rightMid);
-    rightGlow.lookAt(hitPoint);
-    group.add(rightGlow);
-
-    this.scene.add(group);
-    this.laserBeams.push({
-      group,
-      life: 0.22,
-      maxLife: 0.22,
-      isLocal
-    });
+    const beam = this.createTwinLaserGroup(isLocal, isFireLaser);
+    beam.isContinuous = false;
+    beam.life = 0.28;
+    beam.maxLife = 0.28;
+    this.updateTwinLaserTransforms(beam, leftOrigin, rightOrigin, hitPoint, isFireLaser);
+    this.scene.add(beam.group);
+    this.laserBeams.push(beam);
+    return beam;
   }
 
   spawnRemoteLaserBeam(data, peerId) {
@@ -875,8 +959,25 @@ export class WeaponsSystem {
       ? new THREE.Vector3(data.hitPoint.x, data.hitPoint.y, data.hitPoint.z)
       : leftOrigin.clone().add(new THREE.Vector3(data.dir.x, data.dir.y, data.dir.z).multiplyScalar(500));
 
-    this.spawnTwinLaserBeam(leftOrigin, rightOrigin, hitPoint, false, isFireLaser);
-    audio.playLaserShot(false, leftOrigin);
+    let remoteBeam = peerId ? this.remoteLaserBeams.get(peerId) : null;
+    if (!remoteBeam) {
+      remoteBeam = this.createTwinLaserGroup(false, isFireLaser);
+      remoteBeam.peerId = peerId;
+      remoteBeam.life = 0.28;
+      remoteBeam.maxLife = 0.28;
+      this.scene.add(remoteBeam.group);
+      this.laserBeams.push(remoteBeam);
+      if (peerId) {
+        this.remoteLaserBeams.set(peerId, remoteBeam);
+      }
+      if (typeof audio.startLaserLoop === 'function') {
+        audio.startLaserLoop(false, leftOrigin);
+      }
+    } else {
+      remoteBeam.life = 0.28;
+    }
+
+    this.updateTwinLaserTransforms(remoteBeam, leftOrigin, rightOrigin, hitPoint, isFireLaser);
 
     if (data.targetType === 'asteroid') {
       const sparkCol = isFireLaser ? 0xff5500 : 0xff0066;
@@ -1405,20 +1506,35 @@ export class WeaponsSystem {
       const b = this.laserBeams[i];
       b.life -= dt;
       if (b.life <= 0) {
-        this.scene.remove(b.group);
+        if (b.group && b.group.parent) {
+          b.group.parent.remove(b.group);
+        }
+        if (b.ownMaterials) {
+          if (b.coreMat) b.coreMat.dispose();
+          if (b.glowMat) b.glowMat.dispose();
+        }
+        if (b === this.activeLaserBeam) {
+          this.activeLaserBeam = null;
+        }
+        if (b.peerId && this.remoteLaserBeams.get(b.peerId) === b) {
+          this.remoteLaserBeams.delete(b.peerId);
+        }
         this.laserBeams.splice(i, 1);
         continue;
       }
-      const alpha = b.life / b.maxLife;
-      b.group.children.forEach(c => {
-        if (c.material && c.material.opacity !== undefined) {
-          c.material.opacity = alpha * 0.95;
-        }
-      });
+
+      // Smooth fade out only during final expiration (< 0.05s); otherwise rock-solid steady opacity
+      if (b.life < 0.05) {
+        const alpha = b.life / 0.05;
+        if (b.coreMat) b.coreMat.opacity = alpha * 0.98;
+        if (b.glowMat) b.glowMat.opacity = alpha * 0.85;
+      }
     }
 
     if (this.laserBeams.length === 0 || (localShip && localShip.isDead)) {
-      if (typeof audio.stopLaserLoop === 'function') {
+      if (this.activeLaserBeam) {
+        this.stopPrimaryLaser();
+      } else if (typeof audio.stopLaserLoop === 'function') {
         audio.stopLaserLoop();
       }
     }
@@ -1821,7 +1937,16 @@ export class WeaponsSystem {
   }
 
   cleanup() {
-    for (const b of this.laserBeams) this.scene.remove(b.group);
+    this.stopPrimaryLaser();
+    this.remoteLaserBeams.clear();
+    for (const b of this.laserBeams) {
+      if (b.group && b.group.parent) b.group.parent.remove(b.group);
+      if (b.ownMaterials) {
+        if (b.coreMat) b.coreMat.dispose();
+        if (b.glowMat) b.glowMat.dispose();
+      }
+    }
+    this.laserBeams = [];
     for (const m of this.missiles) this.scene.remove(m.group);
     for (const d of this.decoys) this.scene.remove(d.group);
     for (const mine of this.mines) this.scene.remove(mine.mesh);

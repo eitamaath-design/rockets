@@ -30,6 +30,15 @@ export class AudioManager {
     // Noise buffer cache
     this.noiseBuffer = null;
 
+    // Laser beam plasma hum loop nodes
+    this._laserLoopActive = false;
+    this._laserOsc1 = null;
+    this._laserOsc2 = null;
+    this._laserOsc = null;
+    this._laserFilter = null;
+    this._laserGain = null;
+    this._lastLaserAudioTime = 0;
+
     this.init();
   }
 
@@ -361,33 +370,53 @@ export class AudioManager {
     osc.stop(now + 0.32);
   }
 
-  startLaserLoop(isLocal = true) {
+  startLaserLoop(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();
     if (this._laserLoopActive) return;
     this._laserLoopActive = true;
     const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+
+    const dest = (!isLocal && pos) ? (this.createPanner(pos) || this.compressor) : this.compressor;
+
+    // Dual-oscillator futuristic sci-fi plasma synth:
+    // osc1: deep foundational body (155 Hz local / 130 Hz remote sine)
+    // osc2: warm harmonic plasma (313 Hz local / 263 Hz remote sawtooth)
+    // Slightly detuned from 2nd harmonic (310 Hz) -> natural ~3 Hz organic analog flutter/beating
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
     const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(isLocal ? 1180 : 920, now);
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(2400, now);
-    filter.Q.setValueAtTime(2.8, now);
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(isLocal ? 155 : 130, now);
 
-    const vol = isLocal ? 0.24 : 0.16;
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(isLocal ? 313 : 263, now);
+
+    // Resonant low-pass filter to remove harshness while preserving warm plasma sizzle
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(isLocal ? 920 : 780, now);
+    filter.Q.setValueAtTime(1.2, now);
+
+    const vol = isLocal ? 0.22 : 0.14;
     gain.gain.setValueAtTime(0.001, now);
     gain.gain.linearRampToValueAtTime(vol, now + 0.04);
 
-    osc.connect(filter);
+    osc1.connect(filter);
+    osc2.connect(filter);
     filter.connect(gain);
-    gain.connect(this.compressor);
+    gain.connect(dest);
 
-    osc.start(now);
-    this._laserOsc = osc;
+    osc1.start(now);
+    osc2.start(now);
+
+    this._laserOsc1 = osc1;
+    this._laserOsc2 = osc2;
+    this._laserFilter = filter;
     this._laserGain = gain;
+    // Maintain backward-compatible aliases
+    this._laserOsc = osc1;
   }
 
   stopLaserLoop() {
@@ -400,12 +429,18 @@ export class AudioManager {
     try {
       this._laserGain.gain.cancelScheduledValues(now);
       this._laserGain.gain.setValueAtTime(this._laserGain.gain.value, now);
-      this._laserGain.gain.linearRampToValueAtTime(0.0001, now + 0.04);
-      if (this._laserOsc) {
-        this._laserOsc.stop(now + 0.05);
+      this._laserGain.gain.linearRampToValueAtTime(0.0001, now + 0.06);
+      if (this._laserOsc1) {
+        this._laserOsc1.stop(now + 0.07);
+      }
+      if (this._laserOsc2) {
+        this._laserOsc2.stop(now + 0.07);
       }
     } catch (_) {}
+    this._laserOsc1 = null;
+    this._laserOsc2 = null;
     this._laserOsc = null;
+    this._laserFilter = null;
     this._laserGain = null;
   }
 
@@ -422,32 +457,32 @@ export class AudioManager {
 
     const dest = this.createPanner(pos) || this.compressor;
 
-    // Smooth continuous laser pulse / beam cadence with soft attack & decay
+    // Deep, punchy laser impact transient (420Hz down to 140Hz with lowpass filter)
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(isLocal ? 1480 : 1150, now);
-    osc.frequency.exponentialRampToValueAtTime(320, now + 0.09);
+    osc.type = isLocal ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(isLocal ? 420 : 340, now);
+    osc.frequency.exponentialRampToValueAtTime(140, now + 0.08);
 
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(2900, now);
-    filter.frequency.exponentialRampToValueAtTime(550, now + 0.09);
-    filter.Q.setValueAtTime(3.2, now);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(950, now);
+    filter.frequency.exponentialRampToValueAtTime(350, now + 0.08);
+    filter.Q.setValueAtTime(1.5, now);
 
-    const vol = isLocal ? 0.32 : 0.20;
+    const vol = isLocal ? 0.22 : 0.14;
     // Soft attack (prevents clicks) and exponential decay
     gain.gain.setValueAtTime(0.001, now);
     gain.gain.linearRampToValueAtTime(vol, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.085);
 
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
 
     osc.start(now);
-    osc.stop(now + 0.10);
+    osc.stop(now + 0.09);
   }
 
   /**
