@@ -26,22 +26,52 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.isDead).toBe(false);
   });
 
-  it('should accelerate forward when thrust button is held, capped at maxSpeed', () => {
-    expect(ship.maxSpeed).toBe(140.0);
+  it('should accelerate forward when thrust button is held, reaching maxSpeed and then hyperSpeed', () => {
+    expect(ship.maxSpeed).toBe(280.0);
+    expect(ship.hyperSpeed).toBe(560.0);
     ship.input.thrust = true;
 
-    // Simulate 1 second of forward acceleration (forwardAccel = 45 u/s^2)
+    // Simulate 1 second of forward acceleration (forwardAccel = 60 u/s^2)
     ship.update(1.0);
-    expect(ship.getSpeed()).toBeCloseTo(45.0, 1);
+    expect(ship.getSpeed()).toBeCloseTo(60.0, 1);
 
-    // Simulate 3 more seconds of thrust: speed must be clamped to maxSpeed (140 u/s)
-    ship.update(3.0);
-    expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed, 1);
-    expect(ship.getSpeed()).toBeLessThanOrEqual(ship.maxSpeed);
+    // Simulate reaching maxSpeed (280 u/s)
+    // Set speed right at maxSpeed
+    ship.velocity.set(0, 0, -280.0);
+    expect(ship.getSpeed()).toBeCloseTo(280.0, 1);
+
+    // Continuing to hold thrust accelerates into hyper-speed
+    ship.update(1.0); // +90 u/s -> 370 u/s
+    expect(ship.getSpeed()).toBeCloseTo(370.0, 1);
+    expect(ship.isHyperSpeed).toBe(true);
+
+    // Continue holding thrust until reaching hyperSpeed cap (560.0 u/s)
+    ship.update(5.0);
+    expect(ship.getSpeed()).toBeCloseTo(560.0, 1);
+    expect(ship.getSpeed()).toBeLessThanOrEqual(560.0);
+  });
+
+  it('should decelerate back to maxSpeed when thrust is released from hyper-speed', () => {
+    ship.velocity.set(0, 0, -560.0);
+    expect(ship.getSpeed()).toBe(560.0);
+    expect(ship.isHyperSpeed).toBe(true);
+
+    ship.input.thrust = false;
+    // Decelerate at 350 u/s^2 for 0.5s: 560 - 175 = 385 u/s
+    ship.update(0.5);
+    expect(ship.getSpeed()).toBeCloseTo(385.0, 1);
+
+    // Decelerate for another 0.5s: 385 - 175 = 210, but clamped at maxSpeed 280.0
+    ship.update(0.5);
+    expect(ship.getSpeed()).toBeCloseTo(280.0, 1);
+
+    // Further frames without thrust preserve momentum at maxSpeed (no drag)
+    ship.update(1.0);
+    expect(ship.getSpeed()).toBeCloseTo(280.0, 1);
   });
 
   it('should come to a complete stop 3x faster holding the brake button (~0.67s)', () => {
-    // 1. Bring ship to full speed (140 u/s)
+    // 1. Bring ship to full sustained speed (280 u/s)
     ship.velocity.set(0, 0, -ship.maxSpeed);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed, 1);
 
@@ -49,7 +79,7 @@ describe('Player Flight Physics & Momentum', () => {
     ship.input.thrust = false;
     ship.input.brake = true;
 
-    // 3. At 0.333s, speed should be approximately half (brakes are 3x more effective)
+    // 3. At 0.333s, speed should be approximately half (brakes are 3x more effective, decelRate = 420)
     ship.update(0.333);
     expect(ship.getSpeed()).toBeCloseTo(ship.maxSpeed / 2.0, 0);
 

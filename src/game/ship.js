@@ -18,9 +18,13 @@ export class PlayerShip {
     };
 
     // Flight parameters
-    this.maxSpeed = 140.0; // units per second
-    this.forwardAccel = 45.0; // units per second squared
-    this.decelRate = (this.maxSpeed / 2.0) * 3.0; // 3x effective deceleration (stops in ~0.67s instead of 2.0s)
+    this.maxSpeed = 280.0; // units per second (sustained cruising max speed)
+    this.maxSustainedSpeed = 280.0;
+    this.hyperSpeed = 560.0;
+    this.forwardAccel = 60.0; // units per second squared
+    this.hyperAccel = 90.0;
+    this.hyperDecelRate = 350.0;
+    this.decelRate = (this.maxSpeed / 2.0) * 3.0; // 420.0 u/s^2 for brakes (stops in ~0.67s from max sustained speed)
     this.strafeAccel = 40.0;
     this.maxStrafeSpeed = 35.0;
 
@@ -106,6 +110,10 @@ export class PlayerShip {
 
   set maxTurnRate(val) {
     this.capabilities.maxTurnRate = val;
+  }
+
+  get isHyperSpeed() {
+    return this.velocity.length() > this.maxSpeed + 1.0;
   }
 
   get boostCooldownTimer() {
@@ -418,8 +426,9 @@ export class PlayerShip {
   applyImpulse(impulseVector) {
     this.velocity.add(impulseVector);
     const speed = this.velocity.length();
-    if (speed > this.maxSpeed * 1.35) {
-      this.velocity.setLength(this.maxSpeed * 1.35);
+    const maxAllowed = Math.max(this.hyperSpeed, this.maxSpeed * 1.35);
+    if (speed > maxAllowed) {
+      this.velocity.setLength(maxAllowed);
     }
   }
 
@@ -581,12 +590,29 @@ export class PlayerShip {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion).normalize();
 
-    // 1. Forward Thrust
+    // 1. Forward Thrust & Hyper-Speed Handling
     if (this.input.thrust) {
-      this.velocity.addScaledVector(forward, this.forwardAccel * dt);
-      if (this.velocity.length() > this.maxSpeed) {
-        this.velocity.setLength(this.maxSpeed);
+      const currentSpeed = this.velocity.length();
+      if (currentSpeed < this.maxSpeed) {
+        this.velocity.addScaledVector(forward, this.forwardAccel * dt);
+        if (this.velocity.length() > this.maxSpeed) {
+          this.velocity.setLength(this.maxSpeed);
+        }
+      } else {
+        // Continuously held thrust at or above maxSpeed engages hyper-speed acceleration up to hyperSpeed (560.0)
+        this.velocity.addScaledVector(forward, this.hyperAccel * dt);
+        if (this.velocity.length() > this.hyperSpeed) {
+          this.velocity.setLength(this.hyperSpeed);
+        }
       }
+    } else {
+      // When thrust is released: decelerate down to maxSpeed if in hyper-speed
+      const currentSpeed = this.velocity.length();
+      if (currentSpeed > this.maxSpeed) {
+        const newSpeed = Math.max(this.maxSpeed, currentSpeed - this.hyperDecelRate * dt);
+        this.velocity.setLength(newSpeed);
+      }
+      // At or below maxSpeed, inertia in space preserves momentum without drag
     }
 
     // 2. Slow down / Brake
@@ -615,8 +641,9 @@ export class PlayerShip {
       this.velocity.addScaledVector(right, strafeDir * this.strafeAccel * dt);
       // Clamp lateral velocity
       const totalSpeed = this.velocity.length();
-      if (totalSpeed > this.maxSpeed) {
-        this.velocity.setLength(this.maxSpeed);
+      const allowedSpeed = this.isHyperSpeed ? this.hyperSpeed : this.maxSpeed;
+      if (totalSpeed > allowedSpeed) {
+        this.velocity.setLength(allowedSpeed);
       }
     }
 
