@@ -294,8 +294,8 @@ export class PlayerShip {
     const elapsed = now - this.lastThrustTapTime;
     this.lastThrustTapTime = now;
 
-    // Double tap within 40ms to 380ms window
-    if (elapsed >= 40 && elapsed <= 380) {
+    // Double tap within 40ms to 550ms window
+    if (elapsed >= 40 && elapsed <= 550) {
       if (this.warpCooldownTimer <= 0 && !this.isDead) {
         this.isWarpCharging = true;
         this.warpChargeTime = 0.0;

@@ -554,6 +554,9 @@ export class GameEngine {
 
       switch (e.code) {
         case 'KeyW':
+        case 'ShiftLeft':
+        case 'ShiftRight':
+        case 'KeyB':
           if (!this.playerShip.input.thrust) {
             this.triggerThrustStart();
           }
@@ -606,6 +609,9 @@ export class GameEngine {
     window.addEventListener('keyup', (e) => {
       switch (e.code) {
         case 'KeyW':
+        case 'ShiftLeft':
+        case 'ShiftRight':
+        case 'KeyB':
           this.triggerThrustEnd();
           this.playerShip.input.thrust = false;
           break;

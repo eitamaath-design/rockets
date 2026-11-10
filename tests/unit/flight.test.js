@@ -59,6 +59,18 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.velocity.length()).toBe(0);
   });
 
+  it('should trigger blink charging on double tap within expanded 40ms to 550ms window', () => {
+    ship.resetSpawn();
+    // First tap at t = 1000ms
+    ship.triggerThrustPress(1000);
+    expect(ship.isWarpCharging).toBe(false);
+
+    // Second tap at t = 1450ms (elapsed = 450ms, which exceeds old 380ms window but is within new 550ms window)
+    const res = ship.triggerThrustPress(1450);
+    expect(res).toBe(true);
+    expect(ship.isWarpCharging).toBe(true);
+  });
+
   it('should charge blink on double-tapping thrust up to 1.0s max and execute momentum-directed blink without affecting ship speed', () => {
     expect(ship.warpCooldownTimer).toBe(0);
     expect(ship.isWarpCharging).toBe(false);
