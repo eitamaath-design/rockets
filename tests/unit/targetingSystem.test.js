@@ -133,4 +133,81 @@ describe('Line-of-Sight Corner Bracket Targeting System', () => {
 
     scene.clear();
   });
+
+  it('should render targeting corner brackets when player is NOT room master and stats monitor is hidden', () => {
+    const scene = new THREE.Scene();
+    const enemyShip = new RemoteShip('enemy-peer-1', scene, 'GhostRider');
+    enemyShip.position.set(0, 0, -100);
+    engineMock.remoteShips.set('enemy-peer-1', enemyShip);
+
+    engineMock.spaceEnv.checkRayBlocked.mockReturnValue(false);
+
+    // Call primary HUD update loop as a non-master peer with showStats=false
+    hud.update({ isMaster: false, showStats: false, frameTime: 16.6, fps: 60 });
+
+    const targetBox = document.getElementById('hud-target-enemy-peer-1');
+    expect(targetBox).not.toBeNull();
+    expect(targetBox.querySelector('.target-bracket.tl')).not.toBeNull();
+    expect(targetBox.querySelector('.target-bracket.tr')).not.toBeNull();
+    expect(targetBox.querySelector('.target-bracket.bl')).not.toBeNull();
+    expect(targetBox.querySelector('.target-bracket.br')).not.toBeNull();
+
+    scene.clear();
+  });
+
+  it('should render targeting corner brackets even when Room Master monitor is minimized', () => {
+    const scene = new THREE.Scene();
+    const enemyShip = new RemoteShip('enemy-min-1', scene, 'StarFox');
+    enemyShip.position.set(0, 0, -100);
+    engineMock.remoteShips.set('enemy-min-1', enemyShip);
+
+    hud.isMonitorMinimized = true;
+    engineMock.spaceEnv.checkRayBlocked.mockReturnValue(false);
+
+    hud.update({ isMaster: true, showStats: true, frameTime: 16.6, fps: 60 });
+
+    const targetBox = document.getElementById('hud-target-enemy-min-1');
+    expect(targetBox).not.toBeNull();
+
+    scene.clear();
+  });
+
+  it('should clear targeting container when local player is dead (state.isDead === true)', () => {
+    const scene = new THREE.Scene();
+    const enemyShip = new RemoteShip('enemy-alive', scene, 'Enemy');
+    enemyShip.position.set(0, 0, -100);
+    engineMock.remoteShips.set('enemy-alive', enemyShip);
+
+    hud.update({ isDead: true, isMaster: false });
+
+    const container = document.getElementById('hud-targeting-container');
+    expect(container.innerHTML).toBe('');
+
+    scene.clear();
+  });
+
+  it('should filter out ships blocked by active flaming meteor hazard', () => {
+    const scene = new THREE.Scene();
+    const enemyShip = new RemoteShip('enemy-behind-meteor', scene, 'TargetBeyondMeteor');
+    // Enemy is at (0, 0, -200)
+    enemyShip.position.set(0, 0, -200);
+    engineMock.remoteShips.set('enemy-behind-meteor', enemyShip);
+
+    // Active meteor hazard is positioned directly along LOS at (0, 0, -100) with radius 50
+    engineMock.meteorSystem = {
+      activeMeteor: {
+        position: new THREE.Vector3(0, 0, -100),
+        radius: 50
+      }
+    };
+
+    engineMock.spaceEnv.checkRayBlocked.mockReturnValue(false);
+
+    hud.update({ isMaster: false, showStats: false });
+
+    const targetBox = document.getElementById('hud-target-enemy-behind-meteor');
+    expect(targetBox).toBeNull();
+
+    scene.clear();
+  });
 });

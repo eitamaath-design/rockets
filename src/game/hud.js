@@ -1424,6 +1424,13 @@ export class GameHUD {
         }
       }
     }
+
+    // Line-of-Sight Corner Bracket Targeting System (all clients, full frame rate)
+    this.updateTargetingSystem(state);
+
+    // 2D Tactical Radar (all clients)
+    const radarDt = state?.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
+    this.updateRadar(radarDt);
   }
 
   updateMasterMonitor(state) {
@@ -1507,13 +1514,13 @@ export class GameHUD {
 
     // 9. Update Targeting System
     const dt = state.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
-    this.updateTargetingSystem();
+    this.updateTargetingSystem(state);
 
     // 10. Update 2D Tactical Radar (Refreshes every 3 seconds)
     this.updateRadar(dt);
   }
 
-  updateTargetingSystem() {
+  updateTargetingSystem(state = null) {
     const container = document.getElementById('hud-targeting-container');
     if (!container || !this.engine) return;
 
@@ -1522,7 +1529,7 @@ export class GameHUD {
     const camera = this.engine.camera;
     const spaceEnv = this.engine.spaceEnv;
 
-    if (!playerShip || !camera || !remoteShips) {
+    if (!playerShip || !camera || !remoteShips || (state && state.isDead) || playerShip.isDead) {
       container.innerHTML = '';
       return;
     }
@@ -1530,10 +1537,19 @@ export class GameHUD {
     const vpWidth = window.innerWidth || (document.documentElement ? document.documentElement.clientWidth : 800);
     const vpHeight = window.innerHeight || (document.documentElement ? document.documentElement.clientHeight : 600);
 
+    // Compute camera forward vector for view-frustum dot product check
+    const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+
     let html = '';
 
     for (const [peerId, remote] of remoteShips.entries()) {
       if (!remote || remote.isDead || remote.isInvisible) continue;
+
+      // Filter out ships behind the camera plane
+      const toEnemy = remote.position.clone().sub(camera.position);
+      if (toEnemy.dot(camFwd) <= 0) {
+        continue;
+      }
 
       // Project remote ship position to NDC screen coordinates
       const pos = remote.position.clone();
@@ -1549,6 +1565,29 @@ export class GameHUD {
       if (spaceEnv && typeof spaceEnv.checkRayBlocked === 'function') {
         isBlocked = spaceEnv.checkRayBlocked(playerShip.position, remote.position);
       }
+
+      // Also check active meteor hazard obstruction if available
+      if (!isBlocked && this.engine.meteorSystem && this.engine.meteorSystem.activeMeteor) {
+        const m = this.engine.meteorSystem.activeMeteor;
+        const mPos = m.position || m.group?.position;
+        if (mPos) {
+          const seg = remote.position.clone().sub(playerShip.position);
+          const segLen = seg.length();
+          if (segLen > 0.001) {
+            const segDir = seg.clone().divideScalar(segLen);
+            const toCenter = mPos.clone().sub(playerShip.position);
+            const proj = toCenter.dot(segDir);
+            if (proj > 0 && proj < segLen) {
+              const perpDistSq = toCenter.lengthSq() - (proj * proj);
+              const r = (m.radius || 100) * 0.95;
+              if (perpDistSq < r * r) {
+                isBlocked = true;
+              }
+            }
+          }
+        }
+      }
+
       if (isBlocked) {
         continue;
       }

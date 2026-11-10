@@ -459,6 +459,7 @@ class AppRouter {
     this.engine.start();
     window.__engine = this.engine;
     window.gameEngine = this.engine;
+    window.__hud = this.hud;
     window.logger = logger;
   }
 }

@@ -1472,6 +1472,24 @@ export class SpaceEnvironment {
         }
       }
     }
+
+    // Check if ray is blocked by active flaming meteor hazard
+    if (this.meteorSystem && this.meteorSystem.activeMeteor) {
+      const m = this.meteorSystem.activeMeteor;
+      const mPos = m.position || m.group?.position;
+      if (mPos) {
+        const toCenter = mPos.clone().sub(startPos);
+        const proj = toCenter.dot(segDir);
+        if (proj > 0 && proj < segLen) {
+          const perpDistSq = toCenter.lengthSq() - (proj * proj);
+          const r = (m.radius || 100) * 0.95;
+          if (perpDistSq < r * r) {
+            return true;
+          }
+        }
+      }
+    }
+
     return false;
   }
 

@@ -241,6 +241,7 @@ export class GameEngine {
       frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10,
       powerUpSystem: this.powerUpSystem
     });
+    if (this.spaceEnv) this.spaceEnv.meteorSystem = this.meteorSystem;
 
     // Blink VFX (dynamic particle sphere with trails decaying after 1 second)
     this.blinkVfx = new BlinkVFXSystem(this.scene);
@@ -443,7 +444,10 @@ export class GameEngine {
       }
     };
     if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
-    if (this.meteorSystem) this.meteorSystem.spaceEnv = this.spaceEnv;
+    if (this.meteorSystem) {
+      this.meteorSystem.spaceEnv = this.spaceEnv;
+      if (this.spaceEnv) this.spaceEnv.meteorSystem = this.meteorSystem;
+    }
     if (this.playerShip) this.playerShip.spaceEnv = this.spaceEnv;
     return this.spaceEnv;
   }
@@ -457,6 +461,7 @@ export class GameEngine {
     if (this.weaponsSystem) this.weaponsSystem.spaceEnv = this.spaceEnv;
     if (this.meteorSystem) {
       this.meteorSystem.spaceEnv = this.spaceEnv;
+      if (this.spaceEnv) this.spaceEnv.meteorSystem = this.meteorSystem;
       this.meteorSystem.spawnInterval = this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10;
       this.meteorSystem.enabled = this.meteorSystem.spawnInterval > 0;
     }
