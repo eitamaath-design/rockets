@@ -150,6 +150,7 @@ class LobbyService {
           meteorFrequency: 10,
           forwardAccel: 60,
           momentumShearing: 0.0,
+          carveRadius: 6.5,
           renderScale: 1.0,
           maxFps: 60,
           shaderQuality: 'balanced',

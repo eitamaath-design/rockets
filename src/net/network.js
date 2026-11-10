@@ -15,6 +15,7 @@ export class GameNetwork {
       meteorFrequency: 10,
       forwardAccel: 60,
       momentumShearing: 0.0,
+      carveRadius: 6.5,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
@@ -133,6 +134,7 @@ export class GameNetwork {
       const incoming = { ...data.config };
       if (incoming.forwardAccel !== undefined) incoming.forwardAccel = Math.min(180, Math.max(20, Number(incoming.forwardAccel) || 60));
       if (incoming.momentumShearing !== undefined) incoming.momentumShearing = Math.min(1.0, Math.max(0.0, Number(incoming.momentumShearing) || 0.0));
+      if (incoming.carveRadius !== undefined) incoming.carveRadius = Math.min(20.0, Math.max(2.0, Number(incoming.carveRadius) || 6.5));
       this.config = { ...this.config, ...incoming };
       if (data.mapSeed !== undefined) this.mapSeed = data.mapSeed;
       for (const cb of this.configListeners) {
@@ -366,6 +368,7 @@ export class GameNetwork {
     const sanitized = { ...(newConfig || {}) };
     if (sanitized.forwardAccel !== undefined) sanitized.forwardAccel = Math.min(180, Math.max(20, Number(sanitized.forwardAccel) || 60));
     if (sanitized.momentumShearing !== undefined) sanitized.momentumShearing = Math.min(1.0, Math.max(0.0, Number(sanitized.momentumShearing) || 0.0));
+    if (sanitized.carveRadius !== undefined) sanitized.carveRadius = Math.min(20.0, Math.max(2.0, Number(sanitized.carveRadius) || 6.5));
     this.config = { ...this.config, ...sanitized };
     if (this.sendConfig) {
       this.sendConfig({ config: this.config, mapSeed: this.mapSeed });

@@ -14,6 +14,8 @@ export class PlayerShip {
     this.quaternion = new THREE.Quaternion();
     this.desiredQuaternion = new THREE.Quaternion();
     this.radius = 14.0; // Standard fighter collision/bounding radius (5x scaled from 2.8)
+    // Laser carving sphere radius: sized so 200ms continuous carving removes ~10% of ship volume (radius * cbrt(0.1) ≈ 6.5u)
+    this.carveSphereRadius = 6.5;
     // Upgradeable ship capability ceiling (rotational rate limit in rad/s)
     this.capabilities = {
       maxTurnRate: 0.75
@@ -135,24 +137,30 @@ export class PlayerShip {
 
   /**
    * Helper methods returning laser carving dimensions scaled with ship radius
-   * so carving volume is just a little bit bigger than ship size regardless of asteroid size,
-   * enabling automatic scaling for future larger ships.
+   * so 200ms continuous carving removes ~10% of ship volume (radius * cbrt(0.1) ≈ 6.5u).
+   * Exposed via room configuration parameter `carveRadius`.
    */
   getLaserCarveRadius(isFireLaser = false) {
-    const scaleFactor = isFireLaser ? 1.4 : 1.25;
-    return this.radius * scaleFactor;
+    const base = (typeof this.carveSphereRadius === 'number') ? this.carveSphereRadius : (this.radius * Math.cbrt(0.1));
+    return isFireLaser ? base * Math.cbrt(1.4) : base;
   }
 
   getLaserCarveDepth(isFireLaser = false) {
-    const scaleFactor = isFireLaser ? 1.25 : 1.1;
-    return this.radius * scaleFactor;
+    return this.getLaserCarveRadius(isFireLaser);
   }
 
   /**
-   * Updates flight physics parameters (forward acceleration and momentum shearing).
+   * Updates flight physics and weapon carving parameters.
    * @param {Object} config
    */
   setFlightConfig(config = {}) {
+    if (config.carveRadius !== undefined || config.carve !== undefined) {
+      const raw = config.carveRadius !== undefined ? config.carveRadius : config.carve;
+      const val = parseFloat(raw);
+      if (!isNaN(val)) {
+        this.carveSphereRadius = clamp(val, 2.0, 20.0);
+      }
+    }
     if (config.forwardAccel !== undefined || config.accel !== undefined) {
       const raw = config.forwardAccel !== undefined ? config.forwardAccel : config.accel;
       const val = parseFloat(raw);

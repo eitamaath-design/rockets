@@ -443,8 +443,8 @@ export class WeaponsSystem {
     // 1. Primary Weapon: Directed Energy Laser Beam (Continuous Sustained Beam ~5s)
     this.laserMaxEnergy = 100.0;
     this.laserEnergy = 100.0;
-    this.laserFireInterval = 0.16; // 6.25 ticks per second for seamless continuous beam
-    this.laserShotCost = 3.2; // 3.2 * 6.25 = 20.0 energy/s -> exactly 5.0 seconds continuous sustained fire!
+    this.laserFireInterval = 0.20; // 200ms continuous carving tick interval (5 ticks per second)
+    this.laserShotCost = 4.0; // 4.0 * 5 = 20.0 energy/s -> exactly 5.0 seconds continuous sustained fire!
     this.laserCooldownDelay = 0.50;
     this.laserCooldownTimer = 0;
     this.laserRechargeRate = 25.0; // Smooth 4-second recharge
@@ -885,7 +885,7 @@ export class WeaponsSystem {
     }
 
     let _dtDmg = 0;
-    // Periodic combat & excavation tick (every 0.16s)
+    // Periodic combat & excavation tick (every 200ms / 0.20s continuous beam contact)
     if ((nowSec - this.laserLastFireTime) >= (this.laserFireInterval - 0.001)) {
       const _tDmg0 = performance.now();
       if (this.laserEnergy < this.laserShotCost) {
@@ -899,32 +899,28 @@ export class WeaponsSystem {
 
       const dmgMultiplier = isFireLaser ? 1.75 : 1.0;
       const effectiveLaserDamage = this.laserDamage * dmgMultiplier;
-      // Derive laser carving dimensions dynamically from ship radius
+      // Derive laser spherical carving dimensions dynamically from ship carveSphereRadius
+      // Carving out ~10% of ship volume takes ~200ms, removing 100% of ship volume in 2.0s
       const shipRadius = (ship && typeof ship.radius === 'number') ? ship.radius : 14.0;
       const carveRadius = (ship && typeof ship.getLaserCarveRadius === 'function')
         ? ship.getLaserCarveRadius(isFireLaser)
-        : (shipRadius * (isFireLaser ? 1.4 : 1.25));
+        : (shipRadius * Math.cbrt(0.1) * (isFireLaser ? Math.cbrt(1.4) : 1.0));
       const carveDepth = (ship && typeof ship.getLaserCarveDepth === 'function')
         ? ship.getLaserCarveDepth(isFireLaser)
-        : (shipRadius * (isFireLaser ? 1.25 : 1.1));
+        : carveRadius;
+      const carveStrength = isFireLaser ? 120.0 : 80.0;
 
       const shotId = `laser-${this.network ? this.network.selfId : 'local'}-${Date.now()}`;
 
       // Resolve Impact
       if (hitTargetType === 'asteroid' && hitTargetObj) {
         let dmgResult = null;
-        // 3x more effective asteroid carving:
-        const carveFactor = 0.464 * 1.44225; // ~0.6692 for 3x volumetric excavation yield
-        const reducedCarveRadius = carveRadius * carveFactor;
-        const reducedCarveDepth = carveDepth * carveFactor;
-        const carveStrength = 48.0; // 3x effective density strength
-        const maxCrackStages = 17; // 3x faster fracture
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          // 3x more effective damage: 1.2 for small asteroids, 13.5 for mega/medium
-          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (1.2 * dmgMultiplier) : (13.5 * dmgMultiplier);
-          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, carveStrength, false, maxCrackStages);
+          // Small 20 HP asteroids take 2.0 damage per 200ms tick (destroyed in 10 shots / 2.0s = equiv of 100% ship volume)
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (2.0 * dmgMultiplier) : (13.5 * dmgMultiplier);
+          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, carveRadius, carveDepth, carveStrength, false, 1);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, carveStrength);
+          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, carveRadius, carveDepth, carveStrength);
           dmgResult = { carveResult };
         }
         const cRes = dmgResult?.carveResult;

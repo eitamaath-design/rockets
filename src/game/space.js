@@ -1085,6 +1085,13 @@ export class SpaceEnvironment {
       const carving = asteroid.carvings[c];
       const distToCavity = localPoint.distanceTo(carving.cavityCenter || carving.localHit);
 
+      if (carving.carveShape === 'sphere') {
+        if (distToCavity < (carving.carveRadius * 1.05)) {
+          return true;
+        }
+        continue;
+      }
+
       if (carving.isThroughTunnel && carving.localDir && carving.carveDepth) {
         const vToPt = localPoint.clone().sub(carving.localHit);
         const proj = vToPt.dot(carving.localDir);
@@ -2024,14 +2031,9 @@ export class SpaceEnvironment {
     const isMega = Boolean(asteroid.isMega || asteroid.isMegaAsteroid || asteroid.radius >= 1000);
     const half = mc.halfsize;
     const res = mc.resolution;
-    const voxelSize = (2.0 * scaleR) / res;
 
-    const effectiveRadius = isMega
-      ? Math.max(180.0, voxelSize * 1.65, carveRadius * 3.0)
-      : Math.max(24.0, carveRadius);
-    const effectiveDepth = isMega
-      ? Math.max(260.0, voxelSize * 2.4, carveDepth * 4.5)
-      : Math.max(16.0, carveDepth);
+    const effectiveRadius = carveRadius;
+    const effectiveDepth = carveDepth || carveRadius;
     const localRadius = (effectiveRadius / scaleR) * 0.95;
 
     let zone = null;
@@ -2076,24 +2078,17 @@ export class SpaceEnvironment {
     const severity = zone.stage / maxCrackStages;
     const iso = mc.isolation || 40.0;
     const hInv = 1.0 / half;
-    const ldx = localDir.x, ldy = localDir.y, ldz = localDir.z;
     const lhx = localHit.x, lhy = localHit.y, lhz = localHit.z;
     const rSq = effectiveRadius * effectiveRadius;
     const invR = 1.0 / effectiveRadius;
 
-    const startX = lhx - ldx * (effectiveRadius * 0.35);
-    const startY = lhy - ldy * (effectiveRadius * 0.35);
-    const startZ = lhz - ldz * (effectiveRadius * 0.35);
-    const endX = lhx + ldx * effectiveDepth;
-    const endY = lhy + ldy * effectiveDepth;
-    const endZ = lhz + ldz * effectiveDepth;
-
-    const minPx = Math.min(startX, endX) - effectiveRadius;
-    const maxPx = Math.max(startX, endX) + effectiveRadius;
-    const minPy = Math.min(startY, endY) - effectiveRadius;
-    const maxPy = Math.max(startY, endY) + effectiveRadius;
-    const minPz = Math.min(startZ, endZ) - effectiveRadius;
-    const maxPz = Math.max(startZ, endZ) + effectiveRadius;
+    // Spherical bounding box in local coordinates
+    const minPx = lhx - effectiveRadius;
+    const maxPx = lhx + effectiveRadius;
+    const minPy = lhy - effectiveRadius;
+    const maxPy = lhy + effectiveRadius;
+    const minPz = lhz - effectiveRadius;
+    const maxPz = lhz + effectiveRadius;
 
     const minX = Math.max(0, Math.floor((minPx / scaleR) * half + half) - 1);
     const maxX = Math.min(res - 1, Math.ceil((maxPx / scaleR) * half + half) + 1);
@@ -2138,23 +2133,13 @@ export class SpaceEnvironment {
 
     for (let z = minZ; z <= maxZ; z++) {
       const lz = (z - half) * hInv * scaleR;
-      const toZ = lz - lhz;
+      const diffZ = lz - lhz;
       for (let y = minY; y <= maxY; y++) {
         const ly = (y - half) * hInv * scaleR;
-        const toY = ly - lhy;
+        const diffY = ly - lhy;
         for (let x = minX; x <= maxX; x++) {
           const lx = (x - half) * hInv * scaleR;
-          const toX = lx - lhx;
-
-          const proj = toX * ldx + toY * ldy + toZ * ldz;
-          const t = Math.max(0, Math.min(effectiveDepth, proj));
-          const segX = lhx + ldx * t;
-          const segY = lhy + ldy * t;
-          const segZ = lhz + ldz * t;
-
-          const diffX = lx - segX;
-          const diffY = ly - segY;
-          const diffZ = lz - segZ;
+          const diffX = lx - lhx;
           const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
 
           const idx = mc.size2 * z + mc.size * y + x;
@@ -2289,17 +2274,15 @@ export class SpaceEnvironment {
    * Runtime volumetric MarchingCubes asteroid carving:
    * - Converts hitPoint and hitDir to asteroid local space
    * - Maps local coordinates [-R, R] to grid cells [0, res-1]
-   * - Uses zero-allocation localized AABB voxel bounding box
-   * - High-yield flat core falloff: inner 65% of cylinder radius gets factor = 1.0 (full bore strength)
-   * - Outer 35% tapers smoothly with Hermite smoothstep
-   * - Guarantees minimum tunnelRadius >= max(180, voxelSize * 1.65, carveRadius * 3.0) and effectiveDepth >= max(260, voxelSize * 2.4, carveDepth * 5.0)
-   * - Carve strength >= 160 for Mega Asteroid, dropping core density from 100 to 0 on hit 1
-   * - Nearest-voxel fallback: if isMega and isosurface was not crossed, drops closest solid voxel to 0
+   * - Spherical carve shape centered at localHit on the asteroid surface
+   * - Cubic Hermite smoothstep falloff u^2 * (3 - 2u)
+   * - Carves localized spherical voids (default ~10% ship volume at 6.5u radius)
+   * - Exposes carveRadius as room configuration parameter
    * - Updates mc.palette on partially carved cells for scorched walls & exposed ore
    * - Localized mc.update() to regenerate surface polygons
    * - Returns structured carveResult telemetry payload
    */
-  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0, isRemote = false) {
+  carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 6.5, carveDepth = null, strength = 80.0, isRemote = false) {
     const _t0 = performance.now();
     if (!asteroid || !asteroid.mesh) {
       return {
@@ -2308,6 +2291,7 @@ export class SpaceEnvironment {
         isosurfaceCrossedCount: 0,
         totalDensityDelta: 0,
         maxDensityDelta: 0,
+        carveShape: 'sphere',
         carveRadius: 0,
         carveDepth: 0,
         isMega: false,
@@ -2322,6 +2306,7 @@ export class SpaceEnvironment {
         isosurfaceCrossedCount: 0,
         totalDensityDelta: 0,
         maxDensityDelta: 0,
+        carveShape: 'sphere',
         carveRadius: 0,
         carveDepth: 0,
         isMega: false,
@@ -2337,19 +2322,21 @@ export class SpaceEnvironment {
     const localDir = _scratchLocalDir.copy(hitDir).transformDirection(_scratchInvMat).normalize();
 
     const isMega = !!(asteroid.radius >= 2500 || asteroid.isMegaAsteroid || asteroid.isMega);
-    const isMedium = (!isMega && asteroid.radius >= 38.0);
 
     const half = mc.halfsize;
     const res = mc.resolution;
     const voxelSize = (scaleR * 2.0) / res;
 
-    // Mega Asteroid tunnel sizing: wide and deep tunnel shafts spanning >= 1.65 voxels
-    const tunnelRadius = isMedium
-      ? Math.max(28.0, Math.min(36.0, carveRadius))
-      : (isMega ? (carveRadius >= 100.0 ? carveRadius : Math.max(180.0, voxelSize * 1.65, carveRadius * 3.0)) : carveRadius);
-    const effectiveDepth = isMega
-      ? (carveDepth >= 100.0 ? carveDepth : Math.max(260.0, voxelSize * 2.4, carveDepth * 5.0))
-      : (isMedium ? asteroid.radius * 2.5 : carveDepth);
+    // Continuous spherical carving centered at laser hit point
+    const sphereRadius = (typeof carveRadius === 'number' && carveRadius > 0) ? carveRadius : 6.5;
+    const depth = carveDepth || sphereRadius;
+    // On coarse MarchingCubes lattices (e.g. Mega-Asteroid where voxelSize can be ~109u),
+    // ensure the brush influence touches the neighboring voxel cell vertices enclosing localHit.
+    const effectiveBrushRadius = (isMega && sphereRadius < voxelSize * 1.1)
+      ? Math.max(sphereRadius, voxelSize * 1.1)
+      : sphereRadius;
+    const effectiveBrushRadiusSq = effectiveBrushRadius * effectiveBrushRadius;
+    const invBrushRadius = 1.0 / effectiveBrushRadius;
     const carveStrength = (strength !== undefined && strength !== null) ? strength : (isMega ? 160.0 : 80.0);
 
     let voxelsModified = 0;
@@ -2359,25 +2346,15 @@ export class SpaceEnvironment {
 
     const iso = mc.isolation || 40.0;
     const hInv = 1.0 / half;
-    const ldx = localDir.x, ldy = localDir.y, ldz = localDir.z;
     const lhx = localHit.x, lhy = localHit.y, lhz = localHit.z;
-    const tunnelRadiusSq = tunnelRadius * tunnelRadius;
-    const invTunnelRadius = 1.0 / tunnelRadius;
 
-    // Capsule bounding box in local coordinates
-    const startX = lhx - ldx * (tunnelRadius * 0.35);
-    const startY = lhy - ldy * (tunnelRadius * 0.35);
-    const startZ = lhz - ldz * (tunnelRadius * 0.35);
-    const endX = lhx + ldx * effectiveDepth;
-    const endY = lhy + ldy * effectiveDepth;
-    const endZ = lhz + ldz * effectiveDepth;
-
-    const minPx = Math.min(startX, endX) - tunnelRadius;
-    const maxPx = Math.max(startX, endX) + tunnelRadius;
-    const minPy = Math.min(startY, endY) - tunnelRadius;
-    const maxPy = Math.max(startY, endY) + tunnelRadius;
-    const minPz = Math.min(startZ, endZ) - tunnelRadius;
-    const maxPz = Math.max(startZ, endZ) + tunnelRadius;
+    // Spherical bounding box in local coordinates around localHit
+    const minPx = lhx - effectiveBrushRadius;
+    const maxPx = lhx + effectiveBrushRadius;
+    const minPy = lhy - effectiveBrushRadius;
+    const maxPy = lhy + effectiveBrushRadius;
+    const minPz = lhz - effectiveBrushRadius;
+    const maxPz = lhz + effectiveBrushRadius;
 
     // Clamped grid AABB
     const minX = Math.max(0, Math.floor((minPx / scaleR) * half + half) - 1);
@@ -2392,32 +2369,13 @@ export class SpaceEnvironment {
 
     for (let z = minZ; z <= maxZ; z++) {
       const lz = (z - half) * hInv * scaleR;
-      const toZ = lz - lhz;
+      const diffZ = lz - lhz;
       for (let y = minY; y <= maxY; y++) {
         const ly = (y - half) * hInv * scaleR;
-        const toY = ly - lhy;
+        const diffY = ly - lhy;
         for (let x = minX; x <= maxX; x++) {
           const lx = (x - half) * hInv * scaleR;
-          const toX = lx - lhx;
-
-          const proj = toX * ldx + toY * ldy + toZ * ldz;
-
-          let segX, segY, segZ;
-          if (isMedium) {
-            if (proj < -25.0 || proj > (effectiveDepth + 25.0)) continue;
-            segX = lhx + ldx * proj;
-            segY = lhy + ldy * proj;
-            segZ = lhz + ldz * proj;
-          } else {
-            const t = Math.max(0, Math.min(effectiveDepth, proj));
-            segX = lhx + ldx * t;
-            segY = lhy + ldy * t;
-            segZ = lhz + ldz * t;
-          }
-
-          const diffX = lx - segX;
-          const diffY = ly - segY;
-          const diffZ = lz - segZ;
+          const diffX = lx - lhx;
           const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
 
           const current = mc.getCell(x, y, z);
@@ -2428,22 +2386,10 @@ export class SpaceEnvironment {
             }
           }
 
-          if (distSq < tunnelRadiusSq) {
+          if (distSq < effectiveBrushRadiusSq) {
             const dist = Math.sqrt(distSq);
-            const u = 1.0 - (dist * invTunnelRadius);
-
-            let factor;
-            if (isMega) {
-              // High-Yield Flat Core Falloff: full bore inside inner 65% of cylinder radius
-              if (u >= 0.35) {
-                factor = 1.0;
-              } else {
-                const t = Math.max(0.0, u / 0.35);
-                factor = t * t * (3.0 - 2.0 * t);
-              }
-            } else {
-              factor = u * u * (3.0 - 2.0 * u);
-            }
+            const u = 1.0 - (dist * invBrushRadius);
+            const factor = u * u * (3.0 - 2.0 * u);
 
             if (current > 0 && factor > 0) {
               const sub = factor * carveStrength;
@@ -2549,29 +2495,32 @@ export class SpaceEnvironment {
       isosurfaceCrossedCount,
       totalDensityDelta: Number(totalDensityDelta.toFixed(1)),
       maxDensityDelta: Number(maxDensityDelta.toFixed(1)),
-      carveRadius: Number(tunnelRadius.toFixed(1)),
-      carveDepth: Number(effectiveDepth.toFixed(1)),
+      carveShape: 'sphere',
+      carveRadius: Number(sphereRadius.toFixed(1)),
+      carveDepth: Number(depth.toFixed(1)),
+      hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
       isMega,
       reason: voxelsModified > 0 ? 'ok' : 'no_solid_voxels_in_brush'
     };
 
-    logger.log('CARVE', `asteroid=${asteroid.id || (isMega ? 'mega' : 'asteroid')} isMega=${isMega} hit=(${hitPoint.x.toFixed(1)},${hitPoint.y.toFixed(1)},${hitPoint.z.toFixed(1)}) r=${carveResult.carveRadius} d=${carveResult.carveDepth} voxels=${carveResult.voxelsModified} crossed=${carveResult.isosurfaceCrossedCount} delta=${carveResult.totalDensityDelta}`);
+    logger.log('CARVE', `asteroid=${asteroid.id || (isMega ? 'mega' : 'asteroid')} isMega=${isMega} hit=(${hitPoint.x.toFixed(1)},${hitPoint.y.toFixed(1)},${hitPoint.z.toFixed(1)}) r=${carveResult.carveRadius} shape=sphere voxels=${carveResult.voxelsModified} crossed=${carveResult.isosurfaceCrossedCount} delta=${carveResult.totalDensityDelta}`);
 
     asteroid.carvings = asteroid.carvings || [];
     asteroid.carvings.push({
       localHit: localHit.clone(),
       localDir: localDir.clone(),
-      cavityCenter: localHit.clone().addScaledVector(localDir, effectiveDepth * 0.5),
-      carveRadius: tunnelRadius,
-      carveDepth: effectiveDepth,
-      isThroughTunnel: isMedium,
+      cavityCenter: localHit.clone(),
+      carveShape: 'sphere',
+      carveRadius: sphereRadius,
+      carveDepth: depth,
+      isThroughTunnel: false,
       carvedVolume: totalDensityDelta,
       carvedCells: voxelsModified,
       carveResult,
       timestamp: Date.now()
     });
 
-    const debrisCount = tunnelRadius > 35 ? 16 : 8;
+    const debrisCount = sphereRadius > 20 ? 16 : 8;
     this.spawnRockDebris(hitPoint, hitDir, debrisCount);
 
     if (!isRemote && !this.isApplyingRemoteCarve) {
@@ -2581,8 +2530,9 @@ export class SpaceEnvironment {
         isMega,
         hitPoint: { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z },
         hitDir: { x: hitDir.x, y: hitDir.y, z: hitDir.z },
-        carveRadius: Number(tunnelRadius.toFixed(1)),
-        carveDepth: Number(effectiveDepth.toFixed(1)),
+        carveShape: 'sphere',
+        carveRadius: Number(sphereRadius.toFixed(1)),
+        carveDepth: Number(depth.toFixed(1)),
         strength,
         isFracture: false,
         timestamp: Date.now()

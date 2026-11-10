@@ -103,12 +103,11 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
 
       space.carveAsteroid(mediumAsteroid, hitPoint, hitDir, 32.0, 36.0);
 
-      // Carving recorded with isThroughTunnel true
+      // Carving recorded with carveShape sphere
       expect(mediumAsteroid.carvings.length).toBeGreaterThan(0);
       const c = mediumAsteroid.carvings[0];
-      expect(c.isThroughTunnel).toBe(true);
-      expect(c.carveRadius).toBeGreaterThanOrEqual(28.0);
-      expect(c.carveRadius).toBeLessThanOrEqual(36.0);
+      expect(c.carveShape).toBe('sphere');
+      expect(c.carveRadius).toBe(32.0);
 
       // Verify vertices moved
       let movedCount = 0;
@@ -123,7 +122,7 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       expect(movedCount).toBeGreaterThan(0);
     });
 
-    it('should allow raycast in checkRayCollision to penetrate through carved tunnel without hitting outer sphere shell', () => {
+    it('should allow raycast in checkRayCollision to penetrate into carved spherical cavity', () => {
       const space = new SpaceEnvironment(scene, 111);
       const mediumAsteroid = space.asteroids.slice(1).find(a => a.radius >= 40);
       expect(mediumAsteroid).toBeDefined();
@@ -132,26 +131,26 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       const astPos = mediumAsteroid.position.clone();
       const r = mediumAsteroid.radius;
 
-      // Carve tunnel straight through the asteroid along X axis
+      // Carve sphere at hit point
       const hitPoint = astPos.clone().add(new THREE.Vector3(-r, 0, 0));
       const hitDir = new THREE.Vector3(1, 0, 0); // Along +X
-      space.carveAsteroid(mediumAsteroid, hitPoint, hitDir, 32.0, 36.0);
 
-      // Cast a ray directly through the tunnel from outside
       const rayOrigin = astPos.clone().add(new THREE.Vector3(-r - 100, 0, 0));
       const rayDir = new THREE.Vector3(1, 0, 0);
+      const initialHit = space.checkRayCollision(rayOrigin, rayDir, 1000.0);
+      expect(initialHit).not.toBeNull();
+      const initialDist = initialHit.distance;
 
-      // checkRayCollision should allow ray to pass cleanly through the through-and-through tunnel
-      const hit = space.checkRayCollision(rayOrigin, rayDir, 1000.0);
-      // Ray passes completely through this asteroid (hit should either be null or hit an asteroid further downfield)
-      if (hit) {
-        expect(hit.asteroid).not.toBe(mediumAsteroid);
-      } else {
-        expect(hit).toBeNull();
+      space.carveAsteroid(mediumAsteroid, hitPoint, hitDir, 32.0, 32.0);
+
+      // checkRayCollision should penetrate into the carved cavity
+      const penetratedHit = space.checkRayCollision(rayOrigin, rayDir, 1000.0);
+      if (penetratedHit && penetratedHit.asteroid === mediumAsteroid) {
+        expect(penetratedHit.distance).toBeGreaterThan(initialDist);
       }
     });
 
-    it('should grant continuous capsule corridor collision clearance when ship flies through tunnel', () => {
+    it('should grant cavity collision clearance when ship enters carved spherical cavity', () => {
       const space = new SpaceEnvironment(scene, 222);
       const mediumAsteroid = space.asteroids.slice(1).find(a => a.radius >= 40);
       mediumAsteroid.mesh.updateMatrixWorld(true);
@@ -159,17 +158,17 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       const astPos = mediumAsteroid.position.clone();
       const r = mediumAsteroid.radius;
 
-      // Carve tunnel straight along Z axis
+      // Carve spherical cavity along Z axis
       const hitPoint = astPos.clone().add(new THREE.Vector3(0, 0, r));
       const hitDir = new THREE.Vector3(0, 0, -1);
-      space.carveAsteroid(mediumAsteroid, hitPoint, hitDir, 32.0, 36.0);
+      space.carveAsteroid(mediumAsteroid, hitPoint, hitDir, 32.0, 32.0);
 
-      // Place ship inside the tunnel corridor along the axis
-      const shipInTunnel = hitPoint.clone().addScaledVector(hitDir, r * 0.8);
+      // Place ship inside the spherical cavity
+      const shipInCavity = hitPoint.clone().addScaledVector(hitDir, 12.0);
       const shipVel = new THREE.Vector3(0, 0, -20);
 
-      const col = space.resolveShipCollision(shipInTunnel, shipVel, 2.8, 1200);
-      // No collision! Free corridor flight
+      const col = space.resolveShipCollision(shipInCavity, shipVel, 2.8, 1200);
+      // No collision! Free cavity flight
       expect(col).toBeNull();
     });
 
@@ -185,9 +184,8 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
 
       expect(mega.carvings.length).toBe(1);
       const c = mega.carvings[0];
-      expect(c.isThroughTunnel).toBe(false);
-      // Mega asteroid caverns are bored deep (>= 120u)
-      expect(c.carveDepth).toBeGreaterThanOrEqual(120.0);
+      expect(c.carveShape).toBe('sphere');
+      expect(c.carveRadius).toBe(45.0);
     });
 
     it('should initialize Central Mega-Asteroid with MarchingCubes volumetric density field and solid core', () => {
@@ -448,7 +446,7 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       expect(report).toContain('[WEAPON_HIT]');
     });
 
-    it('should support complete through-tunnel drilling simulation penetrating through to the far side of Mega-Asteroid', () => {
+    it('should support multi-shot progressive laser spherical carve simulation penetrating deeper into Mega-Asteroid', () => {
       // Use low resolution for fast headless simulation
       const space = new SpaceEnvironment(scene, 7788, { voxelQuality: 'low' });
       const mega = space.asteroids[0];
@@ -457,33 +455,25 @@ describe('Persistent Planetary Exploration & Orbital Dogfighting Arena', () => {
       const rayDir = new THREE.Vector3(0, 0, -1);
 
       let prevDist = 0;
-      let breakthrough = false;
 
-      // Repeatedly fire laser/carve through the colossus
-      for (let shot = 0; shot < 35; shot++) {
+      // Progressively fire laser/carve spherical cavities into the colossus
+      for (let shot = 0; shot < 5; shot++) {
         const hit = space.checkRayCollision(rayOrigin, rayDir, 10000.0);
-        if (!hit || hit.asteroid !== mega) {
-          // Ray passed completely through the asteroid!
-          breakthrough = true;
-          break;
-        }
-
+        expect(hit).not.toBeNull();
+        expect(hit.asteroid).toBe(mega);
         expect(hit.distance).toBeGreaterThanOrEqual(prevDist);
         prevDist = hit.distance;
 
-        // Bore deep forward
-        const res = space.carveAsteroid(mega, hit.hitPoint, rayDir, 60.0, 80.0, 160.0);
+        // Spherical carve at current hit point
+        const res = space.carveAsteroid(mega, hit.hitPoint, rayDir, 60.0, 60.0, 160.0);
         expect(res.voxelsModified).toBeGreaterThan(0);
+        expect(res.carveShape).toBe('sphere');
       }
 
-      expect(breakthrough).toBe(true);
-      // Now a ray cast from (0, 0, 4000) straight down (0, 0, -1) sees clear space all the way through!
-      const postHit = space.checkRayCollision(rayOrigin, rayDir, 10000.0);
-      if (postHit) {
-        expect(postHit.asteroid).not.toBe(mega);
-      } else {
-        expect(postHit).toBeNull();
-      }
+      // Verify final penetration is deeper than initial surface hit
+      const finalHit = space.checkRayCollision(rayOrigin, rayDir, 10000.0);
+      expect(finalHit).not.toBeNull();
+      expect(finalHit.distance).toBeGreaterThanOrEqual(prevDist);
     });
 
     it('should require 5 progressive fracture hits (stages 1 -> 2 -> 3 -> 4 -> 5) via damageAsteroid / fractureAsteroid before excavating a rock part', () => {

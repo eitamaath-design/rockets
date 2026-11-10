@@ -53,6 +53,7 @@ class AppRouter {
       meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10,
       forwardAccel: params.get('accel') !== null ? Math.min(180, Math.max(20, parseInt(params.get('accel'), 10) || 60)) : 60,
       momentumShearing: params.get('shear') !== null ? Math.min(1.0, Math.max(0.0, parseFloat(params.get('shear')) || 0.0)) : 0.0,
+      carveRadius: params.get('carve') !== null ? Math.min(20.0, Math.max(2.0, parseFloat(params.get('carve')) || 6.5)) : 6.5,
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
       shaderQuality: params.get('shader') || 'balanced',
@@ -156,6 +157,10 @@ class AppRouter {
                 <div class="config-field">
                   <label for="shear-slider">Momentum Shear: <span id="shear-val-badge">0.00</span></label>
                   <input type="range" id="shear-slider" class="lobby-slider" min="0.0" max="1.0" step="0.05" value="0.0" />
+                </div>
+                <div class="config-field">
+                  <label for="carve-slider">Laser Carve Radius: <span id="carve-val-badge">6.5</span>u</label>
+                  <input type="range" id="carve-slider" class="lobby-slider" min="2.0" max="20.0" step="0.5" value="6.5" />
                 </div>
                 <div class="config-field">
                   <label for="render-scale-select">Render Scale (DPI)</label>
@@ -286,6 +291,14 @@ class AppRouter {
       });
     }
 
+    const carveSlider = document.getElementById('carve-slider');
+    const carveBadge = document.getElementById('carve-val-badge');
+    if (carveSlider && carveBadge) {
+      carveSlider.addEventListener('input', (e) => {
+        carveBadge.textContent = parseFloat(e.target.value).toFixed(1);
+      });
+    }
+
     // Hook PWA Installation
     let deferredPrompt = window.__pwaDeferredPrompt;
     const pwaBanner = document.getElementById('pwa-install-banner');
@@ -324,6 +337,7 @@ class AppRouter {
           meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10,
           forwardAccel: parseInt(document.getElementById('accel-slider')?.value, 10) || 60,
           momentumShearing: parseFloat(document.getElementById('shear-slider')?.value) || 0.0,
+          carveRadius: parseFloat(document.getElementById('carve-slider')?.value) || 6.5,
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
           shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
@@ -398,6 +412,7 @@ class AppRouter {
             <span class="room-badge badge-meteor">METEOR: ${room.config?.meteorFrequency ? room.config.meteorFrequency + 's' : 'OFF'}</span>
             <span class="room-badge badge-accel">ACC: ${room.config?.forwardAccel ?? 60}u/s²</span>
             <span class="room-badge badge-shear">SHEAR: ${Number(room.config?.momentumShearing ?? 0.0).toFixed(2)}</span>
+            <span class="room-badge badge-carve">CARVE: ${Number(room.config?.carveRadius ?? 6.5).toFixed(1)}u</span>
           </div>
         </div>
         <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}" data-config='${JSON.stringify(room.config || {})}'>
@@ -432,6 +447,7 @@ class AppRouter {
       meteorFrequency: 10,
       forwardAccel: 60,
       momentumShearing: 0.0,
+      carveRadius: 6.5,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
@@ -451,7 +467,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&carve=${activeConfig.carveRadius}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh

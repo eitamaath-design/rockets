@@ -41,9 +41,10 @@ export class GameHUD {
       const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
       const accel = cfg.forwardAccel !== undefined ? cfg.forwardAccel : 60;
       const shear = cfg.momentumShearing !== undefined ? Number(cfg.momentumShearing).toFixed(2) : '0.00';
+      const carve = cfg.carveRadius !== undefined ? Number(cfg.carveRadius).toFixed(1) : '6.5';
       const fpsLabel = cfg.maxFps ? cfg.maxFps : 'MAX';
       const scaleLabel = cfg.renderScale || 1.0;
-      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | ACC: ${accel} | SHEAR: ${shear} | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | ACC: ${accel} | SHEAR: ${shear} | CARVE: ${carve}u | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
     }
   }
 
@@ -119,7 +120,7 @@ export class GameHUD {
         </div>
 
         <div class="hud-top-right">
-          <div class="hud-stat-pill hud-config-pill" id="hud-config-pill">VOX: HIGH (64³) | BELT: 100 | METEOR: 10s | ACC: 60 | SHEAR: 0.00</div>
+          <div class="hud-stat-pill hud-config-pill" id="hud-config-pill">VOX: HIGH (64³) | BELT: 100 | METEOR: 10s | ACC: 60 | SHEAR: 0.00 | CARVE: 6.5u</div>
           <div class="hud-stat-pill" id="hud-peers-count">👥 1</div>
           <div class="hud-stat-pill" id="hud-ping-val">📡 0ms</div>
           <button class="hud-btn-diag" id="hud-btn-diag" title="Client Diagnostics & Telemetry Logs">🐞 Logs</button>
@@ -1103,9 +1104,10 @@ export class GameHUD {
       const meteor = cfg.meteorFrequency ? `${cfg.meteorFrequency}s` : 'OFF';
       const accel = cfg.forwardAccel !== undefined ? cfg.forwardAccel : 60;
       const shear = cfg.momentumShearing !== undefined ? Number(cfg.momentumShearing).toFixed(2) : '0.00';
+      const carve = cfg.carveRadius !== undefined ? Number(cfg.carveRadius).toFixed(1) : '6.5';
       const fpsLabel = cfg.maxFps ? cfg.maxFps : 'MAX';
       const scaleLabel = cfg.renderScale || 1.0;
-      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | ACC: ${accel} | SHEAR: ${shear} | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
+      configPill.textContent = `VOX: ${q} (${res}) | BELT: ${belt} | METEOR: ${meteor} | ACC: ${accel} | SHEAR: ${shear} | CARVE: ${carve}u | FPS: ${fpsLabel} | DPI: ${scaleLabel}x`;
     }
 
     // Shield Bar (recharges over 15s) with dirty-checking

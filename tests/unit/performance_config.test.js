@@ -303,5 +303,51 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       expect(net.config.forwardAccel).toBe(20);
       expect(net.config.momentumShearing).toBe(0.0);
     });
+
+    it('should configure, display and clamp carveRadius room configuration parameter', async () => {
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount = document.getElementById('hud-mount');
+      const mockEngine = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          forwardAccel: 60,
+          momentumShearing: 0.0,
+          carveRadius: 8.5,
+          renderScale: 1.0,
+          maxFps: 0,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
+        },
+        network: { roomName: 'Carve-Sector', roomId: 'carve-sector' },
+        playerShip: { input: { analogPitch: 0, analogYaw: 0 } }
+      };
+
+      const hud = new GameHUD(mount, mockEngine);
+      const pill = document.getElementById('hud-config-pill');
+      expect(pill.textContent).toContain('CARVE: 8.5u');
+      hud.destroy();
+
+      const { GameNetwork } = await import('../../src/net/network.js');
+      const net = new GameNetwork({
+        roomId: 'test-carve-room',
+        config: { carveRadius: 6.5 }
+      });
+      net.broadcastConfig({ carveRadius: 50.0 });
+      expect(net.config.carveRadius).toBe(20.0);
+
+      net.broadcastConfig({ carveRadius: 0.5 });
+      expect(net.config.carveRadius).toBe(2.0);
+
+      const { PlayerShip } = await import('../../src/game/ship.js');
+      const camera = new THREE.PerspectiveCamera();
+      const ship = new PlayerShip(camera);
+      ship.setFlightConfig({ carveRadius: 12.5 });
+      expect(ship.carveSphereRadius).toBe(12.5);
+      expect(ship.getLaserCarveRadius(false)).toBe(12.5);
+      expect(ship.getLaserCarveRadius(true)).toBeCloseTo(12.5 * Math.cbrt(1.4), 2);
+    });
   });
 });
