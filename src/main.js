@@ -51,6 +51,8 @@ class AppRouter {
       asteroidCount: params.get('density') ? parseInt(params.get('density'), 10) : 100,
       megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
       meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10,
+      forwardAccel: params.get('accel') !== null ? Math.min(180, Math.max(20, parseInt(params.get('accel'), 10) || 60)) : 60,
+      momentumShearing: params.get('shear') !== null ? Math.min(1.0, Math.max(0.0, parseFloat(params.get('shear')) || 0.0)) : 0.0,
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
       shaderQuality: params.get('shader') || 'balanced',
@@ -146,6 +148,14 @@ class AppRouter {
                     <option value="10" selected>10s (Standard)</option>
                     <option value="5">5s (Chaos)</option>
                   </select>
+                </div>
+                <div class="config-field">
+                  <label for="accel-slider">Forward Accel: <span id="accel-val-badge">60</span> u/s²</label>
+                  <input type="range" id="accel-slider" class="lobby-slider" min="20" max="180" step="5" value="60" />
+                </div>
+                <div class="config-field">
+                  <label for="shear-slider">Momentum Shear: <span id="shear-val-badge">0.00</span></label>
+                  <input type="range" id="shear-slider" class="lobby-slider" min="0.0" max="1.0" step="0.05" value="0.0" />
                 </div>
                 <div class="config-field">
                   <label for="render-scale-select">Render Scale (DPI)</label>
@@ -259,6 +269,23 @@ class AppRouter {
       });
     }
 
+    // Hook Sliders value change badges
+    const accelSlider = document.getElementById('accel-slider');
+    const accelBadge = document.getElementById('accel-val-badge');
+    if (accelSlider && accelBadge) {
+      accelSlider.addEventListener('input', (e) => {
+        accelBadge.textContent = e.target.value;
+      });
+    }
+
+    const shearSlider = document.getElementById('shear-slider');
+    const shearBadge = document.getElementById('shear-val-badge');
+    if (shearSlider && shearBadge) {
+      shearSlider.addEventListener('input', (e) => {
+        shearBadge.textContent = parseFloat(e.target.value).toFixed(2);
+      });
+    }
+
     // Hook PWA Installation
     let deferredPrompt = window.__pwaDeferredPrompt;
     const pwaBanner = document.getElementById('pwa-install-banner');
@@ -295,6 +322,8 @@ class AppRouter {
           asteroidCount: parseInt(document.getElementById('asteroid-count-select')?.value, 10) || 100,
           megaRadius: parseInt(document.getElementById('mega-radius-select')?.value, 10) || 2800,
           meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10,
+          forwardAccel: parseInt(document.getElementById('accel-slider')?.value, 10) || 60,
+          momentumShearing: parseFloat(document.getElementById('shear-slider')?.value) || 0.0,
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
           shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
@@ -367,6 +396,8 @@ class AppRouter {
             <span class="room-badge badge-belt">BELT: ${room.config?.asteroidCount ?? 100}</span>
             <span class="room-badge badge-mega">MEGA: ${room.config?.megaRadius ?? 2800}u</span>
             <span class="room-badge badge-meteor">METEOR: ${room.config?.meteorFrequency ? room.config.meteorFrequency + 's' : 'OFF'}</span>
+            <span class="room-badge badge-accel">ACC: ${room.config?.forwardAccel ?? 60}u/s²</span>
+            <span class="room-badge badge-shear">SHEAR: ${Number(room.config?.momentumShearing ?? 0.0).toFixed(2)}</span>
           </div>
         </div>
         <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}" data-config='${JSON.stringify(room.config || {})}'>
@@ -399,6 +430,8 @@ class AppRouter {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
+      forwardAccel: 60,
+      momentumShearing: 0.0,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
@@ -418,7 +451,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh

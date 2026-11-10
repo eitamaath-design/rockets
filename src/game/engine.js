@@ -138,6 +138,8 @@ export class GameEngine {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
+      forwardAccel: 60,
+      momentumShearing: 0.0,
       renderScale: 1.0,
       maxFps: 0,
       shaderQuality: 'balanced',
@@ -228,6 +230,7 @@ export class GameEngine {
     // Initialize subsystems
     this.initSpaceEnv(this.mapSeed);
     this.playerShip = new PlayerShip(this.camera, this.spaceEnv);
+    this.playerShip.setFlightConfig(this.config);
     this.playerShip.resetSpawn();
 
     this.cockpit = new Cockpit(this.camera);
@@ -312,6 +315,9 @@ export class GameEngine {
     }
     if (this.meteorSystem && typeof this.meteorSystem.setParticleDensity === 'function') {
       this.meteorSystem.setParticleDensity(pDensity);
+    }
+    if (this.playerShip && typeof this.playerShip.setFlightConfig === 'function') {
+      this.playerShip.setFlightConfig(this.config);
     }
     if (this.config.showStats === undefined) {
       this.config.showStats = true;

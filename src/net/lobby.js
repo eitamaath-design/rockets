@@ -148,6 +148,8 @@ class LobbyService {
           asteroidCount: 100,
           megaRadius: 2800,
           meteorFrequency: 10,
+          forwardAccel: 60,
+          momentumShearing: 0.0,
           renderScale: 1.0,
           maxFps: 60,
           shaderQuality: 'balanced',

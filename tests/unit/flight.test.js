@@ -684,4 +684,139 @@ describe('Player Flight Physics & Momentum', () => {
       expect(ship.currentRollInput).toBe(0.0);
     });
   });
+
+  describe('Configurable Forward Acceleration & Momentum Shearing Flight Dynamics', () => {
+    it('should initialize with default forwardAccel = 60.0 and momentumShearing = 0.0', () => {
+      expect(ship.forwardAccel).toBe(60.0);
+      expect(ship.hyperAccel).toBe(90.0);
+      expect(ship.momentumShearing).toBe(0.0);
+      expect(ship.kShear).toBe(2.5);
+      expect(ship.kRetro).toBe(2.0);
+    });
+
+    it('should update forwardAccel via setFlightConfig and clamp to [20, 180]', () => {
+      ship.setFlightConfig({ forwardAccel: 120 });
+      expect(ship.forwardAccel).toBe(120.0);
+      expect(ship.hyperAccel).toBe(180.0);
+
+      // Clamp lower bound
+      ship.setFlightConfig({ forwardAccel: 10 });
+      expect(ship.forwardAccel).toBe(20.0);
+      expect(ship.hyperAccel).toBe(30.0);
+
+      // Clamp upper bound
+      ship.setFlightConfig({ forwardAccel: 250 });
+      expect(ship.forwardAccel).toBe(180.0);
+      expect(ship.hyperAccel).toBe(270.0);
+
+      // Test alias 'accel'
+      ship.setFlightConfig({ accel: '95' });
+      expect(ship.forwardAccel).toBe(95.0);
+    });
+
+    it('should accelerate proportionally faster with higher forwardAccel', () => {
+      ship.setFlightConfig({ forwardAccel: 120 });
+      ship.input.thrust = true;
+      ship.update(1.0);
+      expect(ship.getSpeed()).toBeCloseTo(120.0, 1);
+    });
+
+    it('should update momentumShearing via setFlightConfig and clamp to [0.0, 1.0]', () => {
+      ship.setFlightConfig({ momentumShearing: 0.75 });
+      expect(ship.momentumShearing).toBe(0.75);
+
+      // Test alias 'shear'
+      ship.setFlightConfig({ shear: 0.4 });
+      expect(ship.momentumShearing).toBe(0.4);
+
+      // Clamp lower bound
+      ship.setFlightConfig({ momentumShearing: -0.5 });
+      expect(ship.momentumShearing).toBe(0.0);
+
+      // Clamp upper bound
+      ship.setFlightConfig({ momentumShearing: 1.8 });
+      expect(ship.momentumShearing).toBe(1.0);
+    });
+
+    it('should preserve 100% Newtonian momentum without lateral damping when momentumShearing = 0.0', () => {
+      ship.setFlightConfig({ momentumShearing: 0.0 });
+      // Velocity purely along +X (orthogonal to hull heading which is along -Z)
+      ship.velocity.set(150.0, 0, 0);
+      ship.input.thrust = true;
+
+      // Simulate 0.5s thrust
+      ship.update(0.5);
+
+      // X velocity (lateral drift) must remain completely unperturbed
+      expect(ship.velocity.x).toBeCloseTo(150.0, 1);
+      // Z velocity accelerates forward (-Z direction)
+      expect(ship.velocity.z).toBeLessThan(0);
+    });
+
+    it('should damp lateral drift proportionally when momentumShearing > 0.0 during forward thrust', () => {
+      // Ship 1: S = 1.0
+      ship.setFlightConfig({ momentumShearing: 1.0 });
+      ship.velocity.set(100.0, 0, 0);
+      ship.input.thrust = true;
+
+      for (let i = 0; i < 30; i++) {
+        ship.update(0.016); // ~0.48s
+      }
+      const finalVxFullShear = ship.velocity.x;
+      // At kShear=2.5 and dt~0.48s, factor ~ e^(-1.2) ~ 0.30 -> vx ~ 30 u/s
+      expect(finalVxFullShear).toBeLessThan(40.0);
+
+      // Ship 2: S = 0.5
+      const shipHalf = new PlayerShip(camera, mockSpaceEnv);
+      shipHalf.setFlightConfig({ momentumShearing: 0.5 });
+      shipHalf.velocity.set(100.0, 0, 0);
+      shipHalf.input.thrust = true;
+
+      for (let i = 0; i < 30; i++) {
+        shipHalf.update(0.016);
+      }
+      const finalVxHalfShear = shipHalf.velocity.x;
+
+      // Half shear should damp less than full shear
+      expect(finalVxHalfShear).toBeGreaterThan(finalVxFullShear);
+      expect(finalVxHalfShear).toBeLessThan(100.0);
+    });
+
+    it('should aggressively cancel retrograde velocity when reversing under forward thrust with momentumShearing > 0.0', () => {
+      // Hull faces -Z. Ship moves along +Z (flying backwards at 200 u/s)
+      ship.setFlightConfig({ forwardAccel: 60, momentumShearing: 1.0 });
+      ship.velocity.set(0, 0, 200.0);
+      ship.input.thrust = true;
+
+      // With S=1.0 and kRetro=2.0, retrograde decay + 60 u/s² forward thrust cancels backwards speed in < 1.5s
+      for (let i = 0; i < 60; i++) {
+        ship.update(0.02); // 1.2s total
+      }
+
+      // Should have already reversed direction to forward (vz <= 0)
+      expect(ship.velocity.z).toBeLessThanOrEqual(0.0);
+    });
+
+    it('should NOT apply retrograde damping when moving forward (vParallel >= 0)', () => {
+      ship.setFlightConfig({ forwardAccel: 60, momentumShearing: 1.0 });
+      // Moving forward along -Z at 100 u/s
+      ship.velocity.set(0, 0, -100.0);
+      ship.input.thrust = true;
+
+      ship.update(0.5); // should gain +30 forward speed without any retro damping
+      expect(ship.velocity.z).toBeCloseTo(-130.0, 1);
+    });
+
+    it('should NOT apply any momentum shearing when coasting (thrust = false) even with momentumShearing = 1.0', () => {
+      ship.setFlightConfig({ momentumShearing: 1.0 });
+      ship.velocity.set(100.0, 0, 100.0);
+      ship.input.thrust = false;
+
+      ship.update(1.0);
+
+      // In zero-gravity space, unpowered drifting must preserve all inertia without artificial damping
+      expect(ship.velocity.x).toBe(100.0);
+      expect(ship.velocity.z).toBe(100.0);
+    });
+  });
 });

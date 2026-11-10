@@ -13,6 +13,8 @@ export class GameNetwork {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
+      forwardAccel: 60,
+      momentumShearing: 0.0,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
@@ -128,7 +130,10 @@ export class GameNetwork {
     // Incoming synchronized room configuration from host
     configChannel.onReceive((data, peerId) => {
       if (!data || !data.config) return;
-      this.config = { ...this.config, ...data.config };
+      const incoming = { ...data.config };
+      if (incoming.forwardAccel !== undefined) incoming.forwardAccel = Math.min(180, Math.max(20, Number(incoming.forwardAccel) || 60));
+      if (incoming.momentumShearing !== undefined) incoming.momentumShearing = Math.min(1.0, Math.max(0.0, Number(incoming.momentumShearing) || 0.0));
+      this.config = { ...this.config, ...incoming };
       if (data.mapSeed !== undefined) this.mapSeed = data.mapSeed;
       for (const cb of this.configListeners) {
         cb(this.config, peerId);
@@ -358,7 +363,10 @@ export class GameNetwork {
   }
 
   broadcastConfig(newConfig) {
-    this.config = { ...this.config, ...newConfig };
+    const sanitized = { ...(newConfig || {}) };
+    if (sanitized.forwardAccel !== undefined) sanitized.forwardAccel = Math.min(180, Math.max(20, Number(sanitized.forwardAccel) || 60));
+    if (sanitized.momentumShearing !== undefined) sanitized.momentumShearing = Math.min(1.0, Math.max(0.0, Number(sanitized.momentumShearing) || 0.0));
+    this.config = { ...this.config, ...sanitized };
     if (this.sendConfig) {
       this.sendConfig({ config: this.config, mapSeed: this.mapSeed });
     }

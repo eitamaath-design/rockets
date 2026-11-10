@@ -261,5 +261,47 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       expect(monitor.style.display).toBe('block');
       hud.destroy();
     });
+
+    it('should propagate forwardAccel and momentumShearing through room config and HUD config pill', () => {
+      document.body.innerHTML = '<div id="hud-mount"></div>';
+      const mount = document.getElementById('hud-mount');
+      const mockEngine = {
+        config: {
+          voxelQuality: 'high',
+          asteroidCount: 100,
+          megaRadius: 2800,
+          meteorFrequency: 10,
+          forwardAccel: 120,
+          momentumShearing: 0.85,
+          renderScale: 1.0,
+          maxFps: 120,
+          shaderQuality: 'balanced',
+          particleDensity: 'balanced'
+        },
+        network: { roomName: 'Shear-Sector', roomId: 'shear-sector' },
+        playerShip: { input: { analogPitch: 0, analogYaw: 0 } }
+      };
+
+      const hud = new GameHUD(mount, mockEngine);
+      const pill = document.getElementById('hud-config-pill');
+      expect(pill.textContent).toContain('ACC: 120');
+      expect(pill.textContent).toContain('SHEAR: 0.85');
+      hud.destroy();
+    });
+
+    it('should clamp network broadcastConfig and onReceive flight parameters', async () => {
+      const { GameNetwork } = await import('../../src/net/network.js');
+      const net = new GameNetwork({
+        roomId: 'test-net-room',
+        config: { forwardAccel: 999, momentumShearing: -2.0 }
+      });
+      net.broadcastConfig({ forwardAccel: 250, momentumShearing: 1.5 });
+      expect(net.config.forwardAccel).toBe(180);
+      expect(net.config.momentumShearing).toBe(1.0);
+
+      net.broadcastConfig({ forwardAccel: 5, momentumShearing: -0.5 });
+      expect(net.config.forwardAccel).toBe(20);
+      expect(net.config.momentumShearing).toBe(0.0);
+    });
   });
 });

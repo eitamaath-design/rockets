@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { clamp } from '../utils/math.js';
 
+const _scratchVPerp = new THREE.Vector3();
+
 export class PlayerShip {
   constructor(camera, spaceEnv) {
     this.camera = camera;
@@ -21,8 +23,11 @@ export class PlayerShip {
     this.maxSpeed = 280.0; // units per second (sustained cruising max speed)
     this.maxSustainedSpeed = 280.0;
     this.hyperSpeed = 560.0;
-    this.forwardAccel = 60.0; // units per second squared
-    this.hyperAccel = 90.0;
+    this.forwardAccel = 60.0; // units per second squared (clamped [20.0, 180.0])
+    this.hyperAccel = 90.0; // 1.5 * forwardAccel
+    this.momentumShearing = 0.0; // S in [0.0, 1.0], default 0.0 for pure Newtonian backward compatibility
+    this.kShear = 2.5; // Lateral damping rate constant
+    this.kRetro = 2.0; // Retrograde cancellation rate constant
     this.hyperDecelRate = 350.0;
     this.decelRate = (this.maxSpeed / 2.0) * 3.0; // 420.0 u/s^2 for brakes (stops in ~0.67s from max sustained speed)
     this.strafeAccel = 40.0;
@@ -141,6 +146,28 @@ export class PlayerShip {
   getLaserCarveDepth(isFireLaser = false) {
     const scaleFactor = isFireLaser ? 1.25 : 1.1;
     return this.radius * scaleFactor;
+  }
+
+  /**
+   * Updates flight physics parameters (forward acceleration and momentum shearing).
+   * @param {Object} config
+   */
+  setFlightConfig(config = {}) {
+    if (config.forwardAccel !== undefined || config.accel !== undefined) {
+      const raw = config.forwardAccel !== undefined ? config.forwardAccel : config.accel;
+      const val = parseFloat(raw);
+      if (!isNaN(val)) {
+        this.forwardAccel = clamp(val, 20.0, 180.0);
+        this.hyperAccel = this.forwardAccel * 1.5;
+      }
+    }
+    if (config.momentumShearing !== undefined || config.shear !== undefined) {
+      const raw = config.momentumShearing !== undefined ? config.momentumShearing : config.shear;
+      const val = parseFloat(raw);
+      if (!isNaN(val)) {
+        this.momentumShearing = clamp(val, 0.0, 1.0);
+      }
+    }
   }
 
   /**
@@ -590,8 +617,27 @@ export class PlayerShip {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion).normalize();
 
-    // 1. Forward Thrust & Hyper-Speed Handling
+    // 1. Forward Thrust, Shearing & Hyper-Speed Handling
     if (this.input.thrust) {
+      if (this.momentumShearing > 0) {
+        const vParallel = this.velocity.dot(forward);
+        _scratchVPerp.copy(this.velocity).addScaledVector(forward, -vParallel);
+
+        // Lateral damping
+        const lateralDamp = Math.max(0, 1.0 - this.momentumShearing * this.kShear * dt);
+        _scratchVPerp.multiplyScalar(lateralDamp);
+
+        // Retrograde cancellation (only when drifting backwards relative to nose)
+        let newVParallel = vParallel;
+        if (vParallel < 0) {
+          const retroDamp = Math.max(0, 1.0 - this.momentumShearing * this.kRetro * dt);
+          newVParallel = vParallel * retroDamp;
+        }
+
+        // Reassemble velocity vector
+        this.velocity.copy(forward).multiplyScalar(newVParallel).add(_scratchVPerp);
+      }
+
       const currentSpeed = this.velocity.length();
       if (currentSpeed < this.maxSpeed) {
         this.velocity.addScaledVector(forward, this.forwardAccel * dt);
