@@ -14,11 +14,13 @@ describe('Distant Celestial Star-Glow Beacon for Remote Ships', () => {
     remote = new RemoteShip('peer-glow-1', scene, 'StarGlowPilot');
   });
 
-  it('should create a dedicated star-glow mesh with AdditiveBlending and depthWrite: false', () => {
+  it('should create a dedicated star-glow mesh with AdditiveBlending, depthWrite: false, and a valid radial DataTexture map', () => {
     expect(remote.starGlowMesh).toBeInstanceOf(THREE.Mesh);
     expect(remote.starGlowMesh.material.blending).toBe(THREE.AdditiveBlending);
     expect(remote.starGlowMesh.material.depthWrite).toBe(false);
     expect(remote.starGlowMesh.material.transparent).toBe(true);
+    expect(remote.starGlowMesh.material.map).toBeInstanceOf(THREE.Texture);
+    expect(remote.starGlowMesh.material.map.image).toBeDefined();
   });
 
   it('should fade out star glow completely at close range (<= 100u)', () => {

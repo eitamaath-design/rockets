@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { createRadialGlowTexture } from './trail.js';
 
 export class RemoteShip {
   constructor(peerId, scene, playerName = 'Pilot') {
+    window.RemoteShip = RemoteShip;
     this.peerId = peerId;
     this.scene = scene;
     this.playerName = playerName;
@@ -222,9 +224,12 @@ export class RemoteShip {
     this.group.add(this.shieldMesh);
 
     // 9. Dedicated Celestial Star-Glow Billboard Mesh (AdditiveBlending, depthWrite: false)
-    const starGlowGeom = new THREE.PlaneGeometry(12.0, 12.0);
+    // Geometry is sized 2.4x2.4 in local space so that when multiplied by group.scale (5.0),
+    // world base size is 12.0 units with smooth Gaussian core-to-perimeter decay.
+    const starGlowGeom = new THREE.PlaneGeometry(2.4, 2.4);
     const starGlowMat = new THREE.MeshBasicMaterial({
       color: 0x00e5ff,
+      map: createRadialGlowTexture(64),
       transparent: true,
       opacity: 0.0,
       blending: THREE.AdditiveBlending,

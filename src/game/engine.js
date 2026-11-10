@@ -128,6 +128,8 @@ class BlinkVFXSystem {
 
 export class GameEngine {
   constructor({ container, network, mapSeed, config, onHudUpdate, onDeathNotice }) {
+    window.GameEngine = GameEngine;
+    GameEngine.RemoteShip = RemoteShip;
     this.container = container;
     this.network = network;
     this.mapSeed = mapSeed;

@@ -4,9 +4,11 @@ import { GameNetwork } from './net/network.js';
 import { GameEngine } from './game/engine.js';
 import { GameHUD } from './game/hud.js';
 import { logger } from './utils/logger.js';
+import { RemoteShip } from './game/remoteShip.js';
 
 window.THREE = THREE;
 window.logger = logger;
+window.__RemoteShip = RemoteShip;
 
 const app = document.getElementById('app');
 
