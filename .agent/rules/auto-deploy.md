@@ -4,7 +4,7 @@ Project-level deployment policy: **`Auto-Deploy Per Task: true`**.
 Every completed task MUST automatically test, build, deploy, and push to remote before concluding.
 
 Full runbook details and architecture are documented in:
-👉 [KNOWLEDGE_BASE.md §4: Operations & Maintenance Runbook](file:///d:/Projects/Rockets/KNOWLEDGE_BASE.md#4-operations--maintenance-runbook)
+👉 [KNOWLEDGE_BASE.md §6: Operations & Maintenance Runbook](file:///d:/Projects/Rockets/KNOWLEDGE_BASE.md#6-operations--maintenance-runbook)
 
 ### Essential Step E Command Sequence
 1. `npm run test:unit`

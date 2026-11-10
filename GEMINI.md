@@ -6,7 +6,7 @@ In this project (`rockets`), the project-level deployment policy is strictly con
 Every task, feature, or bug fix must be verified and automatically deployed to live production by its Task Lead (Step E) before concluding.
 
 For full architectural details, service worker cache derivation, and operational guidelines, consult the single source of truth:
-👉 [KNOWLEDGE_BASE.md §4: Operations & Maintenance Runbook](file:///d:/Projects/Rockets/KNOWLEDGE_BASE.md#4-operations--maintenance-runbook)
+👉 [KNOWLEDGE_BASE.md §6: Operations & Maintenance Runbook](file:///d:/Projects/Rockets/KNOWLEDGE_BASE.md#6-operations--maintenance-runbook)
 
 ### Essential Step E Release Sequence
 ```bash
