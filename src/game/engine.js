@@ -356,6 +356,7 @@ export class GameEngine {
           ws.remoteLaserCoreMat,
           ws.remoteLaserGlowMat,
           ws.remoteFireLaserGlowMat,
+          ws.laserSurgeSystem ? ws.laserSurgeSystem.material : null,
           ws.missileBodyMat,
           ws.missileFinMat,
           ws.missileGlowMat

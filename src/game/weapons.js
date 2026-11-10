@@ -15,6 +15,13 @@ const _beamHitPoint = new THREE.Vector3();
 const _beamCenterOrigin = new THREE.Vector3();
 const _beamMid = new THREE.Vector3();
 const _beamUp = new THREE.Vector3();
+const _surgeDummy = new THREE.Object3D();
+const _surgeColor = new THREE.Color();
+const _surgeBeamDir = new THREE.Vector3();
+const _surgeU = new THREE.Vector3();
+const _surgeV = new THREE.Vector3();
+const _surgePos = new THREE.Vector3();
+const _surgeRefUp = new THREE.Vector3();
 
 /**
  * Dynamic GPU InstancedMesh fire trail system for kinetic projectiles and missiles.
@@ -219,6 +226,218 @@ class FireTrailSystem {
     this.material.dispose();
     this.particles = [];
     this.lastEmitPos.clear();
+  }
+}
+
+/**
+ * Dynamic GPU InstancedMesh continuous surging oscillating energy particle system for laser beams.
+ * Renders high-velocity plasma nodes and counter-phase double-helix filaments coursing
+ * along the twin beams from emitter hardpoints to the impact/target point.
+ */
+export class LaserSurgeSystem {
+  constructor(scene) {
+    this.scene = scene;
+    this.maxParticles = 1024;
+    this.simTime = 0;
+    this.particleDensity = 'balanced';
+    this.particleDensityMultiplier = 1.0;
+    this._prevActiveCount = 0;
+
+    this.planeGeo = new THREE.PlaneGeometry(1, 1);
+    this.glowTexture = createRadialGlowTexture(64);
+
+    this.material = new THREE.MeshBasicMaterial({
+      map: this.glowTexture,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+
+    this.mesh = new THREE.InstancedMesh(this.planeGeo, this.material, this.maxParticles);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.maxParticles * 3), 3);
+    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+
+    // Disable frustum culling so laser surge energy never vanishes during high-rate turns
+    this.mesh.frustumCulled = false;
+
+    for (let i = 0; i < this.maxParticles; i++) {
+      this.mesh.setMatrixAt(i, _hideMatrix);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+
+    this.scene.add(this.mesh);
+  }
+
+  setParticleDensity(density = 'balanced') {
+    if (['low', 'balanced', 'high'].includes(density)) {
+      this.particleDensity = density;
+      this.particleDensityMultiplier = density === 'low' ? 0.5 : (density === 'high' ? 1.5 : 1.0);
+    }
+  }
+
+  update(dt, laserBeams, camera) {
+    this.simTime += dt;
+    const camQuat = (camera && camera.quaternion) ? camera.quaternion : _camQuat.identity();
+
+    let activeSlots = 0;
+    const baseQuadsPerBeam = Math.max(8, Math.round(64 * this.particleDensityMultiplier));
+
+    if (laserBeams && laserBeams.length > 0) {
+      for (let bIdx = 0; bIdx < laserBeams.length; bIdx++) {
+        const beam = laserBeams[bIdx];
+        if (!beam || beam.life <= 0 || !beam.leftOrigin || !beam.rightOrigin || !beam.hitPoint) {
+          continue;
+        }
+
+        const isLocal = !!beam.isLocal;
+        const isFireLaser = !!beam.isFireLaser;
+        const hitPoint = beam.hitPoint;
+
+        // Twin beams: left emitter path and right emitter path
+        for (let path = 0; path < 2; path++) {
+          const origin = path === 0 ? beam.leftOrigin : beam.rightOrigin;
+          _surgeBeamDir.copy(hitPoint).sub(origin);
+          const dist = _surgeBeamDir.length();
+          if (dist < 0.5) continue;
+
+          _surgeBeamDir.multiplyScalar(1.0 / dist);
+
+          // Stable orthonormal coordinate frame (U, V) perpendicular to beam axis
+          if (Math.abs(_surgeBeamDir.y) < 0.95) {
+            _surgeRefUp.set(0, 1, 0);
+          } else {
+            _surgeRefUp.set(1, 0, 0);
+          }
+          _surgeU.crossVectors(_surgeBeamDir, _surgeRefUp).normalize();
+          _surgeV.crossVectors(_surgeBeamDir, _surgeU).normalize();
+
+          const vSurge = 420.0; // world units per second surge speed
+          const nQuads = baseQuadsPerBeam;
+
+          for (let i = 0; i < nQuads; i++) {
+            if (activeSlots >= this.maxParticles) break;
+
+            const uBase = i / nQuads;
+            let u = (uBase + (vSurge * this.simTime) / dist) % 1.0;
+            if (u < 0) u += 1.0;
+            const s = u * dist;
+
+            // Smooth boundary taper at emitter and hit point
+            let taper = 1.0;
+            if (u < 0.05) {
+              taper = u / 0.05;
+            } else if (u > 0.95) {
+              taper = (1.0 - u) / 0.05;
+            }
+
+            const mode = i % 3;
+            let scale;
+
+            if (mode === 0) {
+              // 1. Core Energy Soliton Packet (axial r = 0)
+              _surgePos.copy(origin).addScaledVector(_surgeBeamDir, s);
+              const psi = 22.0 * this.simTime - 0.08 * s;
+              const envelope = 0.5 + 0.5 * Math.sin(psi);
+              scale = (0.35 + 0.35 * envelope) * taper;
+
+              if (isFireLaser) {
+                // Incandescent sun-gold core
+                _surgeColor.setRGB(1.0, 0.95, 0.70 + 0.30 * envelope);
+              } else if (!isLocal) {
+                // Blinding white-hot / magenta-tinged remote core
+                _surgeColor.setRGB(1.0, 0.85 + 0.15 * envelope, 0.95);
+              } else {
+                // Blinding electric white-hot local core
+                _surgeColor.setRGB(0.90 + 0.10 * envelope, 0.95 + 0.05 * envelope, 1.0);
+              }
+            } else {
+              // 2. Double-Helix Outer Filaments (Mode 1: Strand A, Mode 2: Strand B counter-phase)
+              const theta0 = (mode === 1) ? 0.0 : Math.PI;
+              const theta = theta0 + 16.0 * this.simTime + 0.14 * s;
+              const rHelix = 0.58 * Math.sqrt(Math.sin(Math.PI * u));
+
+              const cosT = Math.cos(theta);
+              const sinT = Math.sin(theta);
+              _surgePos.copy(origin)
+                .addScaledVector(_surgeBeamDir, s)
+                .addScaledVector(_surgeU, rHelix * cosT)
+                .addScaledVector(_surgeV, rHelix * sinT);
+
+              scale = (0.28 + 0.18 * Math.sin(theta * 2.0)) * taper;
+
+              if (isFireLaser) {
+                if (mode === 1) {
+                  _surgeColor.setRGB(1.0, 0.45, 0.05); // Blazing orange
+                } else {
+                  _surgeColor.setRGB(1.0, 0.15, 0.02); // Fiery crimson
+                }
+              } else if (!isLocal) {
+                if (mode === 1) {
+                  _surgeColor.setRGB(1.0, 0.05, 0.60); // Hot neon magenta
+                } else {
+                  _surgeColor.setRGB(0.70, 0.10, 1.00); // Electric violet
+                }
+              } else {
+                if (mode === 1) {
+                  _surgeColor.setRGB(0.00, 0.85, 1.00); // Intense cyan
+                } else {
+                  _surgeColor.setRGB(0.15, 0.50, 1.00); // Azure cobalt
+                }
+              }
+            }
+
+            _surgeDummy.position.copy(_surgePos);
+            _surgeDummy.quaternion.copy(camQuat);
+            _surgeDummy.scale.set(scale, scale, scale);
+            _surgeDummy.updateMatrix();
+
+            this.mesh.setMatrixAt(activeSlots, _surgeDummy.matrix);
+            this.mesh.setColorAt(activeSlots, _surgeColor);
+            activeSlots++;
+          }
+        }
+      }
+    }
+
+    // Hide newly deactivated instances
+    for (let j = activeSlots; j < this._prevActiveCount; j++) {
+      this.mesh.setMatrixAt(j, _hideMatrix);
+    }
+
+    // Only upload to GPU if active instances exist or we just transitioned to 0
+    if (activeSlots > 0 || this._prevActiveCount > 0) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+      if (this.mesh.instanceColor) {
+        this.mesh.instanceColor.needsUpdate = true;
+      }
+    }
+    this._prevActiveCount = activeSlots;
+  }
+
+  clear() {
+    if (this._prevActiveCount > 0) {
+      for (let i = 0; i < this._prevActiveCount; i++) {
+        this.mesh.setMatrixAt(i, _hideMatrix);
+      }
+      this.mesh.instanceMatrix.needsUpdate = true;
+      if (this.mesh.instanceColor) {
+        this.mesh.instanceColor.needsUpdate = true;
+      }
+      this._prevActiveCount = 0;
+    }
+  }
+
+  cleanup() {
+    this.clear();
+    if (this.mesh && this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
+    }
+    if (this.planeGeo) this.planeGeo.dispose();
+    if (this.glowTexture) this.glowTexture.dispose();
+    if (this.material) this.material.dispose();
   }
 }
 
@@ -502,6 +721,9 @@ export class WeaponsSystem {
     this.particleDensityMultiplier = 1.0;
     this.scene.add(this.explosionMesh);
 
+    // Dynamic continuous surging oscillating laser energy particle system
+    this.laserSurgeSystem = new LaserSurgeSystem(this.scene);
+
     this.initGeometriesAndMaterials();
     this.listenToNetworkEvents();
   }
@@ -513,6 +735,9 @@ export class WeaponsSystem {
       if (this.fireTrails) {
         this.fireTrails.particleDensity = density;
         this.fireTrails.particleDensityMultiplier = this.particleDensityMultiplier;
+      }
+      if (this.laserSurgeSystem) {
+        this.laserSurgeSystem.setParticleDensity(density);
       }
     }
   }
@@ -681,6 +906,9 @@ export class WeaponsSystem {
       beam.maxLife = 0.28;
       beam.isContinuous = true;
       beam.group.visible = true;
+      if (!beam.leftOrigin) beam.leftOrigin = new THREE.Vector3();
+      if (!beam.rightOrigin) beam.rightOrigin = new THREE.Vector3();
+      if (!beam.hitPoint) beam.hitPoint = new THREE.Vector3();
       return beam;
     }
 
@@ -711,11 +939,21 @@ export class WeaponsSystem {
       isFireLaser,
       life: 0.28,
       maxLife: 0.28,
-      isContinuous: true
+      isContinuous: true,
+      leftOrigin: new THREE.Vector3(),
+      rightOrigin: new THREE.Vector3(),
+      hitPoint: new THREE.Vector3()
     };
   }
 
   updateTwinLaserTransforms(beamObj, leftOrigin, rightOrigin, hitPoint, isFireLaser = false) {
+    if (!beamObj.leftOrigin) beamObj.leftOrigin = new THREE.Vector3();
+    if (!beamObj.rightOrigin) beamObj.rightOrigin = new THREE.Vector3();
+    if (!beamObj.hitPoint) beamObj.hitPoint = new THREE.Vector3();
+    beamObj.leftOrigin.copy(leftOrigin);
+    beamObj.rightOrigin.copy(rightOrigin);
+    beamObj.hitPoint.copy(hitPoint);
+
     if (beamObj.isFireLaser !== isFireLaser) {
       beamObj.isFireLaser = isFireLaser;
       const templateCoreMat = isFireLaser ? this.fireLaserCoreMat : (beamObj.isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
@@ -771,6 +1009,9 @@ export class WeaponsSystem {
     this._wasLaserActive = false;
     if (typeof audio.stopLaserLoop === 'function') {
       audio.stopLaserLoop();
+    }
+    if (this.laserSurgeSystem && (!this.laserBeams || this.laserBeams.length === 0)) {
+      this.laserSurgeSystem.clear();
     }
   }
 
@@ -1969,6 +2210,11 @@ export class WeaponsSystem {
 
     // 8. Update Fire Trails
     this.fireTrails.update(dt, camera);
+
+    // 9. Update Continuous Surging Oscillating Laser Energy Particles
+    if (this.laserSurgeSystem) {
+      this.laserSurgeSystem.update(dt, this.laserBeams, camera);
+    }
   }
 
   // Compatibility getter
@@ -2024,5 +2270,8 @@ export class WeaponsSystem {
     if (this.fireLaserGlowMat) this.fireLaserGlowMat.dispose();
     if (this.remoteFireLaserGlowMat) this.remoteFireLaserGlowMat.dispose();
     this.fireTrails.cleanup();
+    if (this.laserSurgeSystem) {
+      this.laserSurgeSystem.cleanup();
+    }
   }
 }
