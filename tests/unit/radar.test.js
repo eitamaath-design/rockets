@@ -200,4 +200,122 @@ describe('2D Tactical Radar with 3-Second Refresh and Viewpoint Elevation Indica
     // Only the visible enemy should be displayed
     expect(blips.children.length).toBe(1);
   });
+
+  it('should trigger an immediate initial scan on the first frame of hud.update', () => {
+    const enemy = {
+      position: new THREE.Vector3(0, 0, -300),
+      isDead: false,
+      isInvisible: false
+    };
+    remoteShips.set('enemy-init', enemy);
+
+    const blips = document.getElementById('hud-radar-blips');
+    expect(blips.children.length).toBe(0);
+
+    // Call hud.update with a small frameTime
+    hud.update({ frameTime: 16 });
+
+    // Should immediately refresh blips on first frame
+    expect(blips.children.length).toBe(1);
+    expect(hud._hasInitialRadarScan).toBe(true);
+
+    // Second frame should not force refresh unless 3s elapses
+    remoteShips.set('enemy-init2', {
+      position: new THREE.Vector3(100, 0, -300),
+      isDead: false,
+      isInvisible: false
+    });
+    hud.update({ frameTime: 16 });
+    // Still 1 blip because timer has only advanced 16ms < 3.0s
+    expect(blips.children.length).toBe(1);
+  });
+
+  it('should immediately refresh blips when forceRefresh parameter is true regardless of timer', () => {
+    const enemy = {
+      position: new THREE.Vector3(0, 0, -150),
+      isDead: false,
+      isInvisible: false
+    };
+    remoteShips.set('forced-enemy', enemy);
+
+    const blips = document.getElementById('hud-radar-blips');
+    // Normal call with 0.1s dt does not refresh blips (timer 0.1 < 3.0)
+    hud.updateRadar(0.1, false);
+    expect(blips.children.length).toBe(0);
+
+    // Force refresh with 0.016s dt
+    hud.updateRadar(0.016, true);
+    expect(blips.children.length).toBe(1);
+    expect(hud.radarRefreshTimer).toBe(0.0);
+  });
+
+  it('should tolerate remoteShips provided as an Array or plain Object dictionary with plain coordinate objects', () => {
+    const blips = document.getElementById('hud-radar-blips');
+
+    // Test Array of ships with plain { x, y, z } position
+    mockEngine.remoteShips = [
+      {
+        id: 'array-ship-1',
+        position: { x: 0, y: 50, z: -200 },
+        isDead: false,
+        isInvisible: false
+      },
+      {
+        peerId: 'array-ship-2',
+        position: { x: 100, y: -50, z: -300 },
+        isDead: false,
+        isInvisible: false
+      }
+    ];
+
+    hud.updateRadar(3.0);
+    expect(blips.children.length).toBe(2);
+
+    // Test plain Object dictionary of ships
+    mockEngine.remoteShips = {
+      'obj-ship-1': {
+        position: { x: 50, y: 0, z: -100 },
+        isDead: false,
+        isInvisible: false
+      }
+    };
+
+    hud.updateRadar(3.0);
+    expect(blips.children.length).toBe(1);
+  });
+
+  it('should safely render contacts very close to the player position at dial center without NaN or div-by-zero', () => {
+    const closeEnemy = {
+      position: new THREE.Vector3(0.0001, 0, 0.0001), // horizDist <= 0.001
+      isDead: false,
+      isInvisible: false
+    };
+    remoteShips.set('close-enemy', closeEnemy);
+
+    hud.updateRadar(3.0);
+    const blips = document.getElementById('hud-radar-blips');
+    expect(blips.children.length).toBe(1);
+
+    const blip = blips.children[0];
+    // Center coordinate is 55px, 55px
+    expect(parseFloat(blip.style.left)).toBe(55);
+    expect(parseFloat(blip.style.top)).toBe(55);
+  });
+
+  it('should not redundantly call updateRadar from updateMasterMonitor preventing double-ticking', () => {
+    const radarSpy = vi.spyOn(hud, 'updateRadar');
+
+    // Simulate monitor tick
+    hud.updateMasterMonitor({
+      fps: 60,
+      frameTime: 16.6,
+      drawCalls: 50,
+      triangles: 100000,
+      isMaster: true,
+      showStats: true
+    });
+
+    expect(radarSpy).not.toHaveBeenCalled();
+    radarSpy.mockRestore();
+  });
 });

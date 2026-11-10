@@ -11,6 +11,7 @@ export class GameHUD {
     this.lastMonitorUpdateTime = 0;
     this.monitorThrottleMs = 100; // 10Hz throttle (100ms)
     this.isMonitorMinimized = false;
+    this._hasInitialRadarScan = false;
     this._windowListeners = [];
     this._documentListeners = [];
     this._lastValues = {};
@@ -870,10 +871,10 @@ export class GameHUD {
     };
 
     const getMonitorBounds = () => {
-      const rect = monitorEl.getBoundingClientRect ? monitorEl.getBoundingClientRect() : { left: 12, top: 58, width: 220, height: 140 };
+      const rect = monitorEl.getBoundingClientRect ? monitorEl.getBoundingClientRect() : { left: 148, top: 58, width: 220, height: 140 };
       const parsedLeft = parseFloat(monitorEl.style.left);
       const parsedTop = parseFloat(monitorEl.style.top);
-      const left = !Number.isNaN(parsedLeft) ? parsedLeft : (rect.left || 12);
+      const left = !Number.isNaN(parsedLeft) ? parsedLeft : (rect.left || 148);
       const top = !Number.isNaN(parsedTop) ? parsedTop : (rect.top || 58);
       const width = rect.width > 0 ? rect.width : (monitorEl.offsetWidth > 0 ? monitorEl.offsetWidth : 220);
       const height = rect.height > 0 ? rect.height : (monitorEl.offsetHeight > 0 ? monitorEl.offsetHeight : 140);
@@ -906,7 +907,7 @@ export class GameHUD {
         monitorEl.style.right = 'auto';
         const { vw, vh } = getViewportSize();
         const bounds = getMonitorBounds();
-        const restoreLeft = this._savedMonitorPos ? this._savedMonitorPos.left : 12;
+        const restoreLeft = this._savedMonitorPos ? this._savedMonitorPos.left : 148;
         const restoreTop = this._savedMonitorPos ? this._savedMonitorPos.top : 58;
         const clampedLeft = Math.max(0, Math.min(Math.max(0, vw - bounds.width), restoreLeft));
         const clampedTop = Math.max(0, Math.min(Math.max(0, vh - bounds.height), restoreTop));
@@ -1430,7 +1431,11 @@ export class GameHUD {
 
     // 2D Tactical Radar (all clients)
     const radarDt = state?.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
-    this.updateRadar(radarDt);
+    const isFirstScan = !this._hasInitialRadarScan;
+    if (isFirstScan) {
+      this._hasInitialRadarScan = true;
+    }
+    this.updateRadar(radarDt, isFirstScan);
   }
 
   updateMasterMonitor(state) {
@@ -1513,11 +1518,7 @@ export class GameHUD {
     }
 
     // 9. Update Targeting System
-    const dt = state.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
     this.updateTargetingSystem(state);
-
-    // 10. Update 2D Tactical Radar (Refreshes every 3 seconds)
-    this.updateRadar(dt);
   }
 
   updateTargetingSystem(state = null) {
@@ -1631,7 +1632,7 @@ export class GameHUD {
     container.innerHTML = html;
   }
 
-  updateRadar(dt = 0.016) {
+  updateRadar(dt = 0.016, forceRefresh = false) {
     if (!this.engine || !this.engine.playerShip) return;
     const playerShip = this.engine.playerShip;
     const remoteShips = this.engine.remoteShips;
@@ -1646,26 +1647,56 @@ export class GameHUD {
       cadenceEl.textContent = `${remaining.toFixed(1)}s`;
     }
 
-    if (this.radarRefreshTimer >= 3.0) {
+    if (forceRefresh || this.radarRefreshTimer >= 3.0) {
       this.radarRefreshTimer = 0.0;
       // Refresh radar blips!
-      const quat = camera ? camera.quaternion : playerShip.quaternion;
+      let quat;
+      if (camera?.quaternion instanceof THREE.Quaternion) {
+        quat = camera.quaternion;
+      } else if (camera?.quaternion) {
+        quat = new THREE.Quaternion(camera.quaternion.x || 0, camera.quaternion.y || 0, camera.quaternion.z || 0, camera.quaternion.w ?? 1);
+      } else if (playerShip?.quaternion instanceof THREE.Quaternion) {
+        quat = playerShip.quaternion;
+      } else if (playerShip?.quaternion) {
+        quat = new THREE.Quaternion(playerShip.quaternion.x || 0, playerShip.quaternion.y || 0, playerShip.quaternion.z || 0, playerShip.quaternion.w ?? 1);
+      } else {
+        quat = new THREE.Quaternion();
+      }
+
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
-      const playerPos = playerShip.position;
+      const playerPos = (playerShip?.position instanceof THREE.Vector3)
+        ? playerShip.position
+        : ((playerShip?.position && typeof playerShip.position === 'object')
+            ? new THREE.Vector3(playerShip.position.x || 0, playerShip.position.y || 0, playerShip.position.z || 0)
+            : new THREE.Vector3(0, 0, 0));
 
       const radarRadiusPx = 48;
       const radarCenterX = 55;
       const radarCenterY = 55;
       const maxWorldRange = 4500.0; // Standoff detection range
 
+      let shipEntries = [];
+      if (remoteShips instanceof Map || typeof remoteShips?.entries === 'function') {
+        shipEntries = Array.from(remoteShips.entries());
+      } else if (Array.isArray(remoteShips)) {
+        shipEntries = remoteShips.map((s, idx) => [s.peerId || s.id || `ship-${idx}`, s]);
+      } else if (remoteShips && typeof remoteShips === 'object') {
+        shipEntries = Object.entries(remoteShips);
+      }
+
       let html = '';
-      if (remoteShips && remoteShips.size > 0) {
-        for (const [peerId, remote] of remoteShips.entries()) {
+      if (shipEntries.length > 0) {
+        for (const [peerId, remote] of shipEntries) {
           if (!remote || remote.isDead || remote.isInvisible) continue;
 
-          const rel = remote.position.clone().sub(playerPos);
+          const remotePos = remote.position instanceof THREE.Vector3
+            ? remote.position
+            : (remote.position ? new THREE.Vector3(remote.position.x || 0, remote.position.y || 0, remote.position.z || 0) : null);
+          if (!remotePos) continue;
+
+          const rel = remotePos.clone().sub(playerPos);
           const x = rel.dot(right);
           const y = rel.dot(fwd);
           const z = rel.dot(up);
