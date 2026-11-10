@@ -151,13 +151,28 @@ This document serves as the permanent master reference for the **Rockets** multi
   npm run deploy
   ```
 
-### Mandatory Automatic End-of-Task Deployment Policy
-Any task or turn introducing bug fixes, new features, or configuration adjustments in the **Rockets** workspace **must always deploy automatically at the end of the turn**:
-1. Run test verification (`npm run test:unit`).
-2. Build production assets (`npm run build`).
-3. Deploy directly to GitHub Pages (`npm run deploy`).
-4. Stage, commit, and push changes to `main` (`git add -A && git commit -m "..." && git push origin main`).
-5. Verify live production link: `https://eitamaath-design.github.io/rockets/`.
+### Deployment Policy & Strategy
+- **Auto-Deploy Per Task:** `true` (Every individual task, bug fix, or feature MUST automatically build, test, deploy to GitHub Pages, and push to `main` before moving to the next task).
+- **Target Platform:** GitHub Pages (`gh-pages` branch)
+- **Build Command:** `npm run build`
+- **Deploy Command:** `npm run deploy`
+- **Live URL:** `https://eitamaath-design.github.io/rockets/`
+- **Cache Invalidation:** Increment `CACHE_NAME` in `public/sw.js` whenever frontend assets/code change.
+
+### Mandatory Automatic Per-Task Deployment Runbook
+Every individual task lead in the **Rockets** workspace must execute this release sequence at the conclusion of Step E before concluding the task:
+1. Run unit test suite: `npm run test:unit`.
+2. Verify proof of work via `git diff --stat` (ensure physical disk changes exist).
+3. If code changed, bump PWA cache in `public/sw.js`.
+4. Compile production assets: `npm run build`.
+5. Publish to GitHub Pages: `npm run deploy`.
+6. Commit and push:
+   ```bash
+   git add .
+   git commit -m "<concise descriptive summary of completed task>"
+   git push origin main
+   ```
+7. Confirm live URL and report status to the parent orchestrator.
 
 ---
 
