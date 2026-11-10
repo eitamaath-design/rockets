@@ -1913,3 +1913,192 @@ html, body {
     max-width: 80px;
   }
 }
+
+/* =========================================
+   2D TACTICAL RADAR (3-SECOND REFRESH)
+   ========================================= */
+.hud-radar {
+  position: absolute;
+  top: 72px;
+  left: 18px;
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 6;
+  user-select: none;
+}
+
+.hud-radar-dial {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 25, 45, 0.72) 0%, rgba(3, 10, 20, 0.88) 100%);
+  border: 1.5px solid rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.25), inset 0 0 14px rgba(0, 212, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-radar-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgba(0, 212, 255, 0.25);
+  pointer-events: none;
+}
+
+.hud-radar-ring.ring-1 {
+  width: 36px;
+  height: 36px;
+  top: 37px;
+  left: 37px;
+}
+
+.hud-radar-ring.ring-2 {
+  width: 72px;
+  height: 72px;
+  top: 19px;
+  left: 19px;
+}
+
+.hud-radar-ring.ring-3 {
+  width: 104px;
+  height: 104px;
+  top: 3px;
+  left: 3px;
+  border-style: solid;
+  border-color: rgba(0, 212, 255, 0.2);
+}
+
+.hud-radar-axis-h {
+  position: absolute;
+  top: 55px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(0, 212, 255, 0.25);
+}
+
+.hud-radar-axis-v {
+  position: absolute;
+  left: 55px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 212, 255, 0.25);
+}
+
+.hud-radar-center {
+  position: absolute;
+  top: 52px;
+  left: 52px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00ffff;
+  box-shadow: 0 0 6px #00ffff;
+}
+
+.hud-radar-sweep {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(0, 212, 255, 0.35) 0deg, transparent 55deg, transparent 360deg);
+  animation: radar-sweep-spin 3s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes radar-sweep-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.hud-radar-blips {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 110px;
+  height: 110px;
+}
+
+.hud-radar-blip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  animation: blip-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.hud-radar-blip.up .blip-arrow {
+  color: #ff3366;
+  text-shadow: 0 0 6px #ff3366;
+}
+
+.hud-radar-blip.down .blip-arrow {
+  color: #ff9900;
+  text-shadow: 0 0 6px #ff9900;
+}
+
+.hud-radar-blip.level .blip-arrow {
+  color: #00ffaa;
+  text-shadow: 0 0 6px #00ffaa;
+}
+
+.blip-arrow {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.blip-angle {
+  font-family: 'Courier New', monospace;
+  font-size: 8px;
+  font-weight: bold;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 1px 3px;
+  border-radius: 2px;
+  white-space: nowrap;
+  letter-spacing: -0.5px;
+  margin-top: 1px;
+}
+
+@keyframes blip-pulse {
+  0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.85; }
+  100% { transform: translate(-50%, -50%) scale(1.15); opacity: 1.0; }
+}
+
+.hud-radar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 104px;
+  margin-top: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  color: rgba(0, 212, 255, 0.7);
+  letter-spacing: 0.5px;
+}
+
+.hud-radar-title {
+  font-weight: bold;
+}
+
+.hud-radar-cadence {
+  color: #00ffaa;
+}
+
+@media (max-width: 768px) {
+  .hud-radar {
+    top: 55px;
+    left: 8px;
+    transform: scale(0.85);
+    transform-origin: top left;
+  }
+}

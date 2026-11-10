@@ -747,6 +747,9 @@ export class WeaponsSystem {
 
       // Spawn visual twin laser beams
       this.spawnTwinLaserBeam(leftEmitter, rightEmitter, hitPoint, true, isFireLaser);
+      if (typeof audio.startLaserLoop === 'function') {
+        audio.startLaserLoop(true);
+      }
       audio.playLaserShot(true);
 
       // Resolve Impact
@@ -754,14 +757,18 @@ export class WeaponsSystem {
         this.spawnExplosion(hitPoint, isFireLaser ? 9 : 6, beamSparkColor);
         this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
         let dmgResult = null;
-        const reducedCarveRadius = carveRadius * 0.464;
-        const reducedCarveDepth = carveDepth * 0.464;
+        // 3x more effective asteroid carving:
+        const carveFactor = 0.464 * 1.44225; // ~0.6692 for 3x volumetric excavation yield
+        const reducedCarveRadius = carveRadius * carveFactor;
+        const reducedCarveDepth = carveDepth * carveFactor;
+        const carveStrength = 48.0; // 3x effective density strength (increased from 16.0)
+        const maxCrackStages = 17; // 3x faster fracture (reduced from 50)
         if (typeof this.spaceEnv.damageAsteroid === 'function') {
-          // Primary laser requires 50 shots (20 HP / 0.4 damage = 50 shots) to destroy small asteroids or excavate rock volumes (10x less effective)
-          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (0.4 * dmgMultiplier) : (4.5 * dmgMultiplier);
-          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, 16.0, false, 50);
+          // 3x more effective damage: 1.2 for small asteroids, 13.5 for mega/medium
+          const dmgAmount = (hitTargetObj.hp !== undefined && hitTargetObj.hp <= 36) ? (1.2 * dmgMultiplier) : (13.5 * dmgMultiplier);
+          dmgResult = this.spaceEnv.damageAsteroid(hitTargetObj, dmgAmount, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, carveStrength, false, maxCrackStages);
         } else if (typeof this.spaceEnv.carveAsteroid === 'function') {
-          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, 16.0);
+          const carveResult = this.spaceEnv.carveAsteroid(hitTargetObj, hitPoint, fwd, reducedCarveRadius, reducedCarveDepth, carveStrength);
           dmgResult = { carveResult };
         }
         const cRes = dmgResult?.carveResult;
@@ -848,8 +855,8 @@ export class WeaponsSystem {
     this.scene.add(group);
     this.laserBeams.push({
       group,
-      life: 0.18,
-      maxLife: 0.18,
+      life: 0.22,
+      maxLife: 0.22,
       isLocal
     });
   }
@@ -1402,6 +1409,12 @@ export class WeaponsSystem {
           c.material.opacity = alpha * 0.95;
         }
       });
+    }
+
+    if (this.laserBeams.length === 0 || (localShip && localShip.isDead)) {
+      if (typeof audio.stopLaserLoop === 'function') {
+        audio.stopLaserLoop();
+      }
     }
 
     // 3. Update Homing Missiles

@@ -361,6 +361,54 @@ export class AudioManager {
     osc.stop(now + 0.32);
   }
 
+  startLaserLoop(isLocal = true) {
+    if (!this.ctx || this.isMuted) return;
+    this.resume();
+    if (this._laserLoopActive) return;
+    this._laserLoopActive = true;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(isLocal ? 1180 : 920, now);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2400, now);
+    filter.Q.setValueAtTime(2.8, now);
+
+    const vol = isLocal ? 0.24 : 0.16;
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(vol, now + 0.04);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.compressor);
+
+    osc.start(now);
+    this._laserOsc = osc;
+    this._laserGain = gain;
+  }
+
+  stopLaserLoop() {
+    if (!this._laserLoopActive || !this._laserGain) {
+      this._laserLoopActive = false;
+      return;
+    }
+    this._laserLoopActive = false;
+    const now = this.ctx ? this.ctx.currentTime : 0;
+    try {
+      this._laserGain.gain.cancelScheduledValues(now);
+      this._laserGain.gain.setValueAtTime(this._laserGain.gain.value, now);
+      this._laserGain.gain.linearRampToValueAtTime(0.0001, now + 0.04);
+      if (this._laserOsc) {
+        this._laserOsc.stop(now + 0.05);
+      }
+    } catch (_) {}
+    this._laserOsc = null;
+    this._laserGain = null;
+  }
+
   playLaserShot(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
     this.resume();

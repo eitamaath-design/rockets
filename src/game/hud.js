@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { logger } from '../utils/logger.js';
 import { audio } from './audio.js';
 
@@ -195,6 +196,24 @@ export class GameHUD {
       </div>
 
       <div class="hud-combat-feed" id="hud-combat-feed"></div>
+
+      <!-- 2D Viewpoint Tactical Radar (3-Second Refresh Interval) -->
+      <div class="hud-radar" id="hud-radar">
+        <div class="hud-radar-dial">
+          <div class="hud-radar-ring ring-1"></div>
+          <div class="hud-radar-ring ring-2"></div>
+          <div class="hud-radar-ring ring-3"></div>
+          <div class="hud-radar-axis-h"></div>
+          <div class="hud-radar-axis-v"></div>
+          <div class="hud-radar-center"></div>
+          <div class="hud-radar-sweep"></div>
+          <div class="hud-radar-blips" id="hud-radar-blips"></div>
+        </div>
+        <div class="hud-radar-footer">
+          <span class="hud-radar-title">RADAR</span>
+          <span class="hud-radar-cadence" id="hud-radar-cadence">3.0s</span>
+        </div>
+      </div>
 
       <!-- 10-Second Democratic Map Reset Vote Interactive Banner -->
       <div class="hud-vote-banner" id="hud-vote-banner" style="display: none;">
@@ -1452,6 +1471,88 @@ export class GameHUD {
     if (speedBadge) {
       speedBadge.textContent = `${speed}u/s`;
       speedBadge.className = 'metric-badge ' + (speed <= 100 ? 'nominal' : 'warning');
+    }
+
+    // 9. Update 2D Tactical Radar (Refreshes every 3 seconds)
+    const dt = state.frameTime !== undefined ? (state.frameTime / 1000) : 0.016;
+    this.updateRadar(dt);
+  }
+
+  updateRadar(dt = 0.016) {
+    if (!this.engine || !this.engine.playerShip) return;
+    const playerShip = this.engine.playerShip;
+    const remoteShips = this.engine.remoteShips;
+    const camera = this.engine.camera;
+    const blipsContainer = document.getElementById('hud-radar-blips');
+    const cadenceEl = document.getElementById('hud-radar-cadence');
+    if (!blipsContainer) return;
+
+    this.radarRefreshTimer = (this.radarRefreshTimer || 0) + dt;
+    const remaining = Math.max(0, 3.0 - (this.radarRefreshTimer % 3.0));
+    if (cadenceEl) {
+      cadenceEl.textContent = `${remaining.toFixed(1)}s`;
+    }
+
+    if (this.radarRefreshTimer >= 3.0) {
+      this.radarRefreshTimer = 0.0;
+      // Refresh radar blips!
+      const quat = camera ? camera.quaternion : playerShip.quaternion;
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+      const playerPos = playerShip.position;
+
+      const radarRadiusPx = 48;
+      const radarCenterX = 55;
+      const radarCenterY = 55;
+      const maxWorldRange = 4500.0; // Standoff detection range
+
+      let html = '';
+      if (remoteShips && remoteShips.size > 0) {
+        for (const [peerId, remote] of remoteShips.entries()) {
+          if (!remote || remote.isDead || remote.isInvisible) continue;
+
+          const rel = remote.position.clone().sub(playerPos);
+          const x = rel.dot(right);
+          const y = rel.dot(fwd);
+          const z = rel.dot(up);
+
+          const horizDist = Math.sqrt(x * x + y * y);
+          const normDist = Math.min(1.0, horizDist / maxWorldRange);
+
+          // Elevation angle in degrees relative to the pilot's viewpoint plane
+          const elevationDeg = Math.round(Math.atan2(z, Math.max(1.0, horizDist)) * (180 / Math.PI));
+
+          // Angle on radar 2D plane (forward is up: -Y screen axis, right is +X)
+          let px = radarCenterX;
+          let py = radarCenterY;
+          if (horizDist > 0.001) {
+            px = radarCenterX + (x / horizDist) * (normDist * radarRadiusPx);
+            py = radarCenterY - (y / horizDist) * (normDist * radarRadiusPx);
+          }
+
+          let indicatorSymbol = '●';
+          let indicatorClass = 'level';
+          let angleText = '0°';
+          if (elevationDeg >= 3) {
+            indicatorSymbol = '▲';
+            indicatorClass = 'up';
+            angleText = `+${elevationDeg}°`;
+          } else if (elevationDeg <= -3) {
+            indicatorSymbol = '▼';
+            indicatorClass = 'down';
+            angleText = `${elevationDeg}°`;
+          }
+
+          html += `
+            <div class="hud-radar-blip ${indicatorClass}" style="left: ${px.toFixed(1)}px; top: ${py.toFixed(1)}px;" title="Enemy Ship: ${elevationDeg}°">
+              <span class="blip-arrow">${indicatorSymbol}</span>
+              <span class="blip-angle">${angleText}</span>
+            </div>
+          `;
+        }
+      }
+      blipsContainer.innerHTML = html;
     }
   }
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rockets-pwa-v12';
+const CACHE_NAME = 'rockets-pwa-v13';
 
 const ASSETS_TO_CACHE = [
   './',
