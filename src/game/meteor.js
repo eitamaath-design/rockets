@@ -616,7 +616,7 @@ export class MeteorSystem {
     }
     if (this.spaceEnv && this.spaceEnv.meteorLight) {
       this.spaceEnv.meteorLight.intensity = 0.0;
-      this.spaceEnv.meteorLight.visible = false;
+      this.spaceEnv.meteorLight.visible = true;
     }
     this.activeMeteor = null;
   }

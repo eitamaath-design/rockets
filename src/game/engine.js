@@ -273,9 +273,7 @@ export class GameEngine {
 
     // Pre-warm and compile all WebGL materials and shaders upfront
     // This completely eliminates in-game shader compilation freezes when shots are fired!
-    try {
-      this.renderer.compile(this.scene, this.camera);
-    } catch (_) {}
+    this.prewarmShaders();
 
     if (typeof window !== 'undefined') {
       window.gameEngine = this;
@@ -319,6 +317,72 @@ export class GameEngine {
       this.config.showStats = true;
     } else {
       this.config.showStats = Boolean(this.config.showStats);
+    }
+  }
+
+  /**
+   * Pre-warm and compile all WebGL materials and shaders upfront.
+   * This completely eliminates in-game shader compilation freezes when shots are fired!
+   */
+  prewarmShaders() {
+    if (!this.renderer || typeof this.renderer.compile !== 'function') return;
+    const t0 = performance.now();
+    const dummyMeshes = [];
+
+    try {
+      // 1. Ensure all dynamic PointLights are visible with zero intensity so Three.js
+      // generates shader programs with a fixed, stable light define count (e.g. NUM_POINT_LIGHTS).
+      if (this.spaceEnv) {
+        if (this.spaceEnv.combatFlashLight) this.spaceEnv.combatFlashLight.visible = true;
+        if (this.spaceEnv.meteorLight) this.spaceEnv.meteorLight.visible = true;
+      }
+
+      // 2. Attach weapon and impact materials temporarily to scene graph so renderer.compile()
+      // traverses them and generates their WebGL programs ahead of time.
+      if (this.weaponsSystem) {
+        const ws = this.weaponsSystem;
+        const testMats = [
+          ws.localLaserCoreMat,
+          ws.localLaserGlowMat,
+          ws.fireLaserCoreMat,
+          ws.fireLaserGlowMat,
+          ws.remoteLaserCoreMat,
+          ws.remoteLaserGlowMat,
+          ws.remoteFireLaserGlowMat,
+          ws.missileBodyMat,
+          ws.missileFinMat,
+          ws.missileGlowMat
+        ].filter(Boolean);
+
+        const dummyGeom = new THREE.BufferGeometry();
+        dummyGeom.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 1, 0, 1, 0, 0], 3));
+
+        for (const mat of testMats) {
+          const mesh = new THREE.Mesh(dummyGeom, mat);
+          mesh.frustumCulled = false;
+          mesh.visible = true;
+          this.scene.add(mesh);
+          dummyMeshes.push(mesh);
+        }
+      }
+
+      // 3. Compile all shaders against the current scene and camera
+      this.renderer.compile(this.scene, this.camera);
+
+      const dt = performance.now() - t0;
+      if (dt > 50.0) {
+        logger.warn('PERF:WARN', `[PERF:PREWARM] WebGL materials compiled in ${dt.toFixed(2)}ms (pre-warmed ${dummyMeshes.length} weapon materials)`);
+      } else {
+        logger.info('PERF:PREWARM', `[PERF:PREWARM] WebGL materials compiled in ${dt.toFixed(2)}ms (pre-warmed ${dummyMeshes.length} weapon materials)`);
+      }
+    } catch (err) {
+      logger.log('SYS', `Shader pre-warming encountered: ${err?.message || err}`);
+    } finally {
+      // 4. Detach dummy meshes without disposing the shared materials
+      for (const m of dummyMeshes) {
+        this.scene.remove(m);
+        if (m.geometry) m.geometry.dispose();
+      }
     }
   }
 
@@ -1090,7 +1154,12 @@ export class GameEngine {
       }
 
       // 11. Render Scene
+      const _tRender0 = performance.now();
       this.renderer.render(this.scene, this.camera);
+      const _dtRender = performance.now() - _tRender0;
+      if (_dtRender > 16.6) {
+        logger.warn('PERF:WARN', `[PERF:RENDER_FRAME] frame render took ${_dtRender.toFixed(2)}ms (>16.6ms threshold)`);
+      }
 
       // 12. Inform HUD
       this.onHudUpdate({

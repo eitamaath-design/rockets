@@ -78,6 +78,14 @@ class DiagnosticLogger {
     }
   }
 
+  info(tag, msg) {
+    this.log(tag, msg);
+  }
+
+  warn(tag, msg) {
+    this.log(`WARN:${tag}`, msg);
+  }
+
   recordFrame() {
     this.frameCount++;
     const now = performance.now();
@@ -153,6 +161,18 @@ class DiagnosticLogger {
       }
     } else {
       lines.push('No weapon or excavation events recorded yet.');
+    }
+    lines.push('');
+
+    // Performance & Profiling Telemetry
+    lines.push('--- Recent Performance & Profiling Telemetry (Last 25 Events) ---');
+    const perfLogs = this.logs.filter(entry => entry.includes('[PERF:')).slice(-25);
+    if (perfLogs.length > 0) {
+      for (const log of perfLogs) {
+        lines.push(log);
+      }
+    } else {
+      lines.push('No performance profiling events recorded yet.');
     }
     lines.push('');
 

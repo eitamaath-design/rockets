@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { logger } from '../utils/logger.js';
 
 /**
  * Rockets Space Audio System
@@ -372,6 +373,7 @@ export class AudioManager {
 
   startLaserLoop(isLocal = true, pos = null) {
     if (!this.ctx || this.isMuted) return;
+    const _t0 = performance.now();
     this.resume();
     if (this._laserLoopActive) return;
     this._laserLoopActive = true;
@@ -417,6 +419,13 @@ export class AudioManager {
     this._laserGain = gain;
     // Maintain backward-compatible aliases
     this._laserOsc = osc1;
+
+    const _dt = performance.now() - _t0;
+    if (_dt > 5.0) {
+      logger.warn('PERF:WARN', `[PERF:AUDIO] startLaserLoop took ${_dt.toFixed(2)}ms (>5ms threshold)`);
+    } else {
+      logger.info('PERF:AUDIO', `startLaserLoop completed in ${_dt.toFixed(2)}ms`);
+    }
   }
 
   stopLaserLoop() {

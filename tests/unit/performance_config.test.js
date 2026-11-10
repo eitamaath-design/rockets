@@ -115,11 +115,13 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
     });
   });
 
-  describe('Optimization 5: Zero-Intensity Dynamic PointLight Visibility Culling', () => {
-    it('should toggle combatFlashLight.visible and meteorLight.visible off when intensity is 0', () => {
+  describe('Optimization 5: Dynamic PointLight Define Stability Invariant & Zero-Hitch Intensity Modulation', () => {
+    it('should maintain permanent visible = true across combatFlashLight and meteorLight while modulating intensity to avoid mid-game shader recompilation', () => {
       const space = new SpaceEnvironment(scene, 88, { voxelQuality: 'low', asteroidCount: 5 });
-      expect(space.combatFlashLight.visible).toBe(false);
-      expect(space.meteorLight.visible).toBe(false);
+      expect(space.combatFlashLight.visible).toBe(true);
+      expect(space.combatFlashLight.intensity).toBe(0);
+      expect(space.meteorLight.visible).toBe(true);
+      expect(space.meteorLight.intensity).toBe(0);
 
       space.triggerCombatFlash(new THREE.Vector3(10, 20, 30), 0xff5500, 4.0);
       expect(space.combatFlashLight.visible).toBe(true);
@@ -128,7 +130,8 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
       // Decay combatFlashLight to 0
       space.update(1.0, new THREE.Vector3(0, 80, 3200), new THREE.Vector3());
       expect(space.combatFlashLight.intensity).toBe(0);
-      expect(space.combatFlashLight.visible).toBe(false);
+      // Invariant: visible MUST remain true so Three.js does NOT recompile shaders when firing
+      expect(space.combatFlashLight.visible).toBe(true);
 
       const meteorSys = new MeteorSystem(scene, space, { frequency: 10 });
       meteorSys.spawnMeteor();
@@ -137,7 +140,8 @@ describe('GPU/CPU Performance Optimizations & Room Configuration Suite', () => {
 
       meteorSys.destroyMeteor();
       expect(space.meteorLight.intensity).toBe(0);
-      expect(space.meteorLight.visible).toBe(false);
+      // Invariant: visible MUST remain true
+      expect(space.meteorLight.visible).toBe(true);
 
       meteorSys.cleanup();
       space.destroy();

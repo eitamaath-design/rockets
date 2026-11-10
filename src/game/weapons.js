@@ -659,9 +659,32 @@ export class WeaponsSystem {
   }
 
   createTwinLaserGroup(isLocal, isFireLaser = false) {
-    const group = new THREE.Group();
+    this._laserBeamPool = this._laserBeamPool || [];
+    let beam = null;
+    for (let i = 0; i < this._laserBeamPool.length; i++) {
+      if (this._laserBeamPool[i].isLocal === isLocal) {
+        beam = this._laserBeamPool.splice(i, 1)[0];
+        break;
+      }
+    }
+
     const templateCoreMat = isFireLaser ? this.fireLaserCoreMat : (isLocal ? this.localLaserCoreMat : this.remoteLaserCoreMat);
     const templateGlowMat = isFireLaser ? (isLocal ? this.fireLaserGlowMat : this.remoteFireLaserGlowMat) : (isLocal ? this.localLaserGlowMat : this.remoteLaserGlowMat);
+
+    if (beam) {
+      beam.isFireLaser = isFireLaser;
+      beam.coreMat.color.copy(templateCoreMat.color);
+      beam.coreMat.opacity = templateCoreMat.opacity;
+      beam.glowMat.color.copy(templateGlowMat.color);
+      beam.glowMat.opacity = templateGlowMat.opacity;
+      beam.life = 0.28;
+      beam.maxLife = 0.28;
+      beam.isContinuous = true;
+      beam.group.visible = true;
+      return beam;
+    }
+
+    const group = new THREE.Group();
     const coreMat = templateCoreMat.clone();
     const glowMat = templateGlowMat.clone();
 
@@ -683,7 +706,7 @@ export class WeaponsSystem {
       rightGlow,
       coreMat,
       glowMat,
-      ownMaterials: true,
+      ownMaterials: false,
       isLocal,
       isFireLaser,
       life: 0.28,
@@ -726,19 +749,26 @@ export class WeaponsSystem {
 
   stopPrimaryLaser() {
     if (this.activeLaserBeam) {
-      if (this.activeLaserBeam.group && this.activeLaserBeam.group.parent) {
-        this.activeLaserBeam.group.parent.remove(this.activeLaserBeam.group);
+      const beam = this.activeLaserBeam;
+      if (beam.group && beam.group.parent) {
+        beam.group.parent.remove(beam.group);
       }
-      if (this.activeLaserBeam.ownMaterials) {
-        if (this.activeLaserBeam.coreMat) this.activeLaserBeam.coreMat.dispose();
-        if (this.activeLaserBeam.glowMat) this.activeLaserBeam.glowMat.dispose();
+      if (beam.ownMaterials) {
+        if (beam.coreMat) beam.coreMat.dispose();
+        if (beam.glowMat) beam.glowMat.dispose();
+      } else {
+        this._laserBeamPool = this._laserBeamPool || [];
+        if (!this._laserBeamPool.includes(beam)) {
+          this._laserBeamPool.push(beam);
+        }
       }
-      const idx = this.laserBeams.indexOf(this.activeLaserBeam);
+      const idx = this.laserBeams.indexOf(beam);
       if (idx !== -1) {
         this.laserBeams.splice(idx, 1);
       }
       this.activeLaserBeam = null;
     }
+    this._wasLaserActive = false;
     if (typeof audio.stopLaserLoop === 'function') {
       audio.stopLaserLoop();
     }
@@ -754,6 +784,8 @@ export class WeaponsSystem {
       this.stopPrimaryLaser();
       return;
     }
+
+    const _tFire0 = performance.now();
 
     // If out of energy, stop beam
     if (this.laserEnergy < this.laserShotCost && !this.activeLaserBeam) {
@@ -785,6 +817,7 @@ export class WeaponsSystem {
     _beamCenterOrigin.copy(ship.position).addScaledVector(fwd, 2.0);
 
     // Perform raycast hitscan against asteroids and targets
+    const _tRay0 = performance.now();
     let hitPoint = null;
     let hitDistance = this.laserMaxRange;
     let hitTargetType = null;
@@ -827,11 +860,13 @@ export class WeaponsSystem {
       _beamHitPoint.copy(_beamCenterOrigin).addScaledVector(fwd, this.laserMaxRange);
       hitPoint = _beamHitPoint;
     }
+    const _dtRay = performance.now() - _tRay0;
 
     const isFireLaser = !!ship.hasFireLaser;
     const beamSparkColor = isFireLaser ? 0xff5500 : 0x00d4ff;
 
     // Maintain steady continuous beam mesh every frame
+    const _tBeam0 = performance.now();
     if (!this.activeLaserBeam) {
       this.activeLaserBeam = this.createTwinLaserGroup(true, isFireLaser);
       this.scene.add(this.activeLaserBeam.group);
@@ -842,14 +877,17 @@ export class WeaponsSystem {
     }
     this.activeLaserBeam.life = 0.28;
     this.updateTwinLaserTransforms(this.activeLaserBeam, _beamLeftOrigin, _beamRightOrigin, hitPoint, isFireLaser);
+    const _dtBeam = performance.now() - _tBeam0;
 
     // Continuous contact sparks at hit point
     if (hitTargetType) {
       this.spawnLaserImpactSparks(hitPoint, null, beamSparkColor);
     }
 
+    let _dtDmg = 0;
     // Periodic combat & excavation tick (every 0.16s)
     if ((nowSec - this.laserLastFireTime) >= (this.laserFireInterval - 0.001)) {
+      const _tDmg0 = performance.now();
       if (this.laserEnergy < this.laserShotCost) {
         this.stopPrimaryLaser();
         return;
@@ -931,6 +969,15 @@ export class WeaponsSystem {
           time: now
         });
       }
+      _dtDmg = performance.now() - _tDmg0;
+    }
+
+    this._wasLaserActive = true;
+    const _dtFire = performance.now() - _tFire0;
+    if (_dtFire > 5.0) {
+      logger.warn('PERF:WARN', `[PERF:WEAPON_FIRE] triggerPrimary took ${_dtFire.toFixed(2)}ms (>5ms threshold) (raycast: ${_dtRay.toFixed(2)}ms, beam: ${_dtBeam.toFixed(2)}ms, dmg: ${_dtDmg.toFixed(2)}ms)`);
+    } else {
+      logger.info('PERF:WEAPON_FIRE', `triggerPrimary: ${_dtFire.toFixed(2)}ms (raycast: ${_dtRay.toFixed(2)}ms, beam: ${_dtBeam.toFixed(2)}ms, dmg: ${_dtDmg.toFixed(2)}ms)`);
     }
   }
 
@@ -1512,6 +1559,11 @@ export class WeaponsSystem {
         if (b.ownMaterials) {
           if (b.coreMat) b.coreMat.dispose();
           if (b.glowMat) b.glowMat.dispose();
+        } else {
+          this._laserBeamPool = this._laserBeamPool || [];
+          if (!this._laserBeamPool.includes(b)) {
+            this._laserBeamPool.push(b);
+          }
         }
         if (b === this.activeLaserBeam) {
           this.activeLaserBeam = null;
@@ -1534,8 +1586,12 @@ export class WeaponsSystem {
     if (this.laserBeams.length === 0 || (localShip && localShip.isDead)) {
       if (this.activeLaserBeam) {
         this.stopPrimaryLaser();
-      } else if (typeof audio.stopLaserLoop === 'function') {
-        audio.stopLaserLoop();
+        this._wasLaserActive = false;
+      } else if (this._wasLaserActive) {
+        this._wasLaserActive = false;
+        if (typeof audio.stopLaserLoop === 'function') {
+          audio.stopLaserLoop();
+        }
       }
     }
 
@@ -1947,6 +2003,14 @@ export class WeaponsSystem {
       }
     }
     this.laserBeams = [];
+    if (this._laserBeamPool) {
+      for (const b of this._laserBeamPool) {
+        if (b.group && b.group.parent) b.group.parent.remove(b.group);
+        if (b.coreMat) b.coreMat.dispose();
+        if (b.glowMat) b.glowMat.dispose();
+      }
+      this._laserBeamPool = [];
+    }
     for (const m of this.missiles) this.scene.remove(m.group);
     for (const d of this.decoys) this.scene.remove(d.group);
     for (const mine of this.mines) this.scene.remove(mine.mesh);

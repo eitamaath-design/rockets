@@ -585,16 +585,16 @@ export class SpaceEnvironment {
     spawnLight.position.set(0, 120, 3200);
     this.scene.add(spawnLight);
 
-    // Permanent combat flash point light (pre-allocated & culled when intensity == 0)
+    // Permanent combat flash point light (pre-allocated & preserved visible to maintain fixed shader defines)
     this.combatFlashLight = new THREE.PointLight(0xff6600, 0.0, 160);
     this.combatFlashLight.position.set(0, 0, 0);
-    this.combatFlashLight.visible = false;
+    this.combatFlashLight.visible = true;
     this.scene.add(this.combatFlashLight);
 
-    // Permanent meteor hazard light (pre-allocated & culled when intensity == 0)
+    // Permanent meteor hazard light (pre-allocated & preserved visible to maintain fixed shader defines)
     this.meteorLight = new THREE.PointLight(0xff3300, 0.0, 450);
     this.meteorLight.position.set(0, 0, 0);
-    this.meteorLight.visible = false;
+    this.meteorLight.visible = true;
     this.scene.add(this.meteorLight);
   }
 
@@ -913,7 +913,9 @@ export class SpaceEnvironment {
       updateNormalCache(mc, 1, res - 2, 1, res - 2, 1, res - 2);
       mc.update();
       if (mc.geometry && typeof mc.geometry.computeBoundingSphere === 'function') {
-        mc.geometry.computeBoundingSphere();
+        if (!mc.geometry.boundingSphere) {
+          mc.geometry.computeBoundingSphere();
+        }
       }
       mc.scale.set(radius / ISOSURFACE_SCALE, radius / ISOSURFACE_SCALE, radius / ISOSURFACE_SCALE);
 
@@ -1116,7 +1118,7 @@ export class SpaceEnvironment {
     this.combatFlashLight.position.copy(pos);
     this.combatFlashLight.color.setHex(color);
     this.combatFlashLight.intensity = intensity;
-    this.combatFlashLight.visible = intensity > 0.001;
+    this.combatFlashLight.visible = true;
   }
 
   /**
@@ -1197,7 +1199,7 @@ export class SpaceEnvironment {
       if (this.combatFlashLight.intensity > 0) {
         this.combatFlashLight.intensity = Math.max(0, this.combatFlashLight.intensity - dt * 6.0);
       }
-      this.combatFlashLight.visible = this.combatFlashLight.intensity > 0.001;
+      this.combatFlashLight.visible = true;
     }
 
     const numAsteroids = this.asteroids.length;
@@ -1499,6 +1501,7 @@ export class SpaceEnvironment {
    * Penetrates excavated tunnels and hollow cavities.
    */
   checkRayCollision(origin, dir, maxDist = 3500.0) {
+    const _t0 = performance.now();
     let closestHit = null;
     let closestDist = maxDist;
 
@@ -1587,6 +1590,12 @@ export class SpaceEnvironment {
           };
         }
       }
+    }
+    const _dt = performance.now() - _t0;
+    if (_dt > 5.0) {
+      logger.warn('PERF:WARN', `[PERF:RAYCAST] checkRayCollision took ${_dt.toFixed(2)}ms (>5ms threshold)`);
+    } else {
+      logger.info('PERF:RAYCAST', `checkRayCollision completed in ${_dt.toFixed(2)}ms (hit: ${Boolean(closestHit)})`);
     }
     return closestHit;
   }
@@ -1957,6 +1966,7 @@ export class SpaceEnvironment {
    * - Triggers volumetric excavation at maxCrackStages.
    */
   fractureAsteroid(asteroid, hitPoint, hitDir, carveRadius = 24.0, carveDepth = 16.0, strength = 75.0, isRemote = false, maxCrackStages = 5) {
+    const _t0 = performance.now();
     if (!asteroid || !asteroid.mesh || !hitPoint || !hitDir) {
       return {
         voxelsModified: 0,
@@ -2220,7 +2230,9 @@ export class SpaceEnvironment {
     updateNormalCache(mc, minX - 1, maxX + 1, minY - 1, maxY + 1, minZ - 1, maxZ + 1);
     mc.update();
     if (mc.geometry && typeof mc.geometry.computeBoundingSphere === 'function') {
-      mc.geometry.computeBoundingSphere();
+      if (!mc.geometry.boundingSphere) {
+        mc.geometry.computeBoundingSphere();
+      }
     }
 
     this.spawnRockDebris(hitPoint, hitDir, 2 + zone.stage * 2);
@@ -2263,6 +2275,13 @@ export class SpaceEnvironment {
       }
     }
 
+    const _dt = performance.now() - _t0;
+    if (_dt > 5.0) {
+      logger.warn('PERF:WARN', `[PERF:ASTEROID_FRACTURE] fractureAsteroid took ${_dt.toFixed(2)}ms (>5ms threshold)`);
+    } else {
+      logger.info('PERF:ASTEROID_FRACTURE', `fractureAsteroid completed in ${_dt.toFixed(2)}ms (stage: ${zone.stage})`);
+    }
+
     return carveResult;
   }
 
@@ -2281,6 +2300,7 @@ export class SpaceEnvironment {
    * - Returns structured carveResult telemetry payload
    */
   carveAsteroid(asteroid, hitPoint, hitDir, carveRadius = 32.0, carveDepth = 36.0, strength = 80.0, isRemote = false) {
+    const _t0 = performance.now();
     if (!asteroid || !asteroid.mesh) {
       return {
         voxelsModified: 0,
@@ -2517,7 +2537,9 @@ export class SpaceEnvironment {
       updateNormalCache(mc, minX - 1, maxX + 1, minY - 1, maxY + 1, minZ - 1, maxZ + 1);
       mc.update();
       if (mc.geometry && typeof mc.geometry.computeBoundingSphere === 'function') {
-        mc.geometry.computeBoundingSphere();
+        if (!mc.geometry.boundingSphere) {
+          mc.geometry.computeBoundingSphere();
+        }
       }
     }
 
@@ -2569,6 +2591,13 @@ export class SpaceEnvironment {
       if (typeof this.onCarve === 'function') {
         this.onCarve(carvePayload);
       }
+    }
+
+    const _dt = performance.now() - _t0;
+    if (_dt > 5.0) {
+      logger.warn('PERF:WARN', `[PERF:ASTEROID_FRACTURE] carveAsteroid took ${_dt.toFixed(2)}ms (>5ms threshold)`);
+    } else {
+      logger.info('PERF:ASTEROID_FRACTURE', `carveAsteroid completed in ${_dt.toFixed(2)}ms (voxels: ${voxelsModified})`);
     }
 
     return carveResult;
