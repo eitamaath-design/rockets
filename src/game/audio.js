@@ -708,13 +708,13 @@ export class AudioManager {
 
     this.warpOsc.type = 'sawtooth';
     this.warpOsc.frequency.setValueAtTime(90, now);
-    // Exponential pitch sweep upwards towards 650Hz over 3.0s max charge
-    this.warpOsc.frequency.exponentialRampToValueAtTime(650, now + 3.0);
+    // Exponential pitch sweep upwards towards 650Hz over 1.0s max blink charge
+    this.warpOsc.frequency.exponentialRampToValueAtTime(650, now + 1.0);
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(250, now);
-    filter.frequency.exponentialRampToValueAtTime(1800, now + 3.0);
+    filter.frequency.exponentialRampToValueAtTime(1800, now + 1.0);
 
     this.warpGain.gain.setValueAtTime(0.001, now);
     this.warpGain.gain.linearRampToValueAtTime(0.38, now + 0.15);

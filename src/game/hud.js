@@ -247,9 +247,9 @@ export class GameHUD {
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap & Hold to WARP">
+            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap & Hold to BLINK">
               🚀 <strong>THRUST</strong>
-              <span class="hud-boost-badge" id="hud-boost-badge">⚡ WARP</span>
+              <span class="hud-boost-badge" id="hud-boost-badge">⚡ BLINK</span>
             </button>
             <button class="action-touch-btn touch-btn btn-brake" id="btn-brake" title="Hold to Slow Down / Stop in 0.67s (S)">🛑 <strong>BRAKE</strong></button>
           </div>
@@ -1110,17 +1110,17 @@ export class GameHUD {
       if (speedVal) speedVal.textContent = state.speed;
     }
 
-    // Warp Badge (Double-tap & hold thrust warp drive)
+    // Blink Badge (Double-tap & hold thrust charged blink)
     const boostBadge = document.getElementById('hud-boost-badge');
     const thrustBtn = document.getElementById('btn-thrust');
     if (boostBadge) {
       if (state.isWarpCharging) {
         const pct = Math.min(100, Math.round((state.warpChargeRatio || 0) * 100));
-        boostBadge.textContent = `WARP ${pct}%`;
+        boostBadge.textContent = `BLINK ${pct}%`;
         boostBadge.className = 'hud-boost-badge charging';
         if (thrustBtn) thrustBtn.classList.add('warp-charging');
       } else if (state.warpReady ?? state.boostReady) {
-        boostBadge.textContent = '⚡ WARP';
+        boostBadge.textContent = '⚡ BLINK';
         boostBadge.className = 'hud-boost-badge ready';
         if (thrustBtn) {
           thrustBtn.classList.remove('warp-charging');

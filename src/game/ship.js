@@ -24,13 +24,16 @@ export class PlayerShip {
     this.strafeAccel = 40.0;
     this.maxStrafeSpeed = 35.0;
 
-    // Charged Double-Tap Warp Drive (charge up to 3.0s, hold until released, proportional displacement)
+    // Momentum-Directed Charged Blink (charge up to 1.0s, hold until released, 1x to 10x ship length forward displacement)
+    this.length = 5.6; // Standard starfighter hull length (2 * radius 2.8)
+    this.minBlinkDistance = this.length; // 1x ship length (5.6u) forward displacement at 0s charge
+    this.maxBlinkDistance = this.length * 10.0; // 10x ship length (56.0u) forward displacement at 1.0s max charge
     this.warpCooldown = 2.0; // seconds
     this.warpCooldownTimer = 0.0;
     this.isWarpCharging = false;
     this.warpChargeTime = 0.0;
-    this.maxWarpCharge = 3.0; // seconds
-    this.maxWarpDistance = 750.0; // units at 100% charge
+    this.maxWarpCharge = 1.0; // seconds max charge (reduced from 3.0s)
+    this.maxWarpDistance = this.maxBlinkDistance; // 56.0 units for backward compatibility
     this.lastThrustTapTime = 0.0;
 
     // Rotation speeds (radians per second)
@@ -303,38 +306,80 @@ export class PlayerShip {
   }
 
   /**
-   * Releases warp charge upon key/button release, executing proportional displacement
-   * with collision raycasting against obstacles.
+   * Computes predicted landing position and distance for blink.
+   * Distance scales linearly from 1x ship length (5.6u at 0s charge) to 10x ship length (56.0u at 1.0s max charge).
+   * Direction is strictly along the ship's momentum (velocity vector), falling back to ship forward if momentum is near zero.
+   * Clamped by obstacle raycasting to prevent blinking into rock.
    * @param {SpaceEnvironment} [spaceEnv]
-   * @returns {Object|null} Result of warp jump or null if not charging
+   * @returns {{ targetPosition: THREE.Vector3, distance: number, direction: THREE.Vector3, chargeRatio: number }}
+   */
+  getBlinkLandingPosition(spaceEnv = null) {
+    const chargeRatio = this.maxWarpCharge > 0 ? Math.min(1.0, this.warpChargeTime / this.maxWarpCharge) : 0;
+    // 0s charge -> 1x ship length (5.6u); 1.0s max charge -> 10x ship length (56.0u)
+    const baseDist = this.length * (1.0 + chargeRatio * 9.0);
+
+    // Direction: momentum vector (velocity), falling back to ship forward if momentum is near zero
+    let dir;
+    if (this.velocity.lengthSq() > 0.0001) {
+      dir = this.velocity.clone().normalize();
+    } else {
+      dir = this.getForwardVector();
+    }
+
+    let blinkDist = baseDist;
+    const env = spaceEnv || this.spaceEnv;
+    if (env && typeof env.checkRayCollision === 'function') {
+      const hit = env.checkRayCollision(this.position, dir, blinkDist + this.radius);
+      if (hit && hit.hit && typeof hit.distance === 'number') {
+        blinkDist = Math.max(0, hit.distance - this.radius - 2.0);
+      }
+    }
+
+    const targetPosition = this.position.clone().addScaledVector(dir, blinkDist);
+    return {
+      targetPosition,
+      distance: blinkDist,
+      direction: dir,
+      chargeRatio
+    };
+  }
+
+  /**
+   * Releases blink charge upon key/button release, executing spatial relocation along momentum vector
+   * with collision raycasting against obstacles.
+   * Does NOT modify ship velocity/speed (it is a blink, not a boost).
+   * Ship keeps identical viewpoint orientation.
+   * @param {SpaceEnvironment} [spaceEnv]
+   * @returns {Object|null} Result of blink jump or null if not charging
    */
   releaseWarpCharge(spaceEnv = null) {
     if (!this.isWarpCharging) return null;
 
-    const chargeRatio = Math.min(1.0, this.warpChargeTime / this.maxWarpCharge);
-    let result = { success: false, chargeRatio, distance: 0 };
+    const chargeRatio = this.maxWarpCharge > 0 ? Math.min(1.0, this.warpChargeTime / this.maxWarpCharge) : 0;
+    let result = {
+      success: false,
+      chargeRatio,
+      distance: 0,
+      fromPosition: this.position.clone(),
+      toPosition: this.position.clone(),
+      direction: this.getForwardVector()
+    };
 
-    if (chargeRatio > 0.03 && !this.isDead) {
-      const env = spaceEnv || this.spaceEnv;
-      const fwd = this.getForwardVector();
-      let warpDist = chargeRatio * this.maxWarpDistance;
+    if (!this.isDead) {
+      const landing = this.getBlinkLandingPosition(spaceEnv);
+      result.fromPosition = this.position.clone();
+      result.direction = landing.direction;
+      result.distance = landing.distance;
 
-      // Obstacle collision check along forward raycast to prevent warping inside rock
-      if (env && typeof env.checkRayCollision === 'function') {
-        const hit = env.checkRayCollision(this.position, fwd, warpDist + this.radius);
-        if (hit && hit.hit && typeof hit.distance === 'number') {
-          warpDist = Math.max(0, hit.distance - this.radius - 2.0);
-        }
-      }
+      this.position.copy(landing.targetPosition);
+      result.toPosition = this.position.clone();
 
-      this.position.addScaledVector(fwd, warpDist);
-
-      // Forward velocity pulse proportional to charge
-      const warpSpeed = this.maxSpeed * (1.0 + chargeRatio * 1.5);
-      this.velocity.copy(fwd).multiplyScalar(warpSpeed);
+      // Velocity is completely preserved! (No speed boost, just a blink)
+      // Viewpoint orientation is preserved (desiredQuaternion / quaternion unchanged).
 
       this.warpCooldownTimer = this.warpCooldown;
-      result = { success: true, chargeRatio, distance: warpDist };
+      result.success = true;
+      result.chargeRatio = chargeRatio;
     }
 
     this.isWarpCharging = false;

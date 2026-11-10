@@ -11,6 +11,121 @@ import { PowerUpSystem } from './powerups.js';
 import { audio } from './audio.js';
 import { logger } from '../utils/logger.js';
 
+/**
+ * Dynamic particle sphere with trails that decays after 1 second upon blink relocation.
+ */
+class BlinkVFXSystem {
+  constructor(scene) {
+    this.scene = scene;
+    this.activeSpheres = [];
+  }
+
+  emitSphere(origin) {
+    if (!this.scene) return;
+    const group = new THREE.Group();
+    const count = 32;
+    const particles = [];
+
+    const trailMat = new THREE.LineBasicMaterial({
+      color: 0x00ffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    for (let i = 0; i < count; i++) {
+      // Uniform spherical Fibonacci lattice distribution
+      const phi = Math.acos(1 - 2 * (i + 0.5) / count);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
+      const dir = new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta),
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi)
+      ).normalize();
+
+      const speed = 18.0 + Math.random() * 12.0;
+      const vel = dir.clone().multiplyScalar(speed);
+      const pos = origin.clone();
+
+      const lineGeo = new THREE.BufferGeometry();
+      const posArray = new Float32Array(15); // 5 trail points (5 * 3 = 15 floats)
+      for (let j = 0; j < 15; j += 3) {
+        posArray[j] = pos.x;
+        posArray[j + 1] = pos.y;
+        posArray[j + 2] = pos.z;
+      }
+      lineGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+      const line = new THREE.Line(lineGeo, trailMat);
+      group.add(line);
+
+      particles.push({
+        pos,
+        vel,
+        trail: [pos.clone(), pos.clone(), pos.clone(), pos.clone(), pos.clone()],
+        lineGeo
+      });
+    }
+
+    this.scene.add(group);
+    this.activeSpheres.push({
+      group,
+      particles,
+      trailMat,
+      age: 0,
+      maxAge: 1.0 // Strictly decays after 1 second
+    });
+  }
+
+  update(dt) {
+    for (let i = this.activeSpheres.length - 1; i >= 0; i--) {
+      const s = this.activeSpheres[i];
+      s.age += dt;
+      const progress = s.age / s.maxAge;
+
+      if (progress >= 1.0) {
+        for (const p of s.particles) {
+          p.lineGeo.dispose();
+        }
+        s.trailMat.dispose();
+        this.scene.remove(s.group);
+        this.activeSpheres.splice(i, 1);
+        continue;
+      }
+
+      s.trailMat.opacity = Math.max(0, 0.9 * (1.0 - progress));
+
+      for (const p of s.particles) {
+        p.pos.addScaledVector(p.vel, dt);
+        p.vel.multiplyScalar(0.95);
+
+        p.trail.pop();
+        p.trail.unshift(p.pos.clone());
+
+        const posAttr = p.lineGeo.attributes.position;
+        const arr = posAttr.array;
+        for (let j = 0; j < p.trail.length; j++) {
+          arr[j * 3] = p.trail[j].x;
+          arr[j * 3 + 1] = p.trail[j].y;
+          arr[j * 3 + 2] = p.trail[j].z;
+        }
+        posAttr.needsUpdate = true;
+      }
+    }
+  }
+
+  destroy() {
+    for (const s of this.activeSpheres) {
+      for (const p of s.particles) {
+        p.lineGeo.dispose();
+      }
+      s.trailMat.dispose();
+      this.scene.remove(s.group);
+    }
+    this.activeSpheres = [];
+  }
+}
+
 export class GameEngine {
   constructor({ container, network, mapSeed, config, onHudUpdate, onDeathNotice }) {
     this.container = container;
@@ -124,6 +239,32 @@ export class GameEngine {
       frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10,
       powerUpSystem: this.powerUpSystem
     });
+
+    // Blink VFX (dynamic particle sphere with trails decaying after 1 second)
+    this.blinkVfx = new BlinkVFXSystem(this.scene);
+
+    // Predictive Blink Landing Hologram Outline (visible strictly to local player)
+    const holoGroup = new THREE.Group();
+    const holoMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending
+    });
+    const hullGeom = new THREE.ConeGeometry(1.2, 4.0, 5);
+    hullGeom.rotateX(-Math.PI / 2);
+    const hullMesh = new THREE.Mesh(hullGeom, holoMat);
+    holoGroup.add(hullMesh);
+
+    const wingGeom = new THREE.BoxGeometry(5.0, 0.08, 1.8);
+    const wingMesh = new THREE.Mesh(wingGeom, holoMat);
+    wingMesh.position.set(0, 0, 0.8);
+    holoGroup.add(wingMesh);
+
+    holoGroup.visible = false;
+    this.scene.add(holoGroup);
+    this.blinkHologram = holoGroup;
 
     this.applyPerformanceConfig(this.config);
 
@@ -346,16 +487,48 @@ export class GameEngine {
     return false;
   }
 
+  triggerBlinkBlur() {
+    if (typeof document === 'undefined') return;
+    const canvas = document.getElementById('game-canvas');
+    if (canvas) {
+      canvas.classList.remove('blink-blur');
+      void canvas.offsetWidth;
+      canvas.classList.add('blink-blur');
+      setTimeout(() => {
+        if (canvas) canvas.classList.remove('blink-blur');
+      }, 150);
+    }
+    const hud = document.querySelector('.game-hud-overlay');
+    if (hud) {
+      hud.classList.remove('blink-blur');
+      void hud.offsetWidth;
+      hud.classList.add('blink-blur');
+      setTimeout(() => {
+        if (hud) hud.classList.remove('blink-blur');
+      }, 150);
+    }
+  }
+
   triggerThrustEnd() {
     if (!this.playerShip) return null;
     if (this.playerShip.isWarpCharging) {
+      const preBlinkPos = this.playerShip.position.clone();
+      this.triggerBlinkBlur();
+
       const warpResult = this.playerShip.releaseWarpCharge(this.spaceEnv);
       audio.stopWarpCharge();
+
+      if (this.blinkHologram) {
+        this.blinkHologram.visible = false;
+      }
+
       if (warpResult && warpResult.success) {
         audio.playWarpJump(warpResult.chargeRatio);
         if (this.cockpit) this.cockpit.triggerBoostFlash();
-        if (this.thrusterTrails) {
-          this.thrusterTrails.emit(this.playerShip.position, this.playerShip.getForwardVector(), false, 'local', true);
+        if (this.blinkVfx) {
+          // Emit a sphere of particles with trails that decay after 1 second
+          this.blinkVfx.emitSphere(this.playerShip.position);
+          this.blinkVfx.emitSphere(preBlinkPos);
         }
       }
       return warpResult;
@@ -759,6 +932,22 @@ export class GameEngine {
       }
       this.thrusterTrails.update(dt, this.camera);
       this.beaconSystem.update(dt);
+      if (this.blinkVfx) {
+        this.blinkVfx.update(dt);
+      }
+
+      // Update predictive blink landing hologram (visible strictly to local player)
+      if (this.blinkHologram) {
+        if (this.playerShip && this.playerShip.isWarpCharging && !this.playerShip.isDead) {
+          const landing = this.playerShip.getBlinkLandingPosition(this.spaceEnv);
+          this.blinkHologram.position.copy(landing.targetPosition);
+          // Ship keeps the same viewpoint orientation
+          this.blinkHologram.quaternion.copy(this.playerShip.quaternion);
+          this.blinkHologram.visible = true;
+        } else {
+          this.blinkHologram.visible = false;
+        }
+      }
 
       // 7. Chaotic Fiery Meteor Event (Every 10 seconds)
       if (this.meteorSystem) {
@@ -961,6 +1150,14 @@ export class GameEngine {
 
   destroy() {
     this.stop();
+    if (this.blinkVfx) {
+      this.blinkVfx.destroy();
+      this.blinkVfx = null;
+    }
+    if (this.blinkHologram) {
+      this.scene.remove(this.blinkHologram);
+      this.blinkHologram = null;
+    }
     if (this.spaceEnv) this.spaceEnv.destroy();
     if (this.weaponsSystem) this.weaponsSystem.cleanup();
     if (this.thrusterTrails) this.thrusterTrails.cleanup();

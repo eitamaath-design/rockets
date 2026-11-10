@@ -60,6 +60,17 @@ html, body {
   backface-visibility: hidden;
 }
 
+/* Blink moment blur animation keyframes & class */
+@keyframes blinkBlurAnim {
+  0% { filter: blur(0px) brightness(1); }
+  35% { filter: blur(6px) brightness(1.6); }
+  100% { filter: blur(0px) brightness(1); }
+}
+
+.blink-blur {
+  animation: blinkBlurAnim 150ms ease-out;
+}
+
 /* =========================================
    LOBBY SCREEN STYLES
    ========================================= */

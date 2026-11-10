@@ -59,85 +59,154 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.velocity.length()).toBe(0);
   });
 
-  it('should charge warp on double-tapping thrust until released, executing proportional warp jump', () => {
+  it('should charge blink on double-tapping thrust up to 1.0s max and execute momentum-directed blink without affecting ship speed', () => {
     expect(ship.warpCooldownTimer).toBe(0);
     expect(ship.isWarpCharging).toBe(false);
     expect(ship.warpChargeTime).toBe(0);
     expect(ship.getSpeed()).toBe(0);
+    expect(ship.length).toBe(5.6);
+    expect(ship.minBlinkDistance).toBe(5.6);
+    expect(ship.maxBlinkDistance).toBe(56.0);
 
     // First tap at t = 1000ms
     const tap1 = ship.triggerThrustPress(1000);
-    expect(tap1).toBe(false); // First tap does not initiate warp charge
+    expect(tap1).toBe(false); // First tap does not initiate blink charge
     expect(ship.isWarpCharging).toBe(false);
     expect(ship.getSpeed()).toBe(0);
 
     // Double tap within 150ms window (t = 1150ms)
     const tap2 = ship.triggerThrustPress(1150);
-    expect(tap2).toBe(true); // Warp charging initiated!
+    expect(tap2).toBe(true); // Blink charging initiated!
     expect(ship.isWarpCharging).toBe(true);
     expect(ship.warpChargeTime).toBe(0);
-    // Instant boost forward logic is completely removed: ship does not surge forward instantly on tap
     expect(ship.getSpeed()).toBe(0);
 
-    // Holding thrust charges warp continuously until release
+    // Holding thrust charges blink continuously up to 1.0s
+    ship.update(0.5);
+    expect(ship.isWarpCharging).toBe(true);
+    expect(ship.warpChargeTime).toBeCloseTo(0.5, 2);
+
+    // Continue charging past max charge: should cap at maxWarpCharge (1.0s)
     ship.update(1.0);
     expect(ship.isWarpCharging).toBe(true);
-    expect(ship.warpChargeTime).toBeCloseTo(1.0, 2);
+    expect(ship.warpChargeTime).toBe(1.0);
 
-    // Continue charging past max charge: should cap at maxWarpCharge (3.0s) and continue charging until released
-    ship.update(3.0);
-    expect(ship.isWarpCharging).toBe(true);
-    expect(ship.warpChargeTime).toBe(3.0);
+    // Predictive hologram simulation returns landing position (10x ship length = 56.0u)
+    const landing = ship.getBlinkLandingPosition();
+    expect(landing.distance).toBe(56.0);
+    expect(landing.chargeRatio).toBe(1.0);
+    expect(landing.targetPosition.z).toBeCloseTo(ship.position.z - 56.0, 1);
 
-    // Button released: execute warp jump!
+    // Button released: execute blink!
     const initialZ = ship.position.z;
-    const warpResult = ship.releaseWarpCharge();
-    expect(warpResult).not.toBeNull();
-    expect(warpResult.success).toBe(true);
-    expect(warpResult.chargeRatio).toBe(1.0);
-    expect(warpResult.distance).toBe(ship.maxWarpDistance); // Full 750u forward displacement
+    const initialSpeed = ship.getSpeed();
+    const blinkResult = ship.releaseWarpCharge();
+    expect(blinkResult).not.toBeNull();
+    expect(blinkResult.success).toBe(true);
+    expect(blinkResult.chargeRatio).toBe(1.0);
+    expect(blinkResult.distance).toBe(ship.maxBlinkDistance); // Exactly 10x ship length (56.0u)
 
     // Ship moved forward along -Z (looking straight down -Z at spawn)
-    expect(ship.position.z).toBeCloseTo(initialZ - ship.maxWarpDistance, 1);
+    expect(ship.position.z).toBeCloseTo(initialZ - ship.maxBlinkDistance, 1);
     expect(ship.isWarpCharging).toBe(false);
     expect(ship.warpChargeTime).toBe(0);
     expect(ship.warpCooldownTimer).toBe(2.0); // 2-second cooldown started
 
-    // Third tap within cooldown window should be rejected
-    const tap3 = ship.triggerThrustPress(1300);
-    expect(tap3).toBe(false);
+    // Speed / velocity is completely preserved! (Not a boost, just a blink)
+    expect(ship.getSpeed()).toBe(initialSpeed);
 
-    // Advance time by 2.1s: cooldown expires, warp ready again
+    // Advance time by 2.1s: cooldown expires, blink ready again
     ship.update(2.1);
     expect(ship.warpCooldownTimer).toBe(0);
-
-    // New double tap activates warp charging again
-    ship.triggerThrustPress(4000);
-    const tapAfterCooldown = ship.triggerThrustPress(4150);
-    expect(tapAfterCooldown).toBe(true);
-    expect(ship.isWarpCharging).toBe(true);
   });
 
-  it('should clamp warp jump displacement when an obstacle is detected in raycast', () => {
+  it('should blink exactly 1x ship length when double-tapping without charging at all', () => {
     ship.resetSpawn();
     const initialPos = ship.position.clone();
     ship.triggerThrustPress(1000);
     ship.triggerThrustPress(1150);
-    ship.update(3.0); // Fully charged (3.0s -> 750u)
+    expect(ship.isWarpCharging).toBe(true);
+    expect(ship.warpChargeTime).toBe(0); // 0s charge
 
-    // Mock spaceEnv with ray collision at 200u
+    // Immediate release without holding
+    const result = ship.releaseWarpCharge();
+    expect(result.success).toBe(true);
+    expect(result.chargeRatio).toBe(0);
+    expect(result.distance).toBe(ship.length); // Exactly 1x ship length (5.6u)
+    expect(ship.position.z).toBeCloseTo(initialPos.z - ship.length, 1);
+    expect(ship.getSpeed()).toBe(0); // Speed unchanged
+  });
+
+  it('should blink strictly in the direction of the ship momentum rather than viewpoint orientation', () => {
+    ship.resetSpawn();
+    // Give ship lateral velocity along +X (moving sideways to the right at 50 u/s)
+    ship.velocity.set(50, 0, 0);
+    const initialPos = ship.position.clone();
+    const initialSpeed = ship.getSpeed();
+    const initialQuat = ship.quaternion.clone();
+
+    // Rotate viewpoint 45 degrees to the left (yaw) so viewpoint and heading diverge
+    ship.applyMouseLook(-0.785, 0);
+
+    // Initiate double tap and charge to max (1.0s)
+    ship.triggerThrustPress(1000);
+    ship.triggerThrustPress(1150);
+    ship.update(1.0);
+
+    // Check landing prediction along momentum vector (+X)
+    const pred = ship.getBlinkLandingPosition();
+    expect(pred.direction.x).toBeCloseTo(1.0, 2);
+    expect(pred.direction.z).toBeCloseTo(0.0, 2);
+    expect(pred.distance).toBe(56.0);
+
+    // Release blink
+    const posBeforeBlink = ship.position.clone();
+    const quatBeforeBlink = ship.quaternion.clone();
+    const desiredQuatBeforeBlink = ship.desiredQuaternion.clone();
+
+    const result = ship.releaseWarpCharge();
+    expect(result.success).toBe(true);
+    expect(result.direction.x).toBeCloseTo(1.0, 2);
+
+    // Position shifted along +X (momentum direction), NOT -Z (viewpoint orientation)
+    expect(ship.position.x).toBeCloseTo(posBeforeBlink.x + 56.0, 1);
+    expect(ship.position.z).toBeCloseTo(posBeforeBlink.z, 1);
+
+    // Speed is preserved
+    expect(ship.getSpeed()).toBeCloseTo(initialSpeed, 2);
+    expect(ship.velocity.x).toBeCloseTo(50.0, 2);
+
+    // Ship keeps the same viewpoint orientation (no orientation change from blink)
+    expect(ship.quaternion.x).toBe(quatBeforeBlink.x);
+    expect(ship.quaternion.y).toBe(quatBeforeBlink.y);
+    expect(ship.quaternion.z).toBe(quatBeforeBlink.z);
+    expect(ship.quaternion.w).toBe(quatBeforeBlink.w);
+    expect(ship.desiredQuaternion.x).toBe(desiredQuatBeforeBlink.x);
+    expect(ship.desiredQuaternion.y).toBe(desiredQuatBeforeBlink.y);
+    expect(ship.desiredQuaternion.z).toBe(desiredQuatBeforeBlink.z);
+    expect(ship.desiredQuaternion.w).toBe(desiredQuatBeforeBlink.w);
+  });
+
+  it('should clamp blink displacement when an obstacle is detected in raycast', () => {
+    ship.resetSpawn();
+    const initialPos = ship.position.clone();
+    ship.triggerThrustPress(1000);
+    ship.triggerThrustPress(1150);
+    ship.update(1.0); // Fully charged (1.0s -> 56.0u)
+
+    // Mock spaceEnv with ray collision at 30u
     const mockSpaceWithObstacle = {
       checkRayCollision: (origin, dir, maxDist) => ({
         hit: true,
-        distance: 200.0,
-        point: origin.clone().addScaledVector(dir, 200.0)
+        distance: 30.0,
+        point: origin.clone().addScaledVector(dir, 30.0)
       })
     };
 
     const result = ship.releaseWarpCharge(mockSpaceWithObstacle);
     expect(result.success).toBe(true);
-    // Distance clamped to hit.distance - ship.radius - 2.0 = 200 - 2.8 - 2.0 = 195.2u
-    expect(result.distance).toBeCloseTo(200.0 - ship.radius - 2.0, 1);
+    // Distance clamped to hit.distance - ship.radius - 2.0 = 30 - 2.8 - 2.0 = 25.2u
+    expect(result.distance).toBeCloseTo(30.0 - ship.radius - 2.0, 1);
     expect(ship.position.z).toBeCloseTo(initialPos.z - result.distance, 1);
   });
 
