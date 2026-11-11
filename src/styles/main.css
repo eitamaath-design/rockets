@@ -827,20 +827,6 @@ html, body {
   box-shadow: 0 0 8px #ef4444;
 }
 
-.hud-beacon-pill {
-  background: rgba(239, 68, 68, 0.35);
-  border: 1px solid #ef4444;
-  color: #fecaca;
-  font-size: 0.62rem;
-  font-weight: 800;
-  padding: 2px 7px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  animation: beaconPulse 1.2s infinite ease-in-out;
-}
-
 @keyframes beaconPulse {
   0%, 100% { opacity: 0.8; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.05); }

@@ -5,7 +5,6 @@ import { PlayerShip } from './ship.js';
 import { WeaponsSystem } from './weapons.js';
 import { RemoteShip } from './remoteShip.js';
 import { ThrusterTrailSystem } from './trail.js';
-import { EngagementBeaconSystem } from './beacon.js';
 import { MeteorSystem } from './meteor.js';
 import { PowerUpSystem } from './powerups.js';
 import { audio } from './audio.js';
@@ -190,11 +189,9 @@ export class GameEngine {
 
     // Subsystem instances
     this.thrusterTrails = null;
-    this.beaconSystem = null;
     this.meteorSystem = null;
     this.trailEmitTimer = 0;
     this.timeSinceLastCombat = 0;
-    this.beaconPulseTimer = 0;
     this.netStatsTimer = 0;
     this.fpsRolling = 60;
 
@@ -243,7 +240,6 @@ export class GameEngine {
     this.weapons = this.weaponsSystem;
 
     this.thrusterTrails = new ThrusterTrailSystem(this.scene);
-    this.beaconSystem = new EngagementBeaconSystem(this.scene);
     this.powerUpSystem = new PowerUpSystem(this.scene);
     this.meteorSystem = new MeteorSystem(this.scene, this.spaceEnv, {
       frequency: this.config.meteorFrequency !== undefined ? this.config.meteorFrequency : 10,
@@ -1017,25 +1013,6 @@ export class GameEngine {
         }
       }
 
-      // 5. Inactivity Engagement Beacon (30s+ no combat between ships)
-      this.timeSinceLastCombat += dt;
-      if (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0) {
-        this.beaconPulseTimer += dt;
-        if (this.beaconPulseTimer >= 3.5) {
-          this.beaconPulseTimer = 0;
-          this.beaconSystem.emitRipple(this.playerShip.position, 0x00d4ff);
-          for (const remote of this.remoteShips.values()) {
-            if (!remote.isDead) {
-              this.beaconSystem.emitRipple(remote.position, 0xff3355);
-            }
-          }
-          audio.playEngagementBeacon();
-          logger.log('BEACON', `Engagement beacon pulse emitted across sector (inactivity: ${Math.round(this.timeSinceLastCombat)}s)`);
-        }
-      } else {
-        this.beaconPulseTimer = 0;
-      }
-
       // 6. Decaying Ship Thruster Trails (15s lifetime)
       // Thruster trails are emitted ONLY when active engine propulsion is engaged
       // Sub-frame interpolation ensures a dense, gapless, glowing plasma wake
@@ -1049,7 +1026,6 @@ export class GameEngine {
         }
       }
       this.thrusterTrails.update(dt, this.camera);
-      this.beaconSystem.update(dt);
       if (this.pendingBlink) {
         this.pendingBlink.timer -= dt;
         if (this.pendingBlink.timer <= 0) {
@@ -1251,7 +1227,6 @@ export class GameEngine {
         warpChargeRatio: this.playerShip.maxWarpCharge > 0 ? (this.playerShip.warpChargeTime / this.playerShip.maxWarpCharge) : 0,
         boostReady: (this.playerShip.warpCooldownTimer <= 0),
         boostCooldown: Math.ceil(this.playerShip.warpCooldownTimer),
-        inactivityBeacon: (this.network.peers.size > 0 && this.timeSinceLastCombat >= 30.0),
         score: this.playerShip.score,
         kills: this.playerShip.kills,
         deaths: this.playerShip.deaths,
@@ -1296,7 +1271,6 @@ export class GameEngine {
     if (this.spaceEnv) this.spaceEnv.destroy();
     if (this.weaponsSystem) this.weaponsSystem.cleanup();
     if (this.thrusterTrails) this.thrusterTrails.cleanup();
-    if (this.beaconSystem) this.beaconSystem.cleanup();
     if (this.meteorSystem) this.meteorSystem.cleanup();
     if (this.powerUpSystem) this.powerUpSystem.cleanup();
     if (this.renderer && this.renderer.domElement && this.renderer.domElement.parentNode) {

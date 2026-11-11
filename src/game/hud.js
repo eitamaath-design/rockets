@@ -112,12 +112,7 @@ export class GameHUD {
               <span class="meter-val" id="hud-missile-pct">DUMB-FIRE</span>
             </div>
 
-            <div class="hud-powerup-badge" id="hud-powerup-badge" style="display: none;"></div>
-
-            <div class="hud-beacon-pill" id="hud-beacon-pill" style="display: none;">
-              📡 BEACON ACTIVE
-            </div>
-          </div>
+            <div class="hud-powerup-badge" id="hud-powerup-badge" style="display: none;"></div>          </div>
         </div>
 
         <div class="hud-top-right">
@@ -1133,15 +1128,6 @@ export class GameHUD {
         hpBar.className = hpPct > 35 ? 'gauge-bar-fill bar-hp' : 'gauge-bar-fill bar-hp bar-hp-critical';
       }
       if (hpNum) hpNum.textContent = `${hpPct}%`;
-    }
-
-    // 30s Inactivity Beacon Indicator
-    if (state.inactivityBeacon !== this._lastValues.inactivityBeacon) {
-      this._lastValues.inactivityBeacon = state.inactivityBeacon;
-      const beaconPill = document.getElementById('hud-beacon-pill');
-      if (beaconPill) {
-        beaconPill.style.display = state.inactivityBeacon ? 'inline-flex' : 'none';
-      }
     }
 
     // Scoreboard with dirty-checking

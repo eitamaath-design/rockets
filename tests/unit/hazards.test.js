@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import { MeteorSystem } from '../../src/game/meteor.js';
 import { PlayerShip } from '../../src/game/ship.js';
 import { WeaponsSystem } from '../../src/game/weapons.js';
-import { EngagementBeaconSystem } from '../../src/game/beacon.js';
 
 describe('Sector Hazards: Periodic Flaming Meteors & Lighting Stability', () => {
   let scene;
@@ -175,15 +174,6 @@ describe('Sector Hazards: Periodic Flaming Meteors & Lighting Stability', () => 
       weapons.spawnExplosion(new THREE.Vector3(), 15, 0xff5500);
       const lightsAfterExplosion = scene.children.filter(c => c.isPointLight).length;
       expect(lightsAfterExplosion).toBe(initialLights); // Stable light count!
-    });
-
-    it('should not add dynamic PointLights when emitting engagement beacons', () => {
-      const beaconSystem = new EngagementBeaconSystem(scene);
-      const initialLights = scene.children.filter(c => c.isPointLight).length;
-
-      beaconSystem.emitRipple(new THREE.Vector3(), 0x00d4ff);
-      const lightsAfterRipple = scene.children.filter(c => c.isPointLight).length;
-      expect(lightsAfterRipple).toBe(initialLights); // Stable light count!
     });
   });
 });
