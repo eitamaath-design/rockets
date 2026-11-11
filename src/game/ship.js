@@ -43,6 +43,7 @@ export class PlayerShip {
     this.warpCooldownTimer = 0.0;
     this.isWarpCharging = false;
     this.isWarpReleasing = false;
+    this.blinkStrafeLock = 0;
     this.warpChargeTime = 0.0;
     this.maxWarpCharge = 1.0; // seconds max charge (reduced from 3.0s)
     this.maxWarpDistance = this.maxBlinkDistance; // 280.0 units for backward compatibility
@@ -357,6 +358,14 @@ export class PlayerShip {
   }
 
   /**
+   * Current strafe input as -1 (left), 0 (none / both), +1 (right).
+   * @returns {number}
+   */
+  getInputStrafeDir() {
+    return (this.input.strafeRight ? 1 : 0) - (this.input.strafeLeft ? 1 : 0);
+  }
+
+  /**
    * Directly begins charging the blink drive (e.g. Left Shift held on PC). No double-tap needed.
    * @returns {boolean} True if charging started
    */
@@ -371,7 +380,7 @@ export class PlayerShip {
   /**
    * Computes predicted landing position and distance for blink.
    * Distance scales linearly from 1x ship length (5.6u at 0s charge) to 10x ship length (56.0u at 1.0s max charge).
-   * Direction is strictly along the ship's hull orientation (forward vector), independent of momentum.
+   * Direction is along the hull forward vector, or sideways (hull right vector) if a strafe key is held; independent of momentum.
    * Clamped by obstacle raycasting to prevent blinking into rock.
    * @param {SpaceEnvironment} [spaceEnv]
    * @returns {{ targetPosition: THREE.Vector3, distance: number, direction: THREE.Vector3, chargeRatio: number }}
@@ -382,7 +391,11 @@ export class PlayerShip {
     const baseDist = this.length * (1.0 + chargeRatio * 9.0);
 
     // Direction: the physical hull's forward (orientation) vector, independent of momentum
-    const dir = this.getForwardVector().normalize();
+    // Holding strafe left/right redirects the blink sideways (locked in at button release)
+    const strafeDir = this.isWarpReleasing ? this.blinkStrafeLock : this.getInputStrafeDir();
+    const dir = strafeDir !== 0
+      ? this.getRightVector().normalize().multiplyScalar(strafeDir)
+      : this.getForwardVector().normalize();
 
     let blinkDist = baseDist;
     const env = spaceEnv || this.spaceEnv;
@@ -409,6 +422,7 @@ export class PlayerShip {
    */
   beginWarpRelease() {
     if (!this.isWarpCharging) return false;
+    this.blinkStrafeLock = this.getInputStrafeDir();
     this.isWarpCharging = false;
     this.isWarpReleasing = true;
     return true;

@@ -951,6 +951,27 @@ describe('Player Flight Physics & Momentum', () => {
       expect(s.startWarpCharge()).toBe(false); // cooldown active
     });
 
+    it('should blink sideways when a strafe key is held, locked in at release', () => {
+      const s = new PlayerShip(camera, mockSpaceEnv);
+      s.resetSpawn();
+      s.startWarpCharge();
+      s.update(1.0);
+      const right = s.getRightVector();
+      s.input.strafeRight = true;
+      let pred = s.getBlinkLandingPosition();
+      expect(pred.direction.dot(right)).toBeCloseTo(1.0, 3);
+      s.input.strafeLeft = true; // both held cancel out -> forward
+      pred = s.getBlinkLandingPosition();
+      expect(pred.direction.dot(s.getForwardVector())).toBeCloseTo(1.0, 3);
+      s.input.strafeLeft = false;
+      s.beginWarpRelease();
+      s.input.strafeRight = false; // released during delay: direction stays locked
+      const start = s.position.clone();
+      const res = s.releaseWarpCharge();
+      expect(res.success).toBe(true);
+      expect(s.position.clone().sub(start).normalize().dot(right)).toBeCloseTo(1.0, 3);
+    });
+
     it('should use configured blinkDuration for post-blink blur and delay blink by charge duration', async () => {
       const { GameEngine } = await import('../../src/game/engine.js');
       const canvas = document.createElement('canvas');

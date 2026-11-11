@@ -445,3 +445,5 @@ Every individual task lead in the **Rockets** workspace must execute this releas
 > **Ship Rotation Speed (Task 3):** Room config 	urnRate (`#turn-rate-slider`, 0.25-6.0 rad/s, step 0.05, default 0.75, URL `turnrate`, badge `TURN`) sets `capabilities.maxTurnRate` via `ship.setFlightConfig` (hull catch-up rate toward the pilot look target).
 
 > **Blink on Left Shift (Batch 2, Task 1):** On PC, Blink is charged by holding **Left Shift** (no double-tap; `ship.startWarpCharge()`, `engine.triggerBlinkChargeStart()`) and fires on release. W/Right Shift/B are plain thrust. Touch thrust button still uses double-tap. The delay between release and the blink is now a fixed room config `blinkDelay` (`#blink-delay-slider`, 0-2000ms, step 50, default 500, URL `blinkdelay`, badge `BLINK DELAY`), independent of charge amount; the warp FX runs for that delay.
+
+> **Strafe-Directed Blink (Batch 2, Task 2):** If A/D (strafe left/right) is held, the blink (and predictive hologram) goes along the hull right vector (`getInputStrafeDir()`, left=-1, right=+1, both=forward). The direction is locked at button release (`blinkStrafeLock`) for the delay period.
