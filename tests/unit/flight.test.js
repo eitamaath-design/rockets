@@ -928,6 +928,17 @@ describe('Player Flight Physics & Momentum', () => {
       container.remove();
     });
 
+    it('should apply configurable ship rotation speed (turnRate) with clamping', () => {
+      const s = new PlayerShip(camera, mockSpaceEnv);
+      expect(s.maxTurnRate).toBeCloseTo(0.75, 3);
+      s.setFlightConfig({ turnRate: 2.5 });
+      expect(s.maxTurnRate).toBeCloseTo(2.5, 3);
+      s.setFlightConfig({ turnRate: 99 });
+      expect(s.maxTurnRate).toBe(6.0);
+      s.setFlightConfig({ turnRate: 0 });
+      expect(s.maxTurnRate).toBe(0.25);
+    });
+
     it('should use configured blinkDuration for post-blink blur and delay blink by charge duration', async () => {
       const { GameEngine } = await import('../../src/game/engine.js');
       const canvas = document.createElement('canvas');

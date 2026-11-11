@@ -170,6 +170,12 @@ export class PlayerShip {
         this.hyperAccel = this.forwardAccel * 1.5;
       }
     }
+    if (config.turnRate !== undefined) {
+      const val = parseFloat(config.turnRate);
+      if (!isNaN(val)) {
+      this.capabilities.maxTurnRate = clamp(val, 0.25, 6.0);
+      }
+    }
     if (config.momentumShearing !== undefined || config.shear !== undefined) {
       const raw = config.momentumShearing !== undefined ? config.momentumShearing : config.shear;
       const val = parseFloat(raw);

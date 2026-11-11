@@ -58,6 +58,7 @@ class AppRouter {
         ? Math.min(95, Math.max(10, parseInt(params.get('blinktrans') !== null ? params.get('blinktrans') : params.get('translucency'), 10) || 80))
         : 80,
       blinkDuration: params.get('blinkdur') !== null ? Math.min(2000, Math.max(200, parseInt(params.get('blinkdur'), 10) || 750)) : 750,
+      turnRate: params.get('turnrate') !== null ? Math.min(6.0, Math.max(0.25, parseFloat(params.get('turnrate')) || 0.75)) : 0.75,
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
       shaderQuality: params.get('shader') || 'balanced',
@@ -173,6 +174,10 @@ class AppRouter {
                 <div class="config-field">
                   <label for="blink-dur-slider">Blink Effect Duration: <span id="blink-dur-val-badge">750</span> ms</label>
                   <input type="range" id="blink-dur-slider" class="lobby-slider" min="200" max="2000" step="50" value="750" />
+                </div>
+                <div class="config-field">
+                  <label for="turn-rate-slider">Ship Rotation Speed: <span id="turn-rate-val-badge">0.75</span> rad/s</label>
+                  <input type="range" id="turn-rate-slider" class="lobby-slider" min="0.25" max="6.0" step="0.05" value="0.75" />
                 </div>
                 <div class="config-field">
                   <label for="render-scale-select">Render Scale (DPI)</label>
@@ -327,6 +332,14 @@ class AppRouter {
       });
     }
 
+    const turnRateSlider = document.getElementById('turn-rate-slider');
+    const turnRateBadge = document.getElementById('turn-rate-val-badge');
+    if (turnRateSlider && turnRateBadge) {
+      turnRateSlider.addEventListener('input', (e) => {
+        turnRateBadge.textContent = parseFloat(e.target.value).toFixed(2);
+      });
+    }
+
     // Hook PWA Installation
     let deferredPrompt = window.__pwaDeferredPrompt;
     const pwaBanner = document.getElementById('pwa-install-banner');
@@ -368,6 +381,7 @@ class AppRouter {
           carveRadius: parseFloat(document.getElementById('carve-slider')?.value) || 6.5,
           blinkTranslucency: parseInt(document.getElementById('blink-trans-slider')?.value, 10) || 80,
       blinkDuration: parseInt(document.getElementById('blink-dur-slider')?.value, 10) || 750,
+      turnRate: parseFloat(document.getElementById('turn-rate-slider')?.value) || 0.75,
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
           shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
@@ -445,6 +459,7 @@ class AppRouter {
             <span class="room-badge badge-carve">CARVE: ${Number(room.config?.carveRadius ?? 6.5).toFixed(1)}u</span>
             <span class="room-badge badge-blink">HOLO: ${room.config?.blinkTranslucency ?? 80}%</span>
               <span class="room-badge badge-blinkdur">BLINK FX: ${room.config?.blinkDuration ?? 750}ms</span>
+              <span class="room-badge badge-turn">TURN: ${Number(room.config?.turnRate ?? 0.75).toFixed(2)}r/s</span>
           </div>
         </div>
         <button class="btn-join-room-item" data-room-id="${escapeHtml(room.roomId)}" data-room-name="${escapeHtml(room.roomName || room.roomId)}" data-seed="${room.mapSeed || 42}" data-config='${JSON.stringify(room.config || {})}'>
@@ -482,6 +497,7 @@ class AppRouter {
       carveRadius: 6.5,
       blinkTranslucency: 80,
       blinkDuration: 750,
+      turnRate: 0.75,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
@@ -501,7 +517,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&carve=${activeConfig.carveRadius}&blinktrans=${activeConfig.blinkTranslucency}&blinkdur=${activeConfig.blinkDuration}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&carve=${activeConfig.carveRadius}&blinktrans=${activeConfig.blinkTranslucency}&blinkdur=${activeConfig.blinkDuration}&turnrate=${activeConfig.turnRate}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh

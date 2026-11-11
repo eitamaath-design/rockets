@@ -147,6 +147,7 @@ export class GameEngine {
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
       blinkDuration: 750,
+      turnRate: 0.75,
       showStats: false,
       ...(config || {})
     };
