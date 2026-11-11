@@ -13,15 +13,15 @@ export class GameNetwork {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
-      forwardAccel: 60,
-      momentumShearing: 0.0,
+      forwardAccel: 180,
+      momentumShearing: 0.1,
       carveRadius: 6.5,
       blinkTranslucency: 80,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
-      showStats: true,
+      showStats: false,
       ...(config || {})
     };
     this.playerName = playerName || `Pilot-${(selfId || 'Host').slice(0, 4)}`;

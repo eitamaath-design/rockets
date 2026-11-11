@@ -51,8 +51,8 @@ class AppRouter {
       asteroidCount: params.get('density') ? parseInt(params.get('density'), 10) : 100,
       megaRadius: params.get('mega') ? parseInt(params.get('mega'), 10) : 2800,
       meteorFrequency: params.get('meteor') !== null ? parseInt(params.get('meteor'), 10) : 10,
-      forwardAccel: params.get('accel') !== null ? Math.min(180, Math.max(20, parseInt(params.get('accel'), 10) || 60)) : 60,
-      momentumShearing: params.get('shear') !== null ? Math.min(1.0, Math.max(0.0, parseFloat(params.get('shear')) || 0.0)) : 0.0,
+      forwardAccel: params.get('accel') !== null ? Math.min(180, Math.max(20, parseInt(params.get('accel'), 10) || 180)) : 180,
+      momentumShearing: params.get('shear') !== null ? Math.min(1.0, Math.max(0.0, (Number.isNaN(parseFloat(params.get('shear'))) ? 0.1 : parseFloat(params.get('shear'))))) : 0.1,
       carveRadius: params.get('carve') !== null ? Math.min(20.0, Math.max(2.0, parseFloat(params.get('carve')) || 6.5)) : 6.5,
       blinkTranslucency: (params.get('blinktrans') !== null || params.get('translucency') !== null)
         ? Math.min(95, Math.max(10, parseInt(params.get('blinktrans') !== null ? params.get('blinktrans') : params.get('translucency'), 10) || 80))
@@ -61,7 +61,7 @@ class AppRouter {
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
       shaderQuality: params.get('shader') || 'balanced',
       particleDensity: params.get('particles') || 'balanced',
-      showStats: params.get('stats') !== null ? (params.get('stats') !== 'false' && params.get('stats') !== '0') : true
+      showStats: params.get('stats') !== null ? (params.get('stats') !== 'false' && params.get('stats') !== '0') : false
     };
 
     if (roomParam) {
@@ -154,12 +154,12 @@ class AppRouter {
                   </select>
                 </div>
                 <div class="config-field">
-                  <label for="accel-slider">Forward Accel: <span id="accel-val-badge">60</span> u/s²</label>
-                  <input type="range" id="accel-slider" class="lobby-slider" min="20" max="180" step="5" value="60" />
+                  <label for="accel-slider">Forward Accel: <span id="accel-val-badge">180</span> u/s²</label>
+                  <input type="range" id="accel-slider" class="lobby-slider" min="20" max="180" step="5" value="180" />
                 </div>
                 <div class="config-field">
-                  <label for="shear-slider">Momentum Shear: <span id="shear-val-badge">0.00</span></label>
-                  <input type="range" id="shear-slider" class="lobby-slider" min="0.0" max="1.0" step="0.05" value="0.0" />
+                  <label for="shear-slider">Momentum Shear: <span id="shear-val-badge">0.10</span></label>
+                  <input type="range" id="shear-slider" class="lobby-slider" min="0.0" max="1.0" step="0.05" value="0.1" />
                 </div>
                 <div class="config-field">
                   <label for="carve-slider">Laser Carve Radius: <span id="carve-val-badge">6.5</span>u</label>
@@ -207,8 +207,8 @@ class AppRouter {
                 <div class="config-field">
                   <label for="show-stats-select">Real-Time Statistics</label>
                   <select id="show-stats-select" class="lobby-select">
-                    <option value="true" selected>Show (Master)</option>
-                    <option value="false">Hide (Off)</option>
+                    <option value="true">Show (Master)</option>
+                    <option value="false" selected>Hide (Off)</option>
                   </select>
                 </div>
               </div>
@@ -350,15 +350,15 @@ class AppRouter {
           asteroidCount: parseInt(document.getElementById('asteroid-count-select')?.value, 10) || 100,
           megaRadius: parseInt(document.getElementById('mega-radius-select')?.value, 10) || 2800,
           meteorFrequency: document.getElementById('meteor-freq-select') ? parseInt(document.getElementById('meteor-freq-select').value, 10) : 10,
-          forwardAccel: parseInt(document.getElementById('accel-slider')?.value, 10) || 60,
-          momentumShearing: parseFloat(document.getElementById('shear-slider')?.value) || 0.0,
+          forwardAccel: parseInt(document.getElementById('accel-slider')?.value, 10) || 180,
+          momentumShearing: (Number.isNaN(parseFloat(document.getElementById('shear-slider')?.value)) ? 0.1 : parseFloat(document.getElementById('shear-slider')?.value)),
           carveRadius: parseFloat(document.getElementById('carve-slider')?.value) || 6.5,
           blinkTranslucency: parseInt(document.getElementById('blink-trans-slider')?.value, 10) || 80,
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
           shaderQuality: document.getElementById('shader-quality-select')?.value || 'balanced',
           particleDensity: document.getElementById('particle-density-select')?.value || 'balanced',
-          showStats: document.getElementById('show-stats-select') ? document.getElementById('show-stats-select').value !== 'false' : true
+          showStats: document.getElementById('show-stats-select') ? document.getElementById('show-stats-select').value !== 'false' : false
         };
         this.startMatch({
           roomId,
@@ -462,15 +462,15 @@ class AppRouter {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
-      forwardAccel: 60,
-      momentumShearing: 0.0,
+      forwardAccel: 180,
+      momentumShearing: 0.1,
       carveRadius: 6.5,
       blinkTranslucency: 80,
       renderScale: 1.0,
       maxFps: 60,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
-      showStats: true,
+      showStats: false,
       ...(config || {})
     };
 

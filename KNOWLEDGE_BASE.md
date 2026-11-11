@@ -65,8 +65,8 @@ This document serves as the permanent master reference for the **Rockets** multi
 #### Flight Subsystem
 - **6DOF Flight Physics:** Newtonian starfighter dynamics with forward thrust, lateral strafe, pitch, yaw, and roll.
 - **Configurable Acceleration & Momentum Shearing Flight Dynamics:**
-  - Configurable Forward Acceleration: Tunable via room configuration slider (`forwardAccel` $\in [20.0, 180.0]\text{ u/s}^2$, default $60.0\text{ u/s}^2$). Continuous-thrust hyper-speed acceleration scales proportionally at $1.5 \times \text{forwardAccel}$ ($a_{\text{hyper}} \in [30.0, 270.0]\text{ u/s}^2$, default $90.0\text{ u/s}^2$).
-  - Momentum Shearing Knob ($S \in [0.0, 1.0]$, default $0.0$ for classic Newtonian backward compatibility): When the pilot activates forward thrust, velocity $\vec{v}$ is decomposed relative to the physical hull forward unit vector $\hat{f} = \text{ship.getForwardVector()}$:
+  - Configurable Forward Acceleration: Tunable via room configuration slider (`forwardAccel` $\in [20.0, 180.0]\text{ u/s}^2$, default $180.0\text{ u/s}^2$). Continuous-thrust hyper-speed acceleration scales proportionally at $1.5 \times \text{forwardAccel}$ ($a_{\text{hyper}} \in [30.0, 270.0]\text{ u/s}^2$, default $270.0\text{ u/s}^2$).
+  - Momentum Shearing Knob ($S \in [0.0, 1.0]$, default $0.1$; $0.0$ restores classic Newtonian): When the pilot activates forward thrust, velocity $\vec{v}$ is decomposed relative to the physical hull forward unit vector $\hat{f} = \text{ship.getForwardVector()}$:
     $$v_\parallel = \vec{v} \cdot \hat{f}, \quad \vec{v}_\perp = \vec{v} - v_\parallel \hat{f}$$
     1. Transverse Drift Damping: Lateral momentum decays at rate $k_{\text{shear}} = 2.5\text{ s}^{-1}$:
        $$\vec{v}_\perp \leftarrow \vec{v}_\perp \cdot \max(0, 1.0 - S \cdot k_{\text{shear}} \cdot dt)$$
@@ -76,7 +76,7 @@ This document serves as the permanent master reference for the **Rockets** multi
        reducing 180° complete reversal turnaround from 9.33s to under 1.5s at $S = 1.0$.
     3. Reassembly & Zero Coasting Drag Invariant: $\vec{v} \leftarrow v_\parallel \hat{f} + \vec{v}_\perp$ followed by forward thrust addition and max speed clamping. When thrust is inactive (`thrust === false`), momentum shearing is strictly bypassed, fully preserving zero-gravity space inertia, glide, and evasion drift.
 - **Speed Regimes:**
-  - Sustained Cruising Speed: `maxSpeed = 280.0 u/s` with configurable forward acceleration `forwardAccel` (default `60.0 u/s^2`).
+  - Sustained Cruising Speed: `maxSpeed = 280.0 u/s` with configurable forward acceleration `forwardAccel` (default `180.0 u/s^2`).
   - Continuous-Thrust Hyper-Speed: Holding thrust while at or above cruising speed accelerates the starfighter at `hyperAccel = 1.5 * forwardAccel` up to `hyperSpeed = 560.0 u/s`.
   - Thrust-Release Deceleration: Releasing the thrust key decelerates the ship back to `maxSpeed` at `hyperDecelRate = 350.0 u/s^2`, smoothly preserving cruising momentum in zero gravity.
   - Emergency Braking: Decelerates the starfighter to a complete halt at `decelRate = 420.0 u/s^2` (~0.67s from full cruising speed).
@@ -436,3 +436,6 @@ Every individual task lead in the **Rockets** workspace must execute this releas
 | `tests/e2e/enemy_ship_glow.test.js` | Playwright automated visual verification test suite capturing distant enemy starfighter star-glow billboard rendering across space. |
 | `tests/e2e/trails_visual.test.js` | Playwright automated visual verification test suite capturing high-resolution screenshots verifying glowing continuous plasma wakes, billowing rocket plumes, and multi-stage explosions in WebGL. |
 | `tests/e2e/targeting_brackets.test.js` | Playwright automated visual verification suite capturing line-of-sight corner bracket targeting indicators (`.target-bracket.tl/.tr/.bl/.br`) on enemy ships in direct LOS and verifying disappearance under meteor/obstacle occlusion. |
+
+
+> **Sector Creation Defaults (Task 1):** new rooms default to orwardAccel=180, momentumShearing=0.1, carveRadius=6.5u, showStats=false (Real-Time Statistics hidden).

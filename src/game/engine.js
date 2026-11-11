@@ -139,14 +139,14 @@ export class GameEngine {
       asteroidCount: 100,
       megaRadius: 2800,
       meteorFrequency: 10,
-      forwardAccel: 60,
-      momentumShearing: 0.0,
+      forwardAccel: 180,
+      momentumShearing: 0.1,
       carveRadius: 6.5,
       renderScale: 1.0,
       maxFps: 0,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
-      showStats: true,
+      showStats: false,
       ...(config || {})
     };
     this._lastRenderTime = 0;
@@ -320,7 +320,7 @@ export class GameEngine {
       }
     }
     if (this.config.showStats === undefined) {
-      this.config.showStats = true;
+      this.config.showStats = false;
     } else {
       this.config.showStats = Boolean(this.config.showStats);
     }
