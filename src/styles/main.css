@@ -68,7 +68,26 @@ html, body {
 }
 
 .blink-blur {
-  animation: blinkBlurAnim 750ms ease-out;
+  animation: blinkBlurAnim var(--fx-dur, 750ms) ease-out;
+}
+
+/* Pre-blink warp-up: motion blur + zoom + color shift for exactly the charge duration */
+@keyframes blinkWarpAnim {
+  0% { filter: blur(0px) brightness(1) saturate(1) hue-rotate(0deg); }
+  100% { filter: blur(9px) brightness(1.8) saturate(1.8) hue-rotate(-25deg); }
+}
+
+@keyframes blinkWarpZoomAnim {
+  0% { transform: translateZ(0) scale(1); }
+  100% { transform: translateZ(0) scale(1.14); }
+}
+
+.blink-warp-charge {
+  animation: blinkWarpAnim var(--fx-dur, 500ms) ease-in forwards;
+}
+
+#game-canvas.blink-warp-charge {
+  animation: blinkWarpAnim var(--fx-dur, 500ms) ease-in forwards, blinkWarpZoomAnim var(--fx-dur, 500ms) ease-in forwards;
 }
 
 /* =========================================

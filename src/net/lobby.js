@@ -152,6 +152,7 @@ class LobbyService {
           momentumShearing: 0.1,
           carveRadius: 6.5,
           blinkTranslucency: 80,
+      blinkDuration: 750,
           renderScale: 1.0,
           maxFps: 60,
           shaderQuality: 'balanced',
@@ -200,6 +201,7 @@ class LobbyService {
           megaRadius: 2800,
           meteorFrequency: 10,
           blinkTranslucency: 80,
+      blinkDuration: 750,
           showStats: false
         },
         ttlSecondsRemaining: remainingTTL

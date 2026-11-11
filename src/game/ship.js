@@ -42,6 +42,7 @@ export class PlayerShip {
     this.warpCooldown = 2.0; // seconds
     this.warpCooldownTimer = 0.0;
     this.isWarpCharging = false;
+    this.isWarpReleasing = false;
     this.warpChargeTime = 0.0;
     this.maxWarpCharge = 1.0; // seconds max charge (reduced from 3.0s)
     this.maxWarpDistance = this.maxBlinkDistance; // 280.0 units for backward compatibility
@@ -244,6 +245,7 @@ export class PlayerShip {
     this.shieldRechargeTimer = 0;
     this.warpCooldownTimer = 0;
     this.isWarpCharging = false;
+    this.isWarpReleasing = false;
     this.warpChargeTime = 0;
     this.lastThrustTapTime = 0;
     this.isInvisible = false;
@@ -351,7 +353,7 @@ export class PlayerShip {
   /**
    * Computes predicted landing position and distance for blink.
    * Distance scales linearly from 1x ship length (5.6u at 0s charge) to 10x ship length (56.0u at 1.0s max charge).
-   * Direction is strictly along the ship's momentum (velocity vector), falling back to ship forward if momentum is near zero.
+   * Direction is strictly along the ship's hull orientation (forward vector), independent of momentum.
    * Clamped by obstacle raycasting to prevent blinking into rock.
    * @param {SpaceEnvironment} [spaceEnv]
    * @returns {{ targetPosition: THREE.Vector3, distance: number, direction: THREE.Vector3, chargeRatio: number }}
@@ -361,13 +363,8 @@ export class PlayerShip {
     // 0s charge -> 1x ship length (5.6u); 1.0s max charge -> 10x ship length (56.0u)
     const baseDist = this.length * (1.0 + chargeRatio * 9.0);
 
-    // Direction: momentum vector (velocity), falling back to ship forward if momentum is near zero
-    let dir;
-    if (this.velocity.lengthSq() > 0.0001) {
-      dir = this.velocity.clone().normalize();
-    } else {
-      dir = this.getForwardVector();
-    }
+    // Direction: the physical hull's forward (orientation) vector, independent of momentum
+    const dir = this.getForwardVector().normalize();
 
     let blinkDist = baseDist;
     const env = spaceEnv || this.spaceEnv;
@@ -388,7 +385,19 @@ export class PlayerShip {
   }
 
   /**
-   * Releases blink charge upon key/button release, executing spatial relocation along momentum vector
+   * Freezes the charge (stops accumulating) while the pre-blink warp delay plays out.
+   * The blink itself is executed later via releaseWarpCharge().
+   * @returns {boolean} True if a charge was frozen
+   */
+  beginWarpRelease() {
+    if (!this.isWarpCharging) return false;
+    this.isWarpCharging = false;
+    this.isWarpReleasing = true;
+    return true;
+  }
+
+  /**
+   * Releases blink charge upon key/button release, executing spatial relocation along the hull forward vector
    * with collision raycasting against obstacles.
    * Does NOT modify ship velocity/speed (it is a blink, not a boost).
    * Ship keeps identical viewpoint orientation.
@@ -396,7 +405,7 @@ export class PlayerShip {
    * @returns {Object|null} Result of blink jump or null if not charging
    */
   releaseWarpCharge(spaceEnv = null) {
-    if (!this.isWarpCharging) return null;
+    if (!this.isWarpCharging && !this.isWarpReleasing) return null;
 
     const chargeRatio = this.maxWarpCharge > 0 ? Math.min(1.0, this.warpChargeTime / this.maxWarpCharge) : 0;
     let result = {
@@ -426,6 +435,7 @@ export class PlayerShip {
     }
 
     this.isWarpCharging = false;
+    this.isWarpReleasing = false;
     this.warpChargeTime = 0.0;
     return result;
   }

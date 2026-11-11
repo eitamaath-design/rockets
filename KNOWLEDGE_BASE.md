@@ -439,3 +439,5 @@ Every individual task lead in the **Rockets** workspace must execute this releas
 
 
 > **Sector Creation Defaults (Task 1):** new rooms default to orwardAccel=180, momentumShearing=0.1, carveRadius=6.5u, showStats=false (Real-Time Statistics hidden).
+
+> **Blink Rework (Task 2):** Room config linkDuration (#blink-dur-slider, 200-2000ms, step 50, default 750ms, URL linkdur, badge `BLINK FX`) sets the post-blink motion-blur duration. On button release the ship charge is frozen (ship.beginWarpRelease(), isWarpReleasing) and the screen is blurred + warped (`.blink-warp-charge`, zoom/blur/brightness) for exactly the charge duration; only then does engine.executePendingBlink() teleport the ship. Blink direction is now the hull forward vector (`getForwardVector()`), not momentum. Velocity is still preserved.

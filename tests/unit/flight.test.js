@@ -179,7 +179,7 @@ describe('Player Flight Physics & Momentum', () => {
     expect(ship.getSpeed()).toBe(0); // Speed unchanged
   });
 
-  it('should blink strictly in the direction of the ship momentum rather than viewpoint orientation', () => {
+  it('should blink strictly in the direction the hull is oriented, not along momentum', () => {
     ship.resetSpawn();
     // Give ship lateral velocity along +X (moving sideways to the right at 50 u/s)
     ship.velocity.set(50, 0, 0);
@@ -187,18 +187,18 @@ describe('Player Flight Physics & Momentum', () => {
     const initialSpeed = ship.getSpeed();
     const initialQuat = ship.quaternion.clone();
 
-    // Rotate viewpoint 45 degrees to the left (yaw) so viewpoint and heading diverge
-    ship.applyMouseLook(-0.785, 0);
 
     // Initiate double tap and charge to max (1.0s)
     ship.triggerThrustPress(1000);
     ship.triggerThrustPress(1150);
     ship.update(1.0);
 
-    // Check landing prediction along momentum vector (+X)
+    // Check landing prediction along hull forward vector (-Z), not momentum (+X)
+    const fwd = ship.getForwardVector();
     const pred = ship.getBlinkLandingPosition();
-    expect(pred.direction.x).toBeCloseTo(1.0, 2);
-    expect(pred.direction.z).toBeCloseTo(0.0, 2);
+    expect(pred.direction.x).toBeCloseTo(fwd.x, 2);
+    expect(pred.direction.z).toBeCloseTo(fwd.z, 2);
+    expect(pred.direction.z).toBeLessThan(-0.9);
     expect(pred.distance).toBe(280.0);
 
     // Release blink
@@ -208,11 +208,11 @@ describe('Player Flight Physics & Momentum', () => {
 
     const result = ship.releaseWarpCharge();
     expect(result.success).toBe(true);
-    expect(result.direction.x).toBeCloseTo(1.0, 2);
+    expect(result.direction.z).toBeLessThan(-0.9);
 
-    // Position shifted along +X (momentum direction), NOT -Z (viewpoint orientation)
-    expect(ship.position.x).toBeCloseTo(posBeforeBlink.x + 280.0, 1);
-    expect(ship.position.z).toBeCloseTo(posBeforeBlink.z, 1);
+    // Position shifted along hull forward, NOT along +X momentum
+    expect(ship.position.x).toBeCloseTo(posBeforeBlink.x + fwd.x * 280.0, 1);
+    expect(ship.position.z).toBeCloseTo(posBeforeBlink.z + fwd.z * 280.0, 1);
 
     // Speed is preserved
     expect(ship.getSpeed()).toBeCloseTo(initialSpeed, 2);
@@ -905,6 +905,8 @@ describe('Player Flight Physics & Momentum', () => {
       vi.useFakeTimers();
 
       const engine = {
+        config: {},
+        applyScreenFx: GameEngine.prototype.applyScreenFx,
         triggerBlinkBlur: GameEngine.prototype.triggerBlinkBlur
       };
 
@@ -924,6 +926,48 @@ describe('Player Flight Physics & Momentum', () => {
 
       vi.useRealTimers();
       container.remove();
+    });
+
+    it('should use configured blinkDuration for post-blink blur and delay blink by charge duration', async () => {
+      const { GameEngine } = await import('../../src/game/engine.js');
+      const canvas = document.createElement('canvas');
+      canvas.id = 'game-canvas';
+      document.body.appendChild(canvas);
+      vi.useFakeTimers();
+
+      const ship = new PlayerShip(camera, mockSpaceEnv);
+      ship.resetSpawn();
+      ship.triggerThrustPress(1000);
+      ship.triggerThrustPress(1150);
+      ship.update(0.8);
+      const startPos = ship.position.clone();
+
+      const engine = {
+        config: { blinkDuration: 1200 },
+        playerShip: ship,
+        blinkHologram: null,
+        applyScreenFx: GameEngine.prototype.applyScreenFx,
+        triggerBlinkBlur: GameEngine.prototype.triggerBlinkBlur,
+        triggerThrustEnd: GameEngine.prototype.triggerThrustEnd
+      };
+      const res = engine.triggerThrustEnd();
+      expect(res.pending).toBe(true);
+      expect(res.delayMs).toBeCloseTo(800, 3);
+      expect(canvas.classList.contains('blink-warp-charge')).toBe(true);
+      expect(canvas.style.getPropertyValue('--fx-dur')).toBe('800ms');
+      // Blink has not happened yet
+      expect(ship.position.distanceTo(startPos)).toBe(0);
+      expect(ship.isWarpReleasing).toBe(true);
+
+      engine.triggerBlinkBlur();
+      expect(canvas.style.getPropertyValue('--fx-dur')).toBe('1200ms');
+
+      const out = ship.releaseWarpCharge();
+      expect(out.success).toBe(true);
+      expect(ship.isWarpReleasing).toBe(false);
+
+      vi.useRealTimers();
+      canvas.remove();
     });
   });
 });

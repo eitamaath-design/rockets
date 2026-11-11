@@ -146,6 +146,7 @@ export class GameEngine {
       maxFps: 0,
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
+      blinkDuration: 750,
       showStats: false,
       ...(config || {})
     };
@@ -318,6 +319,9 @@ export class GameEngine {
       if (this.weaponsSystem && typeof this.weaponsSystem.setTranslucency === 'function') {
         this.weaponsSystem.setTranslucency(bt);
       }
+    }
+    if (this.config.blinkDuration !== undefined) {
+      this.config.blinkDuration = Math.min(2000, Math.max(200, Math.round(Number(this.config.blinkDuration)) || 750));
     }
     if (this.config.showStats === undefined) {
       this.config.showStats = false;
@@ -565,55 +569,68 @@ export class GameEngine {
     return false;
   }
 
-  triggerBlinkBlur() {
+  /**
+   * Applies a screen-space FX class (blur / warp) to the canvas and HUD overlay for a duration.
+   * @param {string} cls CSS class name
+   * @param {number} durationMs Duration of the effect in milliseconds
+   */
+  applyScreenFx(cls, durationMs) {
     if (typeof document === 'undefined') return;
-    const canvas = document.getElementById('game-canvas');
-    if (canvas) {
-      canvas.classList.remove('blink-blur');
-      void canvas.offsetWidth;
-      canvas.classList.add('blink-blur');
+    const ms = Math.max(50, Math.round(Number(durationMs) || 750));
+    const targets = [document.getElementById('game-canvas'), document.querySelector('.game-hud-overlay')];
+    for (const el of targets) {
+      if (!el) continue;
+      el.style.setProperty('--fx-dur', `${ms}ms`);
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
       setTimeout(() => {
-        if (canvas) canvas.classList.remove('blink-blur');
-      }, 750);
+        el.classList.remove(cls);
+      }, ms);
     }
-    const hud = document.querySelector('.game-hud-overlay');
-    if (hud) {
-      hud.classList.remove('blink-blur');
-      void hud.offsetWidth;
-      hud.classList.add('blink-blur');
-      setTimeout(() => {
-        if (hud) hud.classList.remove('blink-blur');
-      }, 750);
-    }
+  }
+
+  /** Post-blink motion blur whose length is the room-configured blink effect duration. */
+  triggerBlinkBlur() {
+    const ms = this.config && this.config.blinkDuration !== undefined ? this.config.blinkDuration : 750;
+    this.applyScreenFx('blink-blur', ms);
   }
 
   triggerThrustEnd() {
     if (!this.playerShip) return null;
     if (this.playerShip.isWarpCharging) {
-      const preBlinkPos = this.playerShip.position.clone();
-      this.triggerBlinkBlur();
-
-      const warpResult = this.playerShip.releaseWarpCharge(this.spaceEnv);
-      audio.stopWarpCharge();
-
+      // Warp-up phase: blur + warp the screen for exactly the charge duration, then blink.
+      const chargeSec = this.playerShip.warpChargeTime;
+      this.playerShip.beginWarpRelease();
       if (this.blinkHologram) {
         this.blinkHologram.visible = false;
       }
-
-      if (warpResult && warpResult.success) {
-        audio.playWarpJump(warpResult.chargeRatio);
-        if (this.cockpit) this.cockpit.triggerBoostFlash();
-        if (this.blinkVfx) {
-          // Emit a sphere of particles with trails that decay after 1 second
-          this.blinkVfx.emitSphere(this.playerShip.position);
-          this.blinkVfx.emitSphere(preBlinkPos);
-        }
-      }
-      return warpResult;
+      this.pendingBlink = { timer: chargeSec };
+      this.applyScreenFx('blink-warp-charge', chargeSec * 1000);
+      return { success: false, pending: true, delayMs: chargeSec * 1000 };
     }
     return null;
   }
 
+  /** Executes the actual blink once the warp-up delay has elapsed. */
+  executePendingBlink() {
+    if (!this.playerShip) return null;
+    const preBlinkPos = this.playerShip.position.clone();
+    const warpResult = this.playerShip.releaseWarpCharge(this.spaceEnv);
+    audio.stopWarpCharge();
+
+    if (warpResult && warpResult.success) {
+      this.triggerBlinkBlur();
+      audio.playWarpJump(warpResult.chargeRatio);
+      if (this.cockpit) this.cockpit.triggerBoostFlash();
+      if (this.blinkVfx) {
+        // Emit a sphere of particles with trails that decay after 1 second
+        this.blinkVfx.emitSphere(this.playerShip.position);
+        this.blinkVfx.emitSphere(preBlinkPos);
+      }
+    }
+    return warpResult;
+  }
   triggerBoostAction() {
     return this.triggerThrustStart();
   }
@@ -1016,6 +1033,13 @@ export class GameEngine {
       }
       this.thrusterTrails.update(dt, this.camera);
       this.beaconSystem.update(dt);
+      if (this.pendingBlink) {
+        this.pendingBlink.timer -= dt;
+        if (this.pendingBlink.timer <= 0) {
+          this.pendingBlink = null;
+          this.executePendingBlink();
+        }
+      }
       if (this.blinkVfx) {
         this.blinkVfx.update(dt);
       }
