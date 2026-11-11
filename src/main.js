@@ -58,6 +58,7 @@ class AppRouter {
         ? Math.min(95, Math.max(10, parseInt(params.get('blinktrans') !== null ? params.get('blinktrans') : params.get('translucency'), 10) || 80))
         : 80,
       blinkDuration: params.get('blinkdur') !== null ? Math.min(2000, Math.max(200, parseInt(params.get('blinkdur'), 10) || 750)) : 750,
+      blinkDelay: params.get('blinkdelay') !== null ? (Number.isNaN(parseInt(params.get('blinkdelay'), 10)) ? 500 : Math.min(2000, Math.max(0, parseInt(params.get('blinkdelay'), 10)))) : 500,
       turnRate: params.get('turnrate') !== null ? Math.min(6.0, Math.max(0.25, parseFloat(params.get('turnrate')) || 0.75)) : 0.75,
       renderScale: params.get('scale') ? parseFloat(params.get('scale')) : 1.0,
       maxFps: params.get('fps') !== null ? parseInt(params.get('fps'), 10) : 0,
@@ -176,6 +177,10 @@ class AppRouter {
                   <input type="range" id="blink-dur-slider" class="lobby-slider" min="200" max="2000" step="50" value="750" />
                 </div>
                 <div class="config-field">
+                  <label for="blink-delay-slider">Blink Release Delay: <span id="blink-delay-val-badge">500</span> ms</label>
+                  <input type="range" id="blink-delay-slider" class="lobby-slider" min="0" max="2000" step="50" value="500" />
+                </div>
+                <div class="config-field">
                   <label for="turn-rate-slider">Ship Rotation Speed: <span id="turn-rate-val-badge">0.75</span> rad/s</label>
                   <input type="range" id="turn-rate-slider" class="lobby-slider" min="0.25" max="6.0" step="0.05" value="0.75" />
                 </div>
@@ -263,6 +268,9 @@ class AppRouter {
               <span class="control-key">S / 🛑 Brake:</span> Progressive deceleration (full stop in 2.0s)
             </div>
             <div class="control-item">
+              <span class="control-key">Left Shift:</span> Hold to charge BLINK, release to blink (fixed short delay)
+            </div>
+            <div class="control-item">
               <span class="control-key">A & D / ⬅ ➡ Strafe:</span> Fire lateral side thrusters
             </div>
             <div class="control-item">
@@ -332,6 +340,14 @@ class AppRouter {
       });
     }
 
+    const blinkDelaySlider = document.getElementById('blink-delay-slider');
+    const blinkDelayBadge = document.getElementById('blink-delay-val-badge');
+    if (blinkDelaySlider && blinkDelayBadge) {
+      blinkDelaySlider.addEventListener('input', (e) => {
+        blinkDelayBadge.textContent = e.target.value;
+      });
+    }
+
     const turnRateSlider = document.getElementById('turn-rate-slider');
     const turnRateBadge = document.getElementById('turn-rate-val-badge');
     if (turnRateSlider && turnRateBadge) {
@@ -381,6 +397,7 @@ class AppRouter {
           carveRadius: parseFloat(document.getElementById('carve-slider')?.value) || 6.5,
           blinkTranslucency: parseInt(document.getElementById('blink-trans-slider')?.value, 10) || 80,
       blinkDuration: parseInt(document.getElementById('blink-dur-slider')?.value, 10) || 750,
+      blinkDelay: (Number.isNaN(parseInt(document.getElementById('blink-delay-slider')?.value, 10)) ? 500 : parseInt(document.getElementById('blink-delay-slider').value, 10)),
       turnRate: parseFloat(document.getElementById('turn-rate-slider')?.value) || 0.75,
           renderScale: parseFloat(document.getElementById('render-scale-select')?.value) || 1.0,
           maxFps: document.getElementById('max-fps-select') ? parseInt(document.getElementById('max-fps-select').value, 10) : 60,
@@ -459,6 +476,7 @@ class AppRouter {
             <span class="room-badge badge-carve">CARVE: ${Number(room.config?.carveRadius ?? 6.5).toFixed(1)}u</span>
             <span class="room-badge badge-blink">HOLO: ${room.config?.blinkTranslucency ?? 80}%</span>
               <span class="room-badge badge-blinkdur">BLINK FX: ${room.config?.blinkDuration ?? 750}ms</span>
+              <span class="room-badge badge-blinkdelay">BLINK DELAY: ${room.config?.blinkDelay ?? 500}ms</span>
               <span class="room-badge badge-turn">TURN: ${Number(room.config?.turnRate ?? 0.75).toFixed(2)}r/s</span>
           </div>
         </div>
@@ -497,6 +515,7 @@ class AppRouter {
       carveRadius: 6.5,
       blinkTranslucency: 80,
       blinkDuration: 750,
+      blinkDelay: 500,
       turnRate: 0.75,
       renderScale: 1.0,
       maxFps: 60,
@@ -517,7 +536,7 @@ class AppRouter {
     app.appendChild(gameContainer);
 
     // Update browser URL query without reload
-    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&carve=${activeConfig.carveRadius}&blinktrans=${activeConfig.blinkTranslucency}&blinkdur=${activeConfig.blinkDuration}&turnrate=${activeConfig.turnRate}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}&quality=${encodeURIComponent(activeConfig.voxelQuality)}&density=${activeConfig.asteroidCount}&mega=${activeConfig.megaRadius}&meteor=${activeConfig.meteorFrequency}&accel=${activeConfig.forwardAccel}&shear=${activeConfig.momentumShearing}&carve=${activeConfig.carveRadius}&blinktrans=${activeConfig.blinkTranslucency}&blinkdur=${activeConfig.blinkDuration}&blinkdelay=${activeConfig.blinkDelay}&turnrate=${activeConfig.turnRate}&scale=${activeConfig.renderScale}&fps=${activeConfig.maxFps}&shader=${encodeURIComponent(activeConfig.shaderQuality)}&particles=${encodeURIComponent(activeConfig.particleDensity)}&stats=${activeConfig.showStats !== false}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
 
     // Initialize Network Mesh

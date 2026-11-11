@@ -939,6 +939,18 @@ describe('Player Flight Physics & Momentum', () => {
       expect(s.maxTurnRate).toBe(0.25);
     });
 
+    it('should start blink charge directly via startWarpCharge without double-tap and respect cooldown', () => {
+      const s = new PlayerShip(camera, mockSpaceEnv);
+      s.resetSpawn();
+      expect(s.startWarpCharge()).toBe(true);
+      expect(s.isWarpCharging).toBe(true);
+      expect(s.startWarpCharge()).toBe(false);
+      s.update(0.5);
+      expect(s.warpChargeTime).toBeCloseTo(0.5, 3);
+      s.releaseWarpCharge();
+      expect(s.startWarpCharge()).toBe(false); // cooldown active
+    });
+
     it('should use configured blinkDuration for post-blink blur and delay blink by charge duration', async () => {
       const { GameEngine } = await import('../../src/game/engine.js');
       const canvas = document.createElement('canvas');
@@ -954,7 +966,7 @@ describe('Player Flight Physics & Momentum', () => {
       const startPos = ship.position.clone();
 
       const engine = {
-        config: { blinkDuration: 1200 },
+        config: { blinkDuration: 1200, blinkDelay: 350 },
         playerShip: ship,
         blinkHologram: null,
         applyScreenFx: GameEngine.prototype.applyScreenFx,
@@ -963,9 +975,9 @@ describe('Player Flight Physics & Momentum', () => {
       };
       const res = engine.triggerThrustEnd();
       expect(res.pending).toBe(true);
-      expect(res.delayMs).toBeCloseTo(800, 3);
+      expect(res.delayMs).toBeCloseTo(350, 3); // fixed delay, independent of 800ms charge
       expect(canvas.classList.contains('blink-warp-charge')).toBe(true);
-      expect(canvas.style.getPropertyValue('--fx-dur')).toBe('800ms');
+      expect(canvas.style.getPropertyValue('--fx-dur')).toBe('350ms');
       // Blink has not happened yet
       expect(ship.position.distanceTo(startPos)).toBe(0);
       expect(ship.isWarpReleasing).toBe(true);

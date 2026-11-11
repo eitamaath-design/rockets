@@ -357,6 +357,18 @@ export class PlayerShip {
   }
 
   /**
+   * Directly begins charging the blink drive (e.g. Left Shift held on PC). No double-tap needed.
+   * @returns {boolean} True if charging started
+   */
+  startWarpCharge() {
+    if (this.isWarpCharging || this.isWarpReleasing) return false;
+    if (this.warpCooldownTimer > 0 || this.isDead) return false;
+    this.isWarpCharging = true;
+    this.warpChargeTime = 0.0;
+    return true;
+  }
+
+  /**
    * Computes predicted landing position and distance for blink.
    * Distance scales linearly from 1x ship length (5.6u at 0s charge) to 10x ship length (56.0u at 1.0s max charge).
    * Direction is strictly along the ship's hull orientation (forward vector), independent of momentum.

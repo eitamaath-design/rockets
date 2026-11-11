@@ -18,6 +18,7 @@ export class GameNetwork {
       carveRadius: 6.5,
       blinkTranslucency: 80,
       blinkDuration: 750,
+      blinkDelay: 500,
       turnRate: 0.75,
       renderScale: 1.0,
       maxFps: 60,
@@ -139,6 +140,7 @@ export class GameNetwork {
       if (incoming.momentumShearing !== undefined) incoming.momentumShearing = Math.min(1.0, Math.max(0.0, Number(incoming.momentumShearing) || 0.0));
       if (incoming.carveRadius !== undefined) incoming.carveRadius = Math.min(20.0, Math.max(2.0, Number(incoming.carveRadius) || 6.5));
       if (incoming.turnRate !== undefined) incoming.turnRate = Math.min(6.0, Math.max(0.25, Number(incoming.turnRate) || 0.75));
+    if (incoming.blinkDelay !== undefined) incoming.blinkDelay = Math.min(2000, Math.max(0, Math.round(Number(incoming.blinkDelay)) || 0));
     if (incoming.blinkDuration !== undefined) incoming.blinkDuration = Math.min(2000, Math.max(200, Math.round(Number(incoming.blinkDuration)) || 750));
     if (incoming.blinkTranslucency !== undefined) incoming.blinkTranslucency = Math.min(95, Math.max(10, Math.round(Number(incoming.blinkTranslucency)) || 80));
       this.config = { ...this.config, ...incoming };
@@ -376,6 +378,7 @@ export class GameNetwork {
     if (sanitized.momentumShearing !== undefined) sanitized.momentumShearing = Math.min(1.0, Math.max(0.0, Number(sanitized.momentumShearing) || 0.0));
     if (sanitized.carveRadius !== undefined) sanitized.carveRadius = Math.min(20.0, Math.max(2.0, Number(sanitized.carveRadius) || 6.5));
     if (sanitized.turnRate !== undefined) sanitized.turnRate = Math.min(6.0, Math.max(0.25, Number(sanitized.turnRate) || 0.75));
+    if (sanitized.blinkDelay !== undefined) sanitized.blinkDelay = Math.min(2000, Math.max(0, Math.round(Number(sanitized.blinkDelay)) || 0));
     if (sanitized.blinkDuration !== undefined) sanitized.blinkDuration = Math.min(2000, Math.max(200, Math.round(Number(sanitized.blinkDuration)) || 750));
     if (sanitized.blinkTranslucency !== undefined) sanitized.blinkTranslucency = Math.min(95, Math.max(10, Math.round(Number(sanitized.blinkTranslucency)) || 80));
     this.config = { ...this.config, ...sanitized };

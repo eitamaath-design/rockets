@@ -147,6 +147,7 @@ export class GameEngine {
       shaderQuality: 'balanced',
       particleDensity: 'balanced',
       blinkDuration: 750,
+      blinkDelay: 500,
       turnRate: 0.75,
       showStats: false,
       ...(config || {})
@@ -320,6 +321,10 @@ export class GameEngine {
       if (this.weaponsSystem && typeof this.weaponsSystem.setTranslucency === 'function') {
         this.weaponsSystem.setTranslucency(bt);
       }
+    }
+    if (this.config.blinkDelay !== undefined) {
+      const bd = Number(this.config.blinkDelay);
+      this.config.blinkDelay = Math.min(2000, Math.max(0, Number.isFinite(bd) ? Math.round(bd) : 500));
     }
     if (this.config.blinkDuration !== undefined) {
       this.config.blinkDuration = Math.min(2000, Math.max(200, Math.round(Number(this.config.blinkDuration)) || 750));
@@ -592,6 +597,16 @@ export class GameEngine {
   }
 
   /** Post-blink motion blur whose length is the room-configured blink effect duration. */
+  /** Starts charging the blink directly (Left Shift on PC; no double-tap). */
+  triggerBlinkChargeStart() {
+    if (!this.playerShip) return false;
+    if (this.playerShip.startWarpCharge()) {
+      audio.startWarpCharge();
+      return true;
+    }
+    return false;
+  }
+
   triggerBlinkBlur() {
     const ms = this.config && this.config.blinkDuration !== undefined ? this.config.blinkDuration : 750;
     this.applyScreenFx('blink-blur', ms);
@@ -600,14 +615,15 @@ export class GameEngine {
   triggerThrustEnd() {
     if (!this.playerShip) return null;
     if (this.playerShip.isWarpCharging) {
-      // Warp-up phase: blur + warp the screen for exactly the charge duration, then blink.
-      const chargeSec = this.playerShip.warpChargeTime;
+      // Warp-up phase: blur + warp the screen for a fixed, room-configured delay, then blink.
+      const delayMs = this.config && this.config.blinkDelay !== undefined ? this.config.blinkDelay : 500;
+      const chargeSec = delayMs / 1000;
       this.playerShip.beginWarpRelease();
       if (this.blinkHologram) {
         this.blinkHologram.visible = false;
       }
       this.pendingBlink = { timer: chargeSec };
-      this.applyScreenFx('blink-warp-charge', chargeSec * 1000);
+      if (delayMs > 0) this.applyScreenFx('blink-warp-charge', delayMs);
       return { success: false, pending: true, delayMs: chargeSec * 1000 };
     }
     return null;
@@ -650,13 +666,12 @@ export class GameEngine {
 
       switch (e.code) {
         case 'KeyW':
-        case 'ShiftLeft':
         case 'ShiftRight':
         case 'KeyB':
-          if (!this.playerShip.input.thrust) {
-            this.triggerThrustStart();
-          }
           this.playerShip.input.thrust = true;
+          break;
+        case 'ShiftLeft':
+          if (!e.repeat) this.triggerBlinkChargeStart();
           break;
         case 'KeyS':
           this.playerShip.input.brake = true;
@@ -705,11 +720,12 @@ export class GameEngine {
     window.addEventListener('keyup', (e) => {
       switch (e.code) {
         case 'KeyW':
-        case 'ShiftLeft':
         case 'ShiftRight':
         case 'KeyB':
-          this.triggerThrustEnd();
           this.playerShip.input.thrust = false;
+          break;
+        case 'ShiftLeft':
+          this.triggerThrustEnd();
           break;
         case 'KeyS':
           this.playerShip.input.brake = false;

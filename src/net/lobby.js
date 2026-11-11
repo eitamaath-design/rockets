@@ -153,6 +153,7 @@ class LobbyService {
           carveRadius: 6.5,
           blinkTranslucency: 80,
       blinkDuration: 750,
+      blinkDelay: 500,
       turnRate: 0.75,
           renderScale: 1.0,
           maxFps: 60,
@@ -203,6 +204,7 @@ class LobbyService {
           meteorFrequency: 10,
           blinkTranslucency: 80,
       blinkDuration: 750,
+      blinkDelay: 500,
       turnRate: 0.75,
           showStats: false
         },

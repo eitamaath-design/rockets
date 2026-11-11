@@ -278,7 +278,7 @@ export class GameHUD {
 
           <!-- Main Thrusters -->
           <div class="touch-thrust-cluster">
-            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap & Hold to BLINK">
+            <button class="action-touch-btn touch-btn btn-thrust" id="btn-thrust" title="Hold to Thrust (W) | Double-Tap & Hold to BLINK (PC: hold Left Shift)">
               🚀 <strong>THRUST</strong>
               <span class="hud-boost-badge" id="hud-boost-badge">⚡ BLINK</span>
             </button>
@@ -1170,7 +1170,7 @@ export class GameHUD {
       if (speedVal) speedVal.textContent = state.speed;
     }
 
-    // Blink Badge (Double-tap & hold thrust charged blink)
+    // Blink Badge (Left Shift / touch double-tap & hold charged blink)
     const boostBadge = document.getElementById('hud-boost-badge');
     const thrustBtn = document.getElementById('btn-thrust');
     if (boostBadge) {
